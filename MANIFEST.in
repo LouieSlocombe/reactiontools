@@ -1,2 +1,2 @@
-recursive-include template_python/data *
+recursive-include reactiontools/data *
 include README.md

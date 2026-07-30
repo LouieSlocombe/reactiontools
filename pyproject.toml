@@ -3,9 +3,9 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "template_python"
+name = "reactiontools"
 version = "0.0.0"
-description = "Template"
+description = "A centralised set of tools for looking at TS and NEB calculations"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.14"
 license = { text = "MIT" }
@@ -31,15 +31,15 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/LouieSlocombe/template_python"
-Repository = "https://github.com/LouieSlocombe/template_python"
+Homepage = "https://github.com/LouieSlocombe/reactiontools"
+Repository = "https://github.com/LouieSlocombe/reactiontools"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["template_python", "template_python.*"]
+include = ["reactiontools", "reactiontools.*"]
 
 [tool.setuptools.package-data]
-"template_python" = ["data/*"]
+"reactiontools" = ["data/*"]

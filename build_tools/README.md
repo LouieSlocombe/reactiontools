@@ -7,5 +7,5 @@ conda env create -f environment.yml -y
 ```
 
 ```bash
-conda activate template
+conda activate reactiontools
 ```
