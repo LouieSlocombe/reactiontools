@@ -5,12 +5,16 @@ channels:
   - nodefaults
 
 dependencies:
-  - python>=3.14.*
+  - python>=3.13
+  - numpy
+  - matplotlib
+  - ase
+  - scipy
   - pip
   - pytest
-  - pandas
-  - numpy
-  - scipy
-  - matplotlib
+  - plumed
+  - py-plumed
+  - sella
+
   - pip:
-      - ...
+      - git+https://github.com/LouieSlocombe/geodesic_interpolate.git
