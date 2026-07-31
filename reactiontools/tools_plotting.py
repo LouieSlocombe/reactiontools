@@ -1,7 +1,6 @@
 import copy
 import matplotlib.pyplot as plt
 import numpy as np
-import warnings
 from ase import Atoms
 from ase.io import read
 from ase.visualize.plot import plot_atoms
@@ -9,7 +8,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pathlib import Path
 from scipy.interpolate import make_interp_spline
-from typing import Any
 
 from .tools_reaction import get_neb_path
 

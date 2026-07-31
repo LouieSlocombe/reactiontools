@@ -5,11 +5,7 @@ from .tools_plotting import (n_plot,
                              plot_temperature,
                              plot_total_energy,
                              plot_plumed,
-                             plot_plumed_multi,
-                             plot_converge_encut,
-                             plot_converge_kpoints,
-                             plot_converge_encut_fit,
-                             plot_converge_kpoints_fit)
+                             plot_plumed_multi)
 from .tools_plumed import (plumed_selection,
                            find_molecules,
                            run_sum_hills)

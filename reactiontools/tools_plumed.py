@@ -67,7 +67,7 @@ def run_sum_hills(hills="HILLS",
         Hills file written by the ``METAD`` action.
     outfile : str or path-like, optional
         Free-energy surface file to write, as read by
-        :func:`~bghbn.tools_plotting.plot_plumed`.
+        :func:`~reactiontools.tools_plotting.plot_plumed`.
     mintozero : bool, optional
         Pass ``--mintozero`` so the surface minimum sits at zero.
     verbose : bool, optional
@@ -83,17 +83,13 @@ def run_sum_hills(hills="HILLS",
     subprocess.CalledProcessError
         If plumed exits non-zero.
     """
-    cmd_str = f"plumed sum_hills --hills {hills} --outfile {outfile}"
+    cmd = ["plumed", "sum_hills", "--hills", str(hills), "--outfile", str(outfile)]
     if mintozero:
-        cmd_str += " --mintozero"
+        cmd.append("--mintozero")
+    cmd_str = " ".join(cmd)
 
     if verbose:
         print(f"Running: {cmd_str}", flush=True)
 
-    subprocess.run(
-        cmd_str,
-        shell=True,
-        executable="/bin/bash",
-        check=True,
-    )
+    subprocess.run(cmd, check=True)
     return cmd_str
