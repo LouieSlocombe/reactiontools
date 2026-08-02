@@ -1,33 +1,56 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "reactiontools"
-version = "0.0.0"
+dynamic = ["version"]
 description = "A centralised set of tools for looking at TS and NEB calculations"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.14"
-license = { text = "MIT" }
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 
 authors = [
   { name = "Louie Slocombe", email = "louies@hotmail.co.uk" },
 ]
 
+keywords = [
+  "chemistry",
+  "computational-chemistry",
+  "transition-state",
+  "nudged-elastic-band",
+  "neb",
+  "metadynamics",
+  "plumed",
+  "ase",
+]
+
 dependencies = [
   "numpy",
+  "scipy",
+  "matplotlib",
+  "ase>=3.23",
 ]
 
 classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest",
   "pytest-cov",
+]
+# Needed by prepare_neb(geo_int=True), quick_guess_path and quick_guess_ts.
+# Installed from git, so this extra cannot be resolved from a PyPI mirror.
+geodesic = [
+  "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
 ]
 
 [project.urls]
@@ -37,9 +60,16 @@ Repository = "https://github.com/LouieSlocombe/reactiontools"
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.dynamic]
+version = { attr = "reactiontools.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["reactiontools", "reactiontools.*"]
 
-[tool.setuptools.package-data]
-"reactiontools" = ["data/*"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+  "ignore::DeprecationWarning:ase.*",
+]

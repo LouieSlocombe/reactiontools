@@ -1,12 +1,45 @@
 import copy
 from pathlib import Path
 
-import geodesic_interpolate as gi
 import numpy as np
 from ase.io import read
 from ase.mep import NEB
 from ase.optimize import BFGS
 from scipy.interpolate import CubicSpline
+
+_GI_HINT = ("geodesic_interpolate is required for this function. Install it with:\n"
+            "    pip install git+https://github.com/LouieSlocombe/geodesic_interpolate.git")
+
+
+def _geodesic_interpolate(images, n_images):
+    """Interpolate a path with geodesic_interpolate, imported on demand.
+
+    The dependency is installed from git rather than PyPI, so it is imported
+    here instead of at module scope. That keeps ``import reactiontools``
+    working when only the NEB and plotting tools are needed.
+
+    Parameters
+    ----------
+    images : sequence of ase.Atoms
+        Endpoints, or an existing band, to interpolate between.
+    n_images : int
+        Number of images in the interpolated path.
+
+    Returns
+    -------
+    list of ase.Atoms
+        Interpolated path.
+
+    Raises
+    ------
+    ImportError
+        If geodesic_interpolate is not installed.
+    """
+    try:
+        import geodesic_interpolate as gi
+    except ImportError as exc:
+        raise ImportError(_GI_HINT) from exc
+    return gi.geodesic_interpolate(images, n_images=n_images)
 
 
 def get_neb_path(images):
@@ -185,6 +218,11 @@ def prepare_neb(reactant, product, calc,
     -------
     ase.mep.NEB
         Configured NEB object.
+
+    Raises
+    ------
+    ImportError
+        If ``geo_int`` is ``True`` and geodesic_interpolate is not installed.
     """
     neb_images = [reactant]
     for ii in range(n_images - 2):
@@ -192,11 +230,7 @@ def prepare_neb(reactant, product, calc,
     neb_images.append(product)
 
     if geo_int:
-        neb_images = gi.geodesic_interpolate(neb_images, n_images=n_images)
-
-    for image in neb_images:
-        image.calc = copy.copy(calc)
-        image.get_potential_energy()
+        neb_images = _geodesic_interpolate(neb_images, n_images)
 
     neb = NEB(neb_images,
               climb=climb,
@@ -206,6 +240,15 @@ def prepare_neb(reactant, product, calc,
     if not geo_int:
         neb.interpolate()
         neb.interpolate("idpp")
+
+    # Evaluate only once the geometries are final. Priming the calculators
+    # before interpolation would cache the reactant energy against every
+    # interior image, and waste a single-point call on each duplicate.
+    # deepcopy, not copy: shallow copies of a calculator that has already run
+    # share its internal arrays, so the images overwrite each other's forces.
+    for image in neb.images:
+        image.calc = copy.deepcopy(calc)
+        image.get_potential_energy()
     return neb
 
 
@@ -252,7 +295,7 @@ def get_ts_image(neb_images, calc):
         Image with the maximum potential energy.
     """
     for image in neb_images:
-        image.calc = copy.copy(calc)
+        image.calc = copy.deepcopy(calc)
     index = np.argmax([image.get_potential_energy() for image in neb_images])
     return neb_images[index]
 
@@ -273,8 +316,13 @@ def quick_guess_path(reactant, product, n_images=25):
     -------
     list of ase.Atoms
         Interpolated path.
+
+    Raises
+    ------
+    ImportError
+        If geodesic_interpolate is not installed.
     """
-    return gi.geodesic_interpolate([reactant, product], n_images=n_images)
+    return _geodesic_interpolate([reactant, product], n_images)
 
 
 def quick_guess_ts(reactant, product, n_images=25):
@@ -293,7 +341,12 @@ def quick_guess_ts(reactant, product, n_images=25):
     -------
     ase.Atoms
         Midpoint image of the interpolated path.
+
+    Raises
+    ------
+    ImportError
+        If geodesic_interpolate is not installed.
     """
-    atoms_ts = gi.geodesic_interpolate([reactant, product], n_images=n_images)
+    atoms_ts = _geodesic_interpolate([reactant, product], n_images)
     atoms_ts = atoms_ts[n_images // 2]
     return atoms_ts

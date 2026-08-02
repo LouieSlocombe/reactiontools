@@ -1,2 +1,3 @@
-recursive-include reactiontools/data *
 include README.md
+include LICENSE
+recursive-include build_tools *.yml *.md

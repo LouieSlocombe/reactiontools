@@ -199,7 +199,7 @@ def _get_energy(image, calc):
             return image.calc.results['energy']
         except (AttributeError, KeyError):
             pass
-    image.calc = copy.copy(calc)
+    image.calc = copy.deepcopy(calc)
     return image.get_potential_energy()
 
 
@@ -264,8 +264,8 @@ def plot_neb(images,
         ax.plot(path, energies, 'o-', lw=2, label=label)
     ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
     if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
+        fig.savefig(f"{filename}.png", dpi=600)
+        fig.savefig(f"{filename}.pdf")
     if show:
         plt.show()
     return fig, ax
@@ -298,6 +298,8 @@ def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.get_figure()
 
     for traj_path, label in zip(trajectories, labels):
         frames = read(traj_path, index=":")
@@ -310,8 +312,6 @@ def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
 
         ax.plot(x, temperatures, label=label)
 
-    ax.set_xlabel(f"Time ({'fs' if timestep else 'frame'})" if timestep else "Frame")
-    ax.set_ylabel("Temperature (K)")
     ax.legend()
     ax_plot(fig, ax, "Time (fs)" if timestep else "Frame", "Temperature (K)")
 
@@ -345,6 +345,8 @@ def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.get_figure()
 
     for traj_path, label in zip(trajectories, labels):
         frames = read(traj_path, index=":")
