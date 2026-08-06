@@ -1,12 +1,6 @@
-"""Package-level tests: the public surface and its optional dependencies."""
-
-import importlib.util
-
-import pytest
+"""Package-level tests: the public surface."""
 
 import reactiontools
-
-HAS_GEODESIC = importlib.util.find_spec("geodesic_interpolate") is not None
 
 
 def test_version_is_a_string():
@@ -37,25 +31,6 @@ def test_public_api_is_complete():
     assert expected <= set(reactiontools.__all__)
 
 
-def test_package_imports_without_geodesic_interpolate():
-    """The git-only dependency must not be needed to import the package.
-
-    tools_reaction imports it lazily, so the modules that do not touch
-    geodesic interpolation stay usable when it is absent.
-    """
-    from reactiontools import tools_reaction
-
-    assert not hasattr(tools_reaction, "gi")
-
-
-@pytest.mark.skipif(HAS_GEODESIC, reason="geodesic_interpolate is installed")
-def test_geodesic_functions_raise_a_helpful_error(water):
-    """Without the dependency, the error should say how to install it."""
-    with pytest.raises(ImportError, match="geodesic_interpolate"):
-        reactiontools.quick_guess_ts(water, water, n_images=5)
-
-
-@pytest.mark.skipif(not HAS_GEODESIC, reason="requires geodesic_interpolate")
 def test_quick_guess_path_returns_the_requested_images(water):
     product = water.copy()
     product.positions[1] += [0.4, 0.0, 0.0]
@@ -65,7 +40,6 @@ def test_quick_guess_path_returns_the_requested_images(water):
     assert len(path) == 7
 
 
-@pytest.mark.skipif(not HAS_GEODESIC, reason="requires geodesic_interpolate")
 def test_quick_guess_ts_returns_a_midpoint_structure(water):
     product = water.copy()
     product.positions[1] += [0.4, 0.0, 0.0]

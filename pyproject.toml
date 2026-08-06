@@ -31,6 +31,7 @@ dependencies = [
   "scipy",
   "matplotlib",
   "ase>=3.23",
+  "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
 ]
 
 classifiers = [
@@ -46,11 +47,6 @@ classifiers = [
 dev = [
   "pytest",
   "pytest-cov",
-]
-# Needed by prepare_neb(geo_int=True), quick_guess_path and quick_guess_ts.
-# Installed from git, so this extra cannot be resolved from a PyPI mirror.
-geodesic = [
-  "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
 ]
 
 [project.urls]

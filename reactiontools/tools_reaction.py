@@ -1,22 +1,16 @@
 import copy
 from pathlib import Path
 
+import geodesic_interpolate as gi
 import numpy as np
 from ase.io import read
 from ase.mep import NEB
 from ase.optimize import BFGS
 from scipy.interpolate import CubicSpline
 
-_GI_HINT = ("geodesic_interpolate is required for this function. Install it with:\n"
-            "    pip install git+https://github.com/LouieSlocombe/geodesic_interpolate.git")
-
 
 def _geodesic_interpolate(images, n_images):
-    """Interpolate a path with geodesic_interpolate, imported on demand.
-
-    The dependency is installed from git rather than PyPI, so it is imported
-    here instead of at module scope. That keeps ``import reactiontools``
-    working when only the NEB and plotting tools are needed.
+    """Interpolate a path with geodesic_interpolate.
 
     Parameters
     ----------
@@ -29,16 +23,7 @@ def _geodesic_interpolate(images, n_images):
     -------
     list of ase.Atoms
         Interpolated path.
-
-    Raises
-    ------
-    ImportError
-        If geodesic_interpolate is not installed.
     """
-    try:
-        import geodesic_interpolate as gi
-    except ImportError as exc:
-        raise ImportError(_GI_HINT) from exc
     return gi.geodesic_interpolate(images, n_images=n_images)
 
 
@@ -218,11 +203,6 @@ def prepare_neb(reactant, product, calc,
     -------
     ase.mep.NEB
         Configured NEB object.
-
-    Raises
-    ------
-    ImportError
-        If ``geo_int`` is ``True`` and geodesic_interpolate is not installed.
     """
     neb_images = [reactant]
     for ii in range(n_images - 2):
@@ -316,11 +296,6 @@ def quick_guess_path(reactant, product, n_images=25):
     -------
     list of ase.Atoms
         Interpolated path.
-
-    Raises
-    ------
-    ImportError
-        If geodesic_interpolate is not installed.
     """
     return _geodesic_interpolate([reactant, product], n_images)
 
@@ -341,11 +316,6 @@ def quick_guess_ts(reactant, product, n_images=25):
     -------
     ase.Atoms
         Midpoint image of the interpolated path.
-
-    Raises
-    ------
-    ImportError
-        If geodesic_interpolate is not installed.
     """
     atoms_ts = _geodesic_interpolate([reactant, product], n_images)
     atoms_ts = atoms_ts[n_images // 2]

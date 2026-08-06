@@ -32,14 +32,16 @@ including building PLUMED with the OPES module.
 
 ### Dependencies
 
-Runtime requirements are `numpy`, `scipy`, `matplotlib` and `ase>=3.23` (the
-version where `NEB` moved to `ase.mep`).
+Runtime requirements are `numpy`, `scipy`, `matplotlib`, `ase>=3.23` (the
+version where `NEB` moved to `ase.mep`) and
+[`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
+(installed from git, used by `prepare_neb`, `quick_guess_path` and
+`quick_guess_ts`).
 
-Two dependencies are optional:
+One dependency is optional:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |
-| [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts` | Installed from git: `pip install -e ".[geodesic]"`. Imported lazily, so the rest of the package works without it. |
 | `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. |
 
 ## Quickstart
@@ -93,10 +95,9 @@ and reported in meV.
   for a molecule tumbling in vacuum, but wrong for a periodic slab whose atoms
   are already pinned by a constraint — leaving it on stops the band converging.
   Set `rm_ro_trans=False` for constrained or periodic systems.
-- **`geo_int`** uses geodesic interpolation, which needs the optional
-  `geodesic_interpolate` package. With `geo_int=False` the band is built by
-  linear interpolation refined with IDPP, which is usually fine for a small
-  displacement like the hop above.
+- **`geo_int`** uses geodesic interpolation. With `geo_int=False` the band is
+  built by linear interpolation refined with IDPP, which is usually fine for
+  a small displacement like the hop above.
 
 Already have a band on disk? Read it back and plot it directly:
 
@@ -198,8 +199,7 @@ pytest
 ```
 
 The suite builds its own structures with `ase.build` and evaluates them with
-EMT, so it needs no external data or calculator. Tests covering
-`geodesic_interpolate` skip automatically when it is not installed.
+EMT, so it needs no external data or calculator.
 
 ## License
 

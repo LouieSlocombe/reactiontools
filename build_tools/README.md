@@ -21,12 +21,8 @@ source are picked up without reinstalling:
 pip install -e ".[dev]"
 ```
 
-The `environment.yml` already pulls in `geodesic_interpolate` from git. If you
-installed the dependencies some other way, add it with:
-
-```bash
-pip install -e ".[geodesic]"
-```
+This also pulls in `geodesic_interpolate` from git, since it's a required
+dependency.
 
 ## 3. Check the install
 
