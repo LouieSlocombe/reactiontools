@@ -108,6 +108,24 @@ about:
   distributes the images across MPI ranks; pass a specific communicator with
   `world` if you don't want `ase.parallel.world`.
 
+### Minimising with a socket calculator
+
+`optimise_geom` and `optimise_reactant_product` take the same `use_socket`,
+`socket_port`, `socket_unixsocket` and `socket_log` arguments. With
+`use_socket=True`, `calc` is driven through an ASE
+[`SocketIOCalculator`](https://wiki.fysik.dtu.dk/ase/ase/calculators/socketio/socketio.html)
+instead of being called directly, so the external program launches once and
+stays running for every BFGS step instead of restarting on each one:
+
+```python
+reactant, product = optimise_reactant_product(
+    reactant, product, calc, fmax=0.05, use_socket=True)
+```
+
+This needs a calculator ASE knows how to launch as an i-PI client — built-in
+support covers `Espresso`, `Aims` and `Siesta`. A calculator without that
+support, such as EMT, will fail with `use_socket=True`.
+
 Already have a band on disk? Read it back and plot it directly:
 
 ```python
@@ -158,8 +176,8 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `get_neb_path(images)` | Cumulative reaction-path distance along a band, starting at zero. |
 | `stitch_path(path1, path2, f_reverse_path=False)` | Join a reactant-side and product-side path into one IRC-like sequence. |
 | `resample_path(path, n_resample)` | Cubic-spline resample a path to a fixed number of images, preserving the endpoints. |
-| `optimise_geom(atoms, calc, ...)` | Relax a structure with BFGS and return the final image. |
-| `optimise_reactant_product(reactant, product, calc, ...)` | Relax both endpoints independently. |
+| `optimise_geom(atoms, calc, ..., use_socket=False)` | Relax a structure with BFGS and return the final image. `use_socket=True` drives `calc` over an ASE `SocketIOCalculator`. |
+| `optimise_reactant_product(reactant, product, calc, ..., use_socket=False)` | Relax both endpoints independently, one after the other. |
 | `prepare_neb(reactant, product, calc, n_images=5, climb=True, geo_int=True, k=2.0, parallel=False)` | Build a configured `ase.mep.NEB`, interpolating geodesically or with IDPP. `parallel=True` evaluates images concurrently. |
 | `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj')` | Relax the band and return the final images. |
 | `get_ts_image(neb_images, calc)` | The highest-energy image along a band. |

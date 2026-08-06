@@ -1,8 +1,10 @@
 import copy
+from contextlib import nullcontext
 from pathlib import Path
 
 import geodesic_interpolate as gi
 import numpy as np
+from ase.calculators.socketio import SocketIOCalculator
 from ase.io import read
 from ase.mep import NEB
 from ase.optimize import BFGS
@@ -99,7 +101,11 @@ def resample_path(path, n_resample):
 def optimise_geom(atoms, calc,
                   fmax=0.01,
                   steps=1000,
-                  opti_traj='opti.traj'):
+                  opti_traj='opti.traj',
+                  use_socket=False,
+                  socket_port=None,
+                  socket_unixsocket=None,
+                  socket_log=None):
     """Relax a structure with BFGS and return the final image.
 
     Parameters
@@ -114,6 +120,22 @@ def optimise_geom(atoms, calc,
         Maximum number of optimiser steps.
     opti_traj : str, optional
         Temporary trajectory filename used to store the optimisation.
+    use_socket : bool, optional
+        Drive ``calc`` through an
+        ``ase.calculators.socketio.SocketIOCalculator`` instead of calling
+        it directly, so the external code launches once and stays running
+        for every BFGS step instead of restarting on each one. Needs a
+        calculator ASE can launch as an i-PI client (e.g. ``Espresso``,
+        ``Aims``, ``Siesta``); a calculator without that support, such as
+        EMT, will fail.
+    socket_port : int, optional
+        Port for the socket server, used when ``use_socket`` is True.
+        Defaults to ASE's own default (31415) when neither this nor
+        ``socket_unixsocket`` is given.
+    socket_unixsocket : str, optional
+        Name of a Unix socket to use instead of ``socket_port``.
+    socket_log : file object, optional
+        Logfile for the socket communication, for debugging.
 
     Returns
     -------
@@ -121,8 +143,15 @@ def optimise_geom(atoms, calc,
         Relaxed structure.
     """
     atoms = atoms.copy()
-    atoms.calc = calc
-    BFGS(atoms, trajectory=opti_traj).run(fmax=fmax, steps=steps)
+    if use_socket:
+        context = SocketIOCalculator(calc, port=socket_port,
+                                     unixsocket=socket_unixsocket,
+                                     log=socket_log)
+    else:
+        context = nullcontext(calc)
+    with context as live_calc:
+        atoms.calc = live_calc
+        BFGS(atoms, trajectory=opti_traj).run(fmax=fmax, steps=steps)
     atoms = read(opti_traj, index=-1)
     Path(opti_traj).unlink()
     atoms.calc = calc
@@ -133,7 +162,11 @@ def optimise_reactant_product(reactant, product, calc,
                               fmax=0.01,
                               steps=1000,
                               reactant_opti='reactant_opti.traj',
-                              product_opti='product_opti.traj'):
+                              product_opti='product_opti.traj',
+                              use_socket=False,
+                              socket_port=None,
+                              socket_unixsocket=None,
+                              socket_log=None):
     """Optimise reactant and product structures independently.
 
     Parameters
@@ -152,6 +185,10 @@ def optimise_reactant_product(reactant, product, calc,
         Temporary trajectory filename for the reactant optimisation.
     product_opti : str, optional
         Temporary trajectory filename for the product optimisation.
+    use_socket, socket_port, socket_unixsocket, socket_log
+        See :func:`optimise_geom`. Passed through to both optimisations,
+        which run one after the other and so can safely reuse the same
+        port or Unix socket.
 
     Returns
     -------
@@ -162,13 +199,21 @@ def optimise_reactant_product(reactant, product, calc,
     reactant = optimise_geom(reactant, calc,
                              fmax=fmax,
                              steps=steps,
-                             opti_traj=reactant_opti)
+                             opti_traj=reactant_opti,
+                             use_socket=use_socket,
+                             socket_port=socket_port,
+                             socket_unixsocket=socket_unixsocket,
+                             socket_log=socket_log)
 
     print('Optimizing product...', flush=True)
     product = optimise_geom(product, calc,
                             fmax=fmax,
                             steps=steps,
-                            opti_traj=product_opti)
+                            opti_traj=product_opti,
+                            use_socket=use_socket,
+                            socket_port=socket_port,
+                            socket_unixsocket=socket_unixsocket,
+                            socket_log=socket_log)
     return reactant, product
 
 

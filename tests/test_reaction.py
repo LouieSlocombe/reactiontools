@@ -16,6 +16,44 @@ from reactiontools import (get_neb_path,
                            prepare_neb,
                            resample_path,
                            stitch_path)
+from reactiontools import tools_reaction
+
+
+class _FakeSocketIOCalculator:
+    """Stand-in for ase.calculators.socketio.SocketIOCalculator.
+
+    A real one launches an external process and speaks the i-PI protocol,
+    which needs a calculator that knows how to run as a socket client (e.g.
+    Espresso, Aims, Siesta) - EMT doesn't. This records how it was
+    constructed and hands the wrapped calculator straight back, so the
+    socket wiring in optimise_geom can be checked without an external
+    process.
+    """
+
+    instances = []
+
+    def __init__(self, calc, port=None, unixsocket=None, log=None):
+        self.calc = calc
+        self.port = port
+        self.unixsocket = unixsocket
+        self.log = log
+        self.closed = False
+        _FakeSocketIOCalculator.instances.append(self)
+
+    def __enter__(self):
+        return self.calc
+
+    def __exit__(self, *exc_info):
+        self.closed = True
+        return False
+
+
+@pytest.fixture
+def fake_socketio(monkeypatch):
+    """Patch tools_reaction's SocketIOCalculator with a recording stub."""
+    _FakeSocketIOCalculator.instances = []
+    monkeypatch.setattr(tools_reaction, "SocketIOCalculator", _FakeSocketIOCalculator)
+    return _FakeSocketIOCalculator
 
 
 class TestGetNebPath:
@@ -144,6 +182,32 @@ class TestOptimiseGeom:
 
         assert relaxed.calc is not None
 
+    def test_uses_socketio_when_requested(self, calc, water, fake_socketio):
+        optimise_geom(water, calc, fmax=0.05, steps=5,
+                      use_socket=True, socket_port=12345, socket_log="sock.log")
+
+        assert len(fake_socketio.instances) == 1
+        used = fake_socketio.instances[0]
+        assert used.calc is calc
+        assert used.port == 12345
+        assert used.log == "sock.log"
+        assert used.closed is True
+
+    def test_relaxes_through_the_socket_wrapper(self, calc, water, fake_socketio):
+        """The fake hands EMT straight back, so relaxation still works."""
+        atoms = water.copy()
+        atoms.positions[1] += [0.2, 0.0, 0.0]
+
+        relaxed = optimise_geom(atoms, calc, fmax=0.05, steps=200,
+                                use_socket=True)
+
+        assert np.linalg.norm(relaxed.get_forces(), axis=1).max() < 0.05
+
+    def test_does_not_touch_socketio_by_default(self, calc, water, fake_socketio):
+        optimise_geom(water, calc, fmax=0.05, steps=5)
+
+        assert fake_socketio.instances == []
+
 
 class TestOptimiseReactantProduct:
     def test_relaxes_both_endpoints(self, calc):
@@ -167,6 +231,15 @@ class TestOptimiseReactantProduct:
 
         assert not Path("r.traj").exists()
         assert not Path("p.traj").exists()
+
+    def test_forwards_socket_options_to_both_optimisations(
+            self, calc, water, fake_socketio):
+        optimise_reactant_product(water, water.copy(), calc,
+                                  fmax=0.05, steps=5,
+                                  use_socket=True, socket_unixsocket="rt-test")
+
+        assert len(fake_socketio.instances) == 2
+        assert all(i.unixsocket == "rt-test" for i in fake_socketio.instances)
 
 
 @pytest.fixture
