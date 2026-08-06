@@ -228,6 +228,19 @@ pytest
 The suite builds its own structures with `ase.build` and evaluates them with
 EMT, so it needs no external data or calculator.
 
+## Citing
+
+If `reactiontools` is useful in your work, please cite it and whichever of
+the codes it wraps you actually exercised — all in
+[CITATIONS.bib](CITATIONS.bib):
+
+| Entry | Cite for | Used by |
+| --- | --- | --- |
+| `Slocombe_reactiontools` | `reactiontools` itself | always |
+| `larsen2017atomic` | [ASE](https://wiki.fysik.dtu.dk/ase/) | NEB, optimisation and I/O throughout |
+| `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts` |
+| `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills` |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
