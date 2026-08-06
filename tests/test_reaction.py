@@ -278,6 +278,33 @@ class TestPrepareNeb:
         assert climbing.climb is True
         assert plain.climb is False
 
+    def test_parallel_flag_is_passed_through(self, calc, endpoints):
+        reactant, product = endpoints
+
+        parallel = prepare_neb(reactant, product, calc, n_images=5,
+                               parallel=True, geo_int=False)
+        serial = prepare_neb(reactant, product, calc, n_images=5,
+                             parallel=False, geo_int=False)
+
+        assert parallel.parallel is True
+        assert serial.parallel is False
+
+    def test_parallel_evaluation_matches_serial(self, calc, endpoints):
+        """Without an MPI launcher, parallel=True evaluates images on threads.
+
+        The result should be identical to the serial evaluation, just spread
+        across threads instead of run one image at a time.
+        """
+        reactant, product = endpoints
+
+        serial = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+        parallel = prepare_neb(reactant, product, calc, n_images=5,
+                               parallel=True, geo_int=False)
+
+        serial_energies = [image.get_potential_energy() for image in serial.images]
+        parallel_energies = [image.get_potential_energy() for image in parallel.images]
+        assert parallel_energies == pytest.approx(serial_energies)
+
 
 class TestOptimiseNeb:
     def test_returns_the_final_band(self, calc, endpoints):

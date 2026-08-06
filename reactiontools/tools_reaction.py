@@ -177,7 +177,9 @@ def prepare_neb(reactant, product, calc,
                 climb=True,
                 rm_ro_trans=True,
                 geo_int=True,
-                k=2.0):
+                k=2.0,
+                parallel=False,
+                world=None):
     """Build an ASE NEB object from reactant and product end states.
 
     Parameters
@@ -198,6 +200,18 @@ def prepare_neb(reactant, product, calc,
         Use geodesic interpolation before NEB construction.
     k : float, optional
         Spring constant passed to ASE's NEB.
+    parallel : bool, optional
+        Evaluate the interior images' energies and forces concurrently
+        instead of one at a time. Without an MPI launcher this runs each
+        image's calculator in its own thread, which only speeds things up
+        if ``calc`` releases the GIL while it runs (e.g. one that shells out
+        to an external code); under ``mpirun`` ASE instead distributes the
+        images across MPI ranks. Applies to every force evaluation on the
+        returned band, including the ones ``optimise_neb`` runs.
+    world : object, optional
+        MPI communicator used to distribute images when ``parallel`` is True
+        and the process is launched under MPI. Defaults to
+        ``ase.parallel.world``.
 
     Returns
     -------
@@ -216,19 +230,22 @@ def prepare_neb(reactant, product, calc,
               climb=climb,
               remove_rotation_and_translation=rm_ro_trans,
               k=k,
-              method='improvedtangent')
+              method='improvedtangent',
+              parallel=parallel,
+              world=world)
     if not geo_int:
         neb.interpolate()
         neb.interpolate("idpp")
 
-    # Evaluate only once the geometries are final. Priming the calculators
-    # before interpolation would cache the reactant energy against every
-    # interior image, and waste a single-point call on each duplicate.
     # deepcopy, not copy: shallow copies of a calculator that has already run
     # share its internal arrays, so the images overwrite each other's forces.
     for image in neb.images:
         image.calc = copy.deepcopy(calc)
-        image.get_potential_energy()
+
+    # Evaluate once the geometries are final, and through the NEB itself
+    # rather than image by image: that's what makes parallel=True actually
+    # run the images concurrently instead of always evaluating them in turn.
+    neb.get_forces()
     return neb
 
 

@@ -89,7 +89,8 @@ and reported in meV.
 
 ### Choosing NEB settings
 
-`prepare_neb`'s defaults suit isolated molecules. Two are worth thinking about:
+`prepare_neb`'s defaults suit isolated molecules. A few are worth thinking
+about:
 
 - **`rm_ro_trans`** removes rigid-body rotation and translation. That is right
   for a molecule tumbling in vacuum, but wrong for a periodic slab whose atoms
@@ -98,6 +99,14 @@ and reported in meV.
 - **`geo_int`** uses geodesic interpolation. With `geo_int=False` the band is
   built by linear interpolation refined with IDPP, which is usually fine for
   a small displacement like the hop above.
+- **`parallel`** evaluates the interior images concurrently instead of one at
+  a time, for both the initial energies and every force call `optimise_neb`
+  makes afterwards. Without an MPI launcher this runs each image's calculator
+  in its own thread, which only helps if `calc` releases the GIL while it
+  runs (e.g. one that shells out to an external code — a Python-only
+  calculator like EMT gains nothing). Run under `mpirun` and ASE instead
+  distributes the images across MPI ranks; pass a specific communicator with
+  `world` if you don't want `ase.parallel.world`.
 
 Already have a band on disk? Read it back and plot it directly:
 
@@ -151,7 +160,7 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `resample_path(path, n_resample)` | Cubic-spline resample a path to a fixed number of images, preserving the endpoints. |
 | `optimise_geom(atoms, calc, ...)` | Relax a structure with BFGS and return the final image. |
 | `optimise_reactant_product(reactant, product, calc, ...)` | Relax both endpoints independently. |
-| `prepare_neb(reactant, product, calc, n_images=5, climb=True, geo_int=True, k=2.0)` | Build a configured `ase.mep.NEB`, interpolating geodesically or with IDPP. |
+| `prepare_neb(reactant, product, calc, n_images=5, climb=True, geo_int=True, k=2.0, parallel=False)` | Build a configured `ase.mep.NEB`, interpolating geodesically or with IDPP. `parallel=True` evaluates images concurrently. |
 | `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj')` | Relax the band and return the final images. |
 | `get_ts_image(neb_images, calc)` | The highest-energy image along a band. |
 | `quick_guess_path(reactant, product, n_images=25)` | Geodesic path guess, no optimisation. |
