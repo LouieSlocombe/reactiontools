@@ -5,7 +5,8 @@ elastic band (NEB) calculations.
 
 `reactiontools` wraps the parts of an [ASE](https://wiki.fysik.dtu.dk/ase/)
 reaction-path workflow that get rewritten in every project: interpolating a
-band, relaxing the endpoints, pulling the TS image out, driving PLUMED, and
+band, relaxing the endpoints, pulling the TS image out and refining it to a
+true saddle point, following the IRC away from it, driving PLUMED, and
 producing publication-ready figures with consistent styling.
 
 It is calculator-agnostic — anything that behaves like an ASE calculator works,
@@ -38,10 +39,11 @@ version where `NEB` moved to `ase.mep`) and
 (installed from git, used by `prepare_neb`, `quick_guess_path` and
 `quick_guess_ts`).
 
-One dependency is optional:
+Two dependencies are optional:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |
+| [`sella`](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` | Install with `pip install "reactiontools[ts]"`. Imported on first use, so the rest of the package works without it. |
 | `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. |
 
 ## Quickstart
@@ -218,6 +220,59 @@ with socket_calculators(1, make_calc) as (calc,):
     reactant, product = optimise_reactant_product(reactant, product, calc)
 ```
 
+### Refining the transition state
+
+A band gets close to the saddle but rarely converges tightly onto it, and the
+top image is only ever as good as the spacing between images. `optimise_ts`
+polishes it with [Sella](https://github.com/zadorlab/sella), `get_vibrations`
+checks that the result really is a saddle, and `optimise_irc` confirms it
+connects the two minima you meant:
+
+```python
+from reactiontools import (get_ts_image, get_vibrations, optimise_irc,
+                           optimise_ts, plot_irc, stitch_path)
+
+ts = optimise_ts(get_ts_image(images), calc, fmax=0.01)
+
+# A minimum has all-real frequencies; a saddle has exactly one imaginary mode,
+# which ASE reports as a complex number.
+freqs = get_vibrations(ts, calc)
+assert sum(f.imag != 0 for f in freqs) == 1
+
+# Roll downhill both ways, then join the halves into one profile.
+forward, reverse = optimise_irc(ts, calc, dx=0.1)
+plot_irc(stitch_path(reverse, forward))
+```
+
+These two need Sella, which is an optional dependency — install it with
+`pip install "reactiontools[ts]"`. They raise `ImportError` with that hint if
+it is missing; nothing else in the package is affected.
+
+### Building a flipped end state
+
+A band needs a product, and for a stacked dimer that is the awkward structure
+to draw by hand. `tools_geometry` builds one: work out which atoms make up each
+half, then swap the halves over. The reflection that does the swap has a sign
+convention that depends on how the fragments sit, so
+`get_best_flip_and_face_bases` tries them all and keeps whichever leaves the
+two centres of mass closest together:
+
+```python
+from reactiontools import (bonded_cluster_indices_no_anchor_hub,
+                           get_best_flip_and_face_bases, prepare_neb)
+
+anchors = [12, 37]  # one atom per half, where the two are joined
+base_a = bonded_cluster_indices_no_anchor_hub(atoms, anchors[0])
+base_b = bonded_cluster_indices_no_anchor_hub(atoms, anchors[1])
+
+product = get_best_flip_and_face_bases(atoms, base_a, base_b, anchors,
+                                       calc=calc)
+neb = prepare_neb(atoms, product, calc, n_images=7)
+```
+
+Pass `optimise_after=False` to skip the relaxation and get the rigid swap
+alone, in which case no calculator is needed.
+
 ### PLUMED
 
 Build a selection string, sum the hills, and plot the free-energy surface:
@@ -259,8 +314,26 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `socket_calculators(n_calculators, make_calc=None, ...)` | Context manager opening a pool of `SocketIOCalculator`s, one socket each, closed on exit. |
 | `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj')` | Relax the band and return the final images. |
 | `get_ts_image(neb_images, calc=None)` | The highest-energy image along a band, reusing the energies the images carry unless a calculator is given. |
+| `get_fmax(atoms)` | Largest per-atom force, the quantity the optimisers converge against. |
+| `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1)` | Refine a TS guess to a true saddle point with Sella. Needs the `[ts]` extra. |
+| `optimise_irc(ts_image, calc, dx=0.1, ...)` | Follow the IRC downhill in both directions, returning `(forward, reverse)`. Needs the `[ts]` extra. |
+| `get_vibrations(atoms, calc)` | Finite-difference frequencies in cm⁻¹; one imaginary mode confirms a saddle. |
 | `quick_guess_path(reactant, product, n_images=25)` | Geodesic path guess, no optimisation. |
 | `quick_guess_ts(reactant, product, n_images=25)` | Midpoint of a geodesic guess, as a cheap TS starting structure. |
+
+### `tools_geometry` — building flipped end states
+
+A NEB needs a product as well as a reactant. For a stacked dimer the product is
+the awkward one to draw by hand, so these build it: find the two halves, then
+swap them over.
+
+| Function | Description |
+| --- | --- |
+| `bonded_cluster_indices_no_anchor_hub(atoms, anchor, mult=1.0, multi_h=1.3)` | Atoms bonded to an anchor, without the walk routing back through it. |
+| `get_dimer_bonded_cluster_indices(atoms, anchors, mults=None, multi_h=1.3)` | Union of the two clusters, one per anchor. |
+| `flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, rot_matrix=None)` | Swap two fragments over, each landing on the other's anchor and facing it. |
+| `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05)` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
+| `get_best_flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, optimise_after=True, calc=None)` | Search the reflection signs and keep whichever leaves the fragment centres of mass closest. |
 
 ### `tools_plumed` — metadynamics support
 
@@ -277,7 +350,9 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `n_plot(xlab, ylab)` | Apply the house style to the current pyplot axes. |
 | `ax_plot(fig, ax, xlab, ylab)` | Same, for an explicit `Figure`/`Axes` pair. |
 | `plot_images(images, view='tilted', n_cols=4, ...)` | Grid of rendered structures, one panel per image. |
+| `show_atoms(atoms, view='tilted', ...)` | Structures superimposed on one axes, for seeing how far a band has moved. |
 | `plot_neb(images, calc=None, smooth=True, ...)` | NEB energy profile in meV against path length. |
+| `plot_irc(images, calc=None, color='black', ...)` | The same profile with IRC defaults; pair with `stitch_path`. |
 | `plot_temperature(trajectories, labels=None, timestep=None, ax=None)` | Temperature against frame or time for one or more trajectories. |
 | `plot_total_energy(trajectories, labels=None, timestep=None, ax=None)` | Total energy against frame or time. |
 | `plot_plumed(file='fes.dat', ...)` | One-dimensional PLUMED free-energy surface. |
@@ -317,6 +392,7 @@ the codes it wraps you actually exercised — all in
 | `Slocombe_reactiontools` | `reactiontools` itself | always |
 | `larsen2017atomic` | [ASE](https://wiki.fysik.dtu.dk/ase/) | NEB, optimisation and I/O throughout |
 | `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts` |
+| `hermes2022sella` | [Sella](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` |
 | `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills` |
 
 ## License

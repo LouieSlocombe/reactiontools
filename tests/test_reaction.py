@@ -1,5 +1,6 @@
 """Tests for reactiontools.tools_reaction."""
 
+import importlib.util
 import os
 from pathlib import Path
 
@@ -11,17 +12,27 @@ from ase.calculators.socketio import PySocketIOClient, SocketIOCalculator
 from ase.constraints import FixAtoms
 from ase.mep import NEB
 
-from reactiontools import (get_neb_path,
+from reactiontools import (get_fmax,
+                           get_neb_path,
                            get_ts_image,
+                           get_vibrations,
                            optimise_geom,
+                           optimise_irc,
                            optimise_neb,
                            optimise_reactant_product,
+                           optimise_ts,
                            prepare_neb,
                            prepare_parallel_neb,
                            resample_path,
                            socket_calculators,
                            stitch_path)
 from reactiontools import tools_reaction
+
+# Skip the saddle-point tests rather than the whole module: sella is the
+# optional [ts] extra, and everything else here works without it.
+sella_required = pytest.mark.skipif(
+    importlib.util.find_spec("sella") is None,
+    reason="sella is the optional [ts] extra")
 
 
 class _FakeSocketIOCalculator:
@@ -306,6 +317,23 @@ class TestPrepareNeb:
             fresh.calc = EMT()
             assert image.calc.results["energy"] == pytest.approx(
                 fresh.get_potential_energy())
+
+    def test_geodesic_interpolation_builds_a_band(self, calc, endpoints):
+        """Regression: geo_int=True, the default, raised NameError.
+
+        Extracting _build_band left prepare_neb referring to a local the
+        extraction had taken with it. Every other test here passes
+        geo_int=False, so the default path went unexercised and the function
+        was unusable as documented.
+        """
+        reactant, product = endpoints
+
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=True)
+
+        assert len(neb.images) == 5
+        assert all(image.calc is not None for image in neb.images)
+        assert np.all(np.isfinite([image.get_potential_energy()
+                                   for image in neb.images]))
 
     def test_images_do_not_share_calculator_state(self, endpoints):
         """Regression: shallow copies of a used calculator share their arrays.
@@ -745,3 +773,79 @@ class TestGetTsImage:
 
         assert all(atoms.calc is not original
                    for atoms, original in zip(chain, originals))
+
+
+class TestGetFmax:
+    def test_matches_the_largest_per_atom_force(self, calc, water):
+        water.calc = calc
+
+        fmax = get_fmax(water)
+
+        forces = water.get_forces()
+        assert fmax == pytest.approx(np.linalg.norm(forces, axis=1).max())
+
+    def test_is_zero_for_a_relaxed_structure(self, calc, water):
+        relaxed = optimise_geom(water, calc, fmax=0.01)
+        relaxed.calc = calc
+
+        assert get_fmax(relaxed) < 0.01
+
+
+class TestGetVibrations:
+    def test_returns_one_frequency_per_degree_of_freedom(self, calc, water):
+        freqs = get_vibrations(water, calc)
+
+        assert len(freqs) == 3 * len(water)
+
+    def test_does_not_modify_the_input(self, calc, water):
+        before = water.positions.copy()
+
+        get_vibrations(water, calc)
+
+        assert water.positions == pytest.approx(before)
+        assert water.calc is None
+
+    def test_leaves_no_cached_displacements_behind(self, calc, water, tmp_path):
+        """A stale cache from an earlier geometry would be reused silently.
+
+        ASE empties the cache but keeps the directory, which is harmless: it
+        is the displacement files that would be picked up again.
+        """
+        get_vibrations(water, calc)
+
+        assert list((tmp_path / "vib").iterdir()) == []
+
+
+@sella_required
+class TestOptimiseTs:
+    def test_returns_a_structure_and_keeps_the_trajectory(self, calc, water):
+        ts = optimise_ts(water, calc, fmax=0.5, steps=2)
+
+        assert len(ts) == len(water)
+        assert Path("sella.traj").exists()
+
+    def test_does_not_modify_the_input(self, calc, water):
+        before = water.positions.copy()
+
+        optimise_ts(water, calc, fmax=0.5, steps=2)
+
+        assert water.positions == pytest.approx(before)
+
+
+@sella_required
+class TestOptimiseIrc:
+    def test_returns_both_directions(self, calc, water):
+        forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
+
+        assert len(forward) >= 1
+        assert len(reverse) >= 1
+        assert Path("irc_f.traj").exists()
+        assert Path("irc_r.traj").exists()
+
+    def test_the_halves_stitch_into_one_path(self, calc, water):
+        """The point of returning them: stitch_path takes it from here."""
+        forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
+
+        path = stitch_path(reverse, forward)
+
+        assert len(path) == len(forward) + len(reverse) - 1

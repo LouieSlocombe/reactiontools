@@ -11,7 +11,40 @@ from ase.io import read
 from ase.mep import NEB
 from ase.optimize import BFGS
 from ase.parallel import world
+from ase.vibrations import Vibrations
 from scipy.interpolate import CubicSpline
+
+_SELLA_HINT = ("{name} needs sella, which is not installed. "
+               "Install it with `pip install 'reactiontools[ts]'`.")
+
+
+def _import_sella(name):
+    """Import sella on demand, with an install hint when it is missing.
+
+    Sella is an optional dependency: it is only needed by the saddle-point
+    searches, so importing it at module scope would make the whole package
+    unimportable for the NEB-only workflows that are the common case.
+
+    Parameters
+    ----------
+    name : str
+        Name of the calling function, quoted in the error message.
+
+    Returns
+    -------
+    tuple
+        The ``(Sella, IRC)`` classes.
+
+    Raises
+    ------
+    ImportError
+        If sella is not installed.
+    """
+    try:
+        from sella import IRC, Sella
+    except ImportError as exc:
+        raise ImportError(_SELLA_HINT.format(name=name)) from exc
+    return Sella, IRC
 
 
 def _geodesic_interpolate(images, n_images):
@@ -48,6 +81,25 @@ def get_neb_path(images):
     positions = [atoms.positions for atoms in images]
     path = [0] + [np.linalg.norm(positions[i + 1] - positions[i]) for i in range(len(positions) - 1)]
     return np.cumsum(path)
+
+
+def get_fmax(atoms):
+    """Return the largest force acting on any single atom.
+
+    This is the quantity ASE's optimisers converge against, so it is the one
+    to print when checking how far a structure is from a stationary point.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        Structure carrying a calculator that can supply forces.
+
+    Returns
+    -------
+    float
+        Maximum per-atom force magnitude in eV/Å.
+    """
+    return np.sqrt((atoms.get_forces() ** 2).sum(axis=1).max())
 
 
 def stitch_path(path1, path2, f_reverse_path=False):
@@ -226,7 +278,8 @@ def _build_band(reactant, product,
                 rm_ro_trans,
                 geo_int,
                 k,
-                parallel=False):
+                parallel=False,
+                world=None):
     """Build an interpolated NEB whose images carry no calculators yet.
 
     Shared by :func:`prepare_neb` and :func:`prepare_parallel_neb`, which
@@ -250,6 +303,9 @@ def _build_band(reactant, product,
     parallel : bool, optional
         Distribute the images over threads or MPI ranks. See
         :func:`prepare_parallel_neb`.
+    world : object, optional
+        MPI communicator used to distribute images. ``None`` leaves ASE to
+        use its own default, ``ase.parallel.world``.
 
     Returns
     -------
@@ -257,7 +313,7 @@ def _build_band(reactant, product,
         Interpolated band with ``image.calc`` still ``None`` throughout.
     """
     neb_images = [reactant]
-    for ii in range(n_images - 2):
+    for _ii in range(n_images - 2):
         neb_images.append(reactant.copy())
     neb_images.append(product)
 
@@ -269,7 +325,8 @@ def _build_band(reactant, product,
               remove_rotation_and_translation=rm_ro_trans,
               k=k,
               method='improvedtangent',
-              parallel=parallel)
+              parallel=parallel,
+              world=world)
     if not geo_int:
         neb.interpolate()
         neb.interpolate("idpp")
@@ -322,21 +379,11 @@ def prepare_neb(reactant, product, calc,
     ase.mep.NEB
         Configured NEB object.
     """
-    neb = _build_band(reactant, product, n_images, climb, rm_ro_trans, geo_int, k)
+    neb = _build_band(reactant, product,
+                      n_images, climb, rm_ro_trans, geo_int, k,
+                      parallel=parallel,
+                      world=world)
 
-    if geo_int:
-        neb_images = _geodesic_interpolate(neb_images, n_images)
-
-    neb = NEB(neb_images,
-              climb=climb,
-              remove_rotation_and_translation=rm_ro_trans,
-              k=k,
-              method='improvedtangent',
-              parallel=parallel,
-              world=world)
-    if not geo_int:
-        neb.interpolate()
-        neb.interpolate("idpp")
     # deepcopy, not copy: shallow copies of a calculator that has already run
     # share its internal arrays, so the images overwrite each other's forces.
     for image in neb.images:
@@ -661,6 +708,182 @@ def get_ts_image(neb_images, calc=None):
             image.calc = copy.deepcopy(calc)
     index = np.argmax([image.get_potential_energy() for image in neb_images])
     return neb_images[index]
+
+
+def optimise_ts(ts_image, calc,
+                fmax=0.01,
+                steps=1000,
+                eta=1e-4,
+                gamma=0.1,
+                sella_traj='sella.traj'):
+    """Refine a transition-state guess to a true saddle point with Sella.
+
+    A NEB band gets close to the saddle but rarely converges tightly onto it,
+    so the usual route is :func:`get_ts_image` to pick the top of the band and
+    this to polish it. Unlike :func:`optimise_geom`, the trajectory is kept:
+    a saddle search is the step most likely to wander off, and the path it
+    took is what tells you it did.
+
+    Parameters
+    ----------
+    ts_image : ase.Atoms
+        Transition-state guess. Not modified; a copy is optimised.
+    calc : ase.calculators.Calculator
+        Calculator attached during the search.
+    fmax : float, optional
+        Maximum force criterion in eV/Å.
+    steps : int, optional
+        Maximum number of optimiser steps.
+    eta : float, optional
+        Finite-difference step for Sella's curvature estimate.
+    gamma : float, optional
+        Convergence criterion for Sella's iterative diagonalisation.
+    sella_traj : str, optional
+        Trajectory filename, kept after the run.
+
+    Returns
+    -------
+    ase.Atoms
+        Refined transition state, read back from the trajectory.
+
+    Raises
+    ------
+    ImportError
+        If sella is not installed.
+    """
+    Sella, _IRC = _import_sella("optimise_ts")
+
+    print('Running Sella TS search', flush=True)
+    ts_image = ts_image.copy()
+    ts_image.calc = calc
+
+    print(f'Initial energy: {ts_image.get_potential_energy():.3} eV', flush=True)
+    print(f'Initial max force: {get_fmax(ts_image):.3} eV/A', flush=True)
+
+    sella_ts = Sella(ts_image,
+                     trajectory=sella_traj,
+                     eta=eta,
+                     gamma=gamma)
+    sella_ts.run(fmax=fmax, steps=steps)
+
+    return read(sella_traj, index=-1)
+
+
+def optimise_irc(ts_image, calc,
+                 fmax=0.01,
+                 steps=1000,
+                 dx=0.1,
+                 eta=1e-4,
+                 gamma=0.1,
+                 keep_going=True,
+                 irc_f_traj='irc_f.traj',
+                 irc_r_traj='irc_r.traj'):
+    """Follow the intrinsic reaction coordinate downhill from a saddle point.
+
+    Runs Sella's IRC in both directions, which is what confirms that a saddle
+    found by :func:`optimise_ts` actually connects the reactant and product
+    you meant rather than some other pair of minima. The two halves come back
+    separately and can be joined into one profile with :func:`stitch_path`.
+
+    Parameters
+    ----------
+    ts_image : ase.Atoms
+        Converged transition state. Not modified; each direction runs on its
+        own copy.
+    calc : ase.calculators.Calculator
+        Calculator attached during both runs.
+    fmax : float, optional
+        Maximum force criterion in eV/Å.
+    steps : int, optional
+        Maximum number of steps per direction.
+    dx : float, optional
+        Step length along the reaction coordinate in Å.
+    eta : float, optional
+        Finite-difference step for Sella's curvature estimate.
+    gamma : float, optional
+        Convergence criterion for Sella's iterative diagonalisation.
+    keep_going : bool, optional
+        Carry on past a step that fails to converge instead of stopping.
+    irc_f_traj : str, optional
+        Trajectory filename for the forward direction.
+    irc_r_traj : str, optional
+        Trajectory filename for the reverse direction.
+
+    Returns
+    -------
+    tuple of list of ase.Atoms
+        ``(forward, reverse)`` paths, each read back from its trajectory and
+        starting at the transition state.
+
+    Raises
+    ------
+    ImportError
+        If sella is not installed.
+    """
+    _Sella, IRC = _import_sella("optimise_irc")
+
+    irc_f = ts_image.copy()
+    irc_f.calc = calc
+    print("Running IRC forward", flush=True)
+    sella_irc_f = IRC(irc_f,
+                      trajectory=irc_f_traj,
+                      dx=dx,
+                      eta=eta,
+                      gamma=gamma,
+                      keep_going=keep_going)
+    sella_irc_f.run(fmax=fmax,
+                    steps=steps,
+                    direction='forward')
+
+    irc_r = ts_image.copy()
+    irc_r.calc = calc
+
+    print("Running IRC reverse", flush=True)
+    sella_irc_r = IRC(irc_r,
+                      trajectory=irc_r_traj,
+                      dx=dx,
+                      eta=eta,
+                      gamma=gamma,
+                      keep_going=keep_going)
+    sella_irc_r.run(fmax=fmax,
+                    steps=steps,
+                    direction='reverse')
+
+    return read(irc_f_traj, index=":"), read(irc_r_traj, index=":")
+
+
+def get_vibrations(atoms, calc):
+    """Compute vibrational frequencies by finite differences.
+
+    Mostly used to characterise a stationary point: a minimum has all-real
+    frequencies, while a transition state from :func:`optimise_ts` should show
+    exactly one imaginary mode, which ASE reports as a complex number.
+
+    The displacement cache ASE writes is removed before and after the run, so
+    a stale cache from an earlier geometry cannot silently be reused.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        Structure to displace. Not modified; a copy is used.
+    calc : ase.calculators.Calculator
+        Calculator used for the displaced evaluations.
+
+    Returns
+    -------
+    numpy.ndarray
+        Frequencies in cm⁻¹, complex where a mode is imaginary.
+    """
+    atoms = atoms.copy()
+    atoms.calc = calc
+    vib = Vibrations(atoms)
+    # Make sure the folder is clean
+    vib.clean()
+    vib.run()
+    vib.summary()
+    freqs = vib.get_frequencies()
+    vib.clean()
+    return freqs
 
 
 def quick_guess_path(reactant, product, n_images=25):

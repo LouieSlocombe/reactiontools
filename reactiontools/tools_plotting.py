@@ -193,6 +193,67 @@ def plot_images(images,
     return fig, axes
 
 
+def show_atoms(atoms,
+               view="tilted",
+               rotation=None,
+               ax=None,
+               save=True,
+               show=True,
+               filename="atoms"):
+    """Draw one or more structures superimposed on a single axes.
+
+    Unlike :func:`plot_images`, which gives every structure its own panel,
+    this overlays them all in one frame. That is the view for seeing how far a
+    band has moved: pass the images of a NEB and the drawings stack up, so the
+    atoms that shift stand out against the ones that do not.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms or sequence of ase.Atoms
+        Structure, or structures, to draw.
+    view : str, optional
+        Camera angle: one of ``"top"``, ``"side"``, ``"front"`` or
+        ``"tilted"``, or any ASE rotation string (e.g. ``"300x,0y,0z"``).
+    rotation : str, optional
+        Explicit ASE rotation string. Overrides ``view`` when given.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on. A new figure and axes are created if ``None``.
+    save : bool, optional
+        Save ``.png`` and ``.pdf`` outputs when ``True``.
+    show : bool, optional
+        Display the plot with ``plt.show()`` when ``True``.
+    filename : str, optional
+        Output filename stem for saved figures.
+
+    Returns
+    -------
+    tuple
+        ``(fig, ax)`` containing the matplotlib figure and axes.
+    """
+    if isinstance(atoms, Atoms):
+        atoms = [atoms]
+
+    if rotation is None:
+        # Fall through to the raw string so any ASE rotation is accepted
+        rotation = _ATOM_VIEWS.get(view, view)
+
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.get_figure()
+
+    for atom in atoms:
+        plot_atoms(atom, ax, rotation=rotation)
+    ax.set_axis_off()
+
+    if save:
+        fig.savefig(f"{filename}.png", dpi=600)
+        fig.savefig(f"{filename}.pdf")
+    if show:
+        plt.show()
+    return fig, ax
+
+
 def _get_energy(image, calc):
     if image.calc is not None:
         try:
@@ -263,6 +324,84 @@ def plot_neb(images,
         ax.plot(path_smooth, energies_smooth, '-', lw=2, label=label)
     else:
         ax.plot(path, energies, 'o-', lw=2, label=label)
+    ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
+    if save:
+        fig.savefig(f"{filename}.png", dpi=600)
+        fig.savefig(f"{filename}.pdf")
+    if show:
+        plt.show()
+    return fig, ax
+
+
+def plot_irc(images,
+             calc=None,
+             fig=None,
+             ax=None,
+             save=True,
+             show=True,
+             smooth=True,
+             k=2,
+             fig_size=(8, 3),
+             filename="irc",
+             color="black",
+             label=None):
+    """Plot an intrinsic reaction coordinate energy profile.
+
+    The same profile as :func:`plot_neb`, with defaults suited to an IRC: a
+    single black curve rather than one of a labelled set, since an IRC is
+    normally shown on its own. Feed it the two halves from
+    :func:`~reactiontools.tools_reaction.optimise_irc` joined by
+    :func:`~reactiontools.tools_reaction.stitch_path`.
+
+    Parameters
+    ----------
+    images : sequence of ase.Atoms
+        Images along the reaction path, ordered reactant to product.
+    calc : ase.calculators.Calculator or None, optional
+        Calculator used to evaluate any missing energies. Not needed for
+        images read back from a trajectory, which already carry theirs.
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on. A new figure is created if ``None``.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on. A new axes is created if ``None``.
+    save : bool, optional
+        Save ``.png`` and ``.pdf`` outputs when ``True``.
+    show : bool, optional
+        Display the plot with ``plt.show()`` when ``True``.
+    smooth : bool, optional
+        Use spline interpolation for the path when ``True``.
+    k : int, optional
+        Spline order used when ``smooth`` is ``True``.
+    fig_size : tuple, optional
+        Size of the created figure.
+    filename : str, optional
+        Output filename stem for saved figures.
+    color : str, optional
+        Colour of the curve and its markers.
+    label : str, optional
+        Line label for the path curve.
+
+    Returns
+    -------
+    tuple
+        ``(fig, ax)`` containing the matplotlib figure and axes.
+    """
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+    # Use cached energies where available, fall back to calc otherwise
+    energies = np.array([_get_energy(image, calc) for image in images])
+    energies -= min(energies)
+    energies *= 1000.0
+    # Get the path
+    path = get_neb_path(images)
+    if smooth:
+        spl = make_interp_spline(path, energies, k=k)
+        path_smooth = np.linspace(min(path), max(path), 100)
+        energies_smooth = spl(path_smooth)
+        ax.scatter(path, energies, c=color)
+        ax.plot(path_smooth, energies_smooth, '-', c=color, lw=2, label=label)
+    else:
+        ax.plot(path, energies, 'o-', c=color, lw=2, label=label)
     ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
     if save:
         fig.savefig(f"{filename}.png", dpi=600)

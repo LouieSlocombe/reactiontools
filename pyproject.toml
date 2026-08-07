@@ -21,6 +21,8 @@ keywords = [
   "transition-state",
   "nudged-elastic-band",
   "neb",
+  "irc",
+  "saddle-point",
   "metadynamics",
   "plumed",
   "ase",
@@ -44,9 +46,15 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# Saddle-point searches only: optimise_ts and optimise_irc. Kept out of the
+# main dependencies so the NEB workflows install without them.
+ts = [
+  "sella",
+]
 dev = [
   "pytest",
   "pytest-cov",
+  "sella",
 ]
 
 [project.urls]

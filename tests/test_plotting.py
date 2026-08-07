@@ -5,17 +5,18 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from ase.build import molecule
 
 from reactiontools import (ax_plot,
                            n_plot,
                            plot_images,
+                           plot_irc,
                            plot_neb,
                            plot_plumed,
                            plot_plumed_multi,
                            plot_temperature,
                            plot_total_energy,
-                           prepare_neb)
+                           prepare_neb,
+                           show_atoms)
 from reactiontools.tools_plotting import (_expand_fes_files,
                                           _fes_labels,
                                           _get_energy,
@@ -405,3 +406,74 @@ class TestPlotPlumedMulti:
 
         assert Path("compare.png").exists()
         assert Path("compare.pdf").exists()
+
+
+class TestShowAtoms:
+    def test_accepts_a_single_structure(self, water):
+        fig, ax = show_atoms(water, save=False, show=False)
+
+        assert fig is not None and ax is not None
+
+    def test_overlays_a_whole_band_on_one_axes(self, band):
+        """The point of it: one frame, every image drawn into it."""
+        _fig, ax = show_atoms(band, save=False, show=False)
+
+        single = plt.subplots()[1]
+        show_atoms(band[0], ax=single, save=False, show=False)
+        assert len(ax.patches) > len(single.patches)
+
+    def test_draws_on_a_given_axes(self, water):
+        _fig, ax = plt.subplots()
+
+        _fig2, used = show_atoms(water, ax=ax, save=False, show=False)
+
+        assert used is ax
+
+    def test_saves_both_formats(self, water, tmp_path):
+        show_atoms(water, save=True, show=False, filename="struct")
+
+        assert (tmp_path / "struct.png").exists()
+        assert (tmp_path / "struct.pdf").exists()
+
+    def test_accepts_a_named_view(self, water):
+        fig, _ax = show_atoms(water, view="side", save=False, show=False)
+
+        assert fig is not None
+
+
+class TestPlotIrc:
+    def test_returns_a_figure_and_axes(self, band):
+        fig, ax = plot_irc(band, save=False, show=False)
+
+        assert fig is not None and ax is not None
+
+    def test_uses_the_energies_the_images_carry(self, band):
+        """No calculator needed for a path read back from a trajectory."""
+        fig, _ax = plot_irc(band, calc=None, save=False, show=False)
+
+        assert fig is not None
+
+    def test_plots_in_mev_above_the_minimum(self, band):
+        _fig, ax = plot_irc(band, save=False, show=False, smooth=False)
+
+        drawn = ax.lines[0].get_ydata()
+        energies = np.array([_get_energy(i, None) for i in band])
+        assert drawn == pytest.approx((energies - energies.min()) * 1000.0)
+
+    def test_composes_onto_an_existing_axes(self, band):
+        fig, ax = plt.subplots()
+
+        _fig, used = plot_irc(band, fig=fig, ax=ax, save=False, show=False)
+
+        assert used is ax
+
+    def test_saves_both_formats(self, band, tmp_path):
+        plot_irc(band, save=True, show=False, filename="path")
+
+        assert (tmp_path / "path.png").exists()
+        assert (tmp_path / "path.pdf").exists()
+
+    def test_labels_the_axes_in_mev(self, band):
+        _fig, ax = plot_irc(band, save=False, show=False)
+
+        assert "meV" in ax.get_ylabel()

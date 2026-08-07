@@ -19,15 +19,21 @@ def test_public_api_is_complete():
     """The documented API must all be reachable from the top-level package."""
     expected = {
         # tools_reaction
-        "get_neb_path", "stitch_path", "resample_path", "optimise_geom",
-        "optimise_reactant_product", "prepare_neb", "socket_calculators",
-        "prepare_parallel_neb", "optimise_neb",
-        "get_ts_image", "quick_guess_path", "quick_guess_ts",
+        "get_neb_path", "get_fmax", "stitch_path", "resample_path",
+        "optimise_geom", "optimise_reactant_product", "prepare_neb",
+        "socket_calculators", "prepare_parallel_neb", "optimise_neb",
+        "get_ts_image", "optimise_ts", "optimise_irc", "get_vibrations",
+        "quick_guess_path", "quick_guess_ts",
+        # tools_geometry
+        "bonded_cluster_indices_no_anchor_hub",
+        "get_dimer_bonded_cluster_indices", "flip_and_face_bases",
+        "optimize_with_fixed_anchors", "get_best_flip_and_face_bases",
         # tools_plumed
         "plumed_selection", "find_molecules", "run_sum_hills",
         # tools_plotting
-        "n_plot", "ax_plot", "plot_images", "plot_neb", "plot_temperature",
-        "plot_total_energy", "plot_plumed", "plot_plumed_multi",
+        "n_plot", "ax_plot", "show_atoms", "plot_images", "plot_neb",
+        "plot_irc", "plot_temperature", "plot_total_energy", "plot_plumed",
+        "plot_plumed_multi",
     }
     assert expected <= set(reactiontools.__all__)
 
