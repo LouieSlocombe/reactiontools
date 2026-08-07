@@ -204,7 +204,7 @@ def _get_energy(image, calc):
 
 
 def plot_neb(images,
-             calc,
+             calc=None,
              fig=None,
              ax=None,
              save=True,
@@ -220,8 +220,9 @@ def plot_neb(images,
     ----------
     images : sequence of ase.Atoms
         NEB images along the reaction path.
-    calc : ase.calculators.Calculator
-        Calculator used to evaluate any missing energies.
+    calc : ase.calculators.Calculator or None, optional
+        Calculator used to evaluate any missing energies. Not needed for a
+        band read back by ``optimise_neb``, whose images already carry theirs.
     fig : matplotlib.figure.Figure, optional
         Figure to draw on. A new figure is created if ``None``.
     ax : matplotlib.axes.Axes, optional

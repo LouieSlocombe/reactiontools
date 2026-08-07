@@ -1,11 +1,14 @@
 """Tests for reactiontools.tools_reaction."""
 
+import os
 from pathlib import Path
 
 import numpy as np
 import pytest
-from ase.build import molecule
+from ase.build import add_adsorbate, fcc100, molecule
 from ase.calculators.emt import EMT
+from ase.calculators.socketio import PySocketIOClient, SocketIOCalculator
+from ase.constraints import FixAtoms
 from ase.mep import NEB
 
 from reactiontools import (get_neb_path,
@@ -14,7 +17,9 @@ from reactiontools import (get_neb_path,
                            optimise_neb,
                            optimise_reactant_product,
                            prepare_neb,
+                           prepare_parallel_neb,
                            resample_path,
+                           socket_calculators,
                            stitch_path)
 from reactiontools import tools_reaction
 
@@ -397,6 +402,305 @@ class TestOptimiseNeb:
         assert Path("band.traj").exists()
 
 
+def emt_launcher(index):
+    """Launch EMT in its own process, as a stand-in for an external code.
+
+    ``PySocketIOClient`` pickles the factory into a fresh interpreter that
+    then speaks the i-PI protocol back over the socket, which is exactly the
+    arrangement a DFT client uses. It always asks for the stress, so the test
+    systems below need a three-dimensional cell for EMT to supply one.
+    """
+    return PySocketIOClient(EMT)
+
+
+@pytest.fixture
+def evaluated_endpoints(endpoints):
+    """Endpoints carrying energies, as optimise_reactant_product leaves them.
+
+    Bands built from these never reach for a socket to price an endpoint, so
+    the tests can run servers with no clients behind them.
+    """
+    reactant, product = endpoints
+    for atoms in (reactant, product):
+        atoms.calc = EMT()
+        atoms.get_potential_energy()
+    return reactant, product
+
+
+@pytest.fixture
+def slab_endpoints():
+    """A gold adatom hopping between hollow sites on Al(100).
+
+    Periodic, so EMT can report a stress, and small enough that a full
+    climbing-image band converges in a couple of seconds.
+    """
+    slab = fcc100("Al", size=(2, 2, 3))
+    add_adsorbate(slab, "Au", 1.7, "hollow")
+    slab.center(axis=2, vacuum=4.0)
+    slab.set_constraint(FixAtoms(mask=[atom.tag > 1 for atom in slab]))
+
+    reactant = slab.copy()
+    product = slab.copy()
+    product.positions[-1, 0] += product.cell[0, 0] / 2
+    for atoms in (reactant, product):
+        atoms.calc = EMT()
+        atoms.get_potential_energy()
+    return reactant, product
+
+
+class TestSocketCalculators:
+    def test_opens_one_calculator_per_image(self):
+        with socket_calculators(4) as calcs:
+            assert len(calcs) == 4
+            assert all(isinstance(c, SocketIOCalculator) for c in calcs)
+
+    def test_each_calculator_listens_on_its_own_socket(self):
+        with socket_calculators(3) as calcs:
+            names = [c.server.unixsocket for c in calcs]
+
+        assert len(set(names)) == 3
+
+    def test_numbers_ports_from_the_base_upwards(self):
+        with socket_calculators(3, port=31500) as calcs:
+            assert [c.server.port for c in calcs] == [31500, 31501, 31502]
+
+    def test_default_socket_names_are_unique_to_the_process(self):
+        """Two jobs on one node must not fight over the same socket file."""
+        with socket_calculators(2) as calcs:
+            assert all(str(os.getpid()) in c.server.unixsocket for c in calcs)
+
+    def test_passes_the_image_index_to_the_factory(self):
+        seen = []
+
+        def make_calc(index):
+            seen.append(index)
+            return EMT()
+
+        with socket_calculators(3, make_calc):
+            pass
+
+        assert seen == [0, 1, 2]
+
+    def test_closes_the_calculators_on_exit(self):
+        with socket_calculators(3) as calcs:
+            assert all(c.server is not None for c in calcs)
+
+        assert all(c.server is None for c in calcs)
+
+    def test_closes_the_calculators_when_the_block_raises(self):
+        """A band that blows up mid-optimisation must not leak its clients."""
+        with pytest.raises(RuntimeError, match="band diverged"):
+            with socket_calculators(3) as calcs:
+                raise RuntimeError("band diverged")
+
+        assert all(c.server is None for c in calcs)
+
+    def test_releases_the_socket_files(self):
+        with socket_calculators(2) as calcs:
+            files = [Path(f"/tmp/ipi_{c.server.unixsocket}") for c in calcs]
+            assert all(f.exists() for f in files)
+
+        assert not [f for f in files if f.exists()]
+
+    def test_rejects_both_a_port_and_a_unixsocket(self):
+        with pytest.raises(ValueError, match="only one"):
+            with socket_calculators(2, port=31500, unixsocket="rt-test"):
+                pass
+
+    def test_rejects_both_factories(self):
+        with pytest.raises(ValueError, match="only one"):
+            with socket_calculators(2, lambda i: EMT(), make_launcher=emt_launcher):
+                pass
+
+    def test_rejects_a_non_positive_count(self):
+        with pytest.raises(ValueError, match="must be positive"):
+            with socket_calculators(0):
+                pass
+
+
+class TestPrepareParallelNeb:
+    def test_builds_a_band_of_the_requested_length(self, evaluated_endpoints):
+        reactant, product = evaluated_endpoints
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=5, geo_int=False) as neb:
+            assert isinstance(neb, NEB)
+            assert len(neb.images) == 5
+
+    def test_asks_ase_to_spread_the_images(self, evaluated_endpoints):
+        """Without this ASE walks the band one image at a time, and the
+        sockets would sit idle in turn rather than working together."""
+        reactant, product = evaluated_endpoints
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=5, geo_int=False) as neb:
+            assert neb.parallel is True
+
+    def test_gives_each_interior_image_its_own_socket(self, evaluated_endpoints):
+        reactant, product = evaluated_endpoints
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=6, geo_int=False) as neb:
+            interior = [image.calc for image in neb.images[1:-1]]
+
+        assert len(interior) == 4
+        assert all(isinstance(c, SocketIOCalculator) for c in interior)
+        assert len({id(c) for c in interior}) == 4
+
+    def test_does_not_give_the_endpoints_sockets(self, evaluated_endpoints):
+        """Two more clients would idle through the whole run for energies
+        that are already known."""
+        reactant, product = evaluated_endpoints
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=5, geo_int=False) as neb:
+            ends = [neb.images[0].calc, neb.images[-1].calc]
+
+        assert not any(isinstance(c, SocketIOCalculator) for c in ends)
+
+    def test_reuses_the_endpoint_energies_it_is_given(self, evaluated_endpoints):
+        reactant, product = evaluated_endpoints
+        expected = [reactant.get_potential_energy(),
+                    product.get_potential_energy()]
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=5, geo_int=False) as neb:
+            got = [neb.images[0].get_potential_energy(),
+                   neb.images[-1].get_potential_energy()]
+
+        assert got == pytest.approx(expected)
+
+    def test_pins_the_endpoint_energy_against_rigid_motion(self,
+                                                           evaluated_endpoints):
+        """Regression: rm_ro_trans re-aligns the final image every force call.
+
+        A SinglePointCalculator holding the endpoint energy refuses to give
+        it back once the atoms have moved, so the band died partway through
+        with a bare "the property energy is not available". Rigid-body motion
+        cannot change the energy, so the pinned value stays correct.
+        """
+        reactant, product = evaluated_endpoints
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=5, geo_int=False,
+                                  rm_ro_trans=True) as neb:
+            endpoint = neb.images[-1]
+            before = endpoint.get_potential_energy()
+
+            endpoint.rotate(30, "z")
+            endpoint.positions += [1.0, 2.0, 3.0]
+
+            assert endpoint.get_potential_energy() == pytest.approx(before)
+
+    def test_leaves_the_callers_endpoints_alone(self, evaluated_endpoints):
+        reactant, product = evaluated_endpoints
+        calcs = (reactant.calc, product.calc)
+        positions = (reactant.positions.copy(), product.positions.copy())
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=5, geo_int=False):
+            pass
+
+        assert (reactant.calc, product.calc) == calcs
+        assert reactant.positions == pytest.approx(positions[0])
+        assert product.positions == pytest.approx(positions[1])
+
+    def test_closes_the_sockets_on_exit(self, evaluated_endpoints):
+        reactant, product = evaluated_endpoints
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  n_images=5, geo_int=False) as neb:
+            calcs = [image.calc for image in neb.images[1:-1]]
+
+        assert all(c.server is None for c in calcs)
+
+    def test_rejects_a_band_with_no_interior(self, evaluated_endpoints):
+        reactant, product = evaluated_endpoints
+
+        with pytest.raises(ValueError, match="at least 3"):
+            with prepare_parallel_neb(reactant, product, None, n_images=2):
+                pass
+
+    def test_prices_endpoints_that_arrive_without_an_energy(self,
+                                                            slab_endpoints):
+        """Endpoints read back from a file have no calculator, so the first
+        socket has to evaluate them once before the band starts."""
+        reactant, product = slab_endpoints
+        expected = [reactant.get_potential_energy(),
+                    product.get_potential_energy()]
+        for atoms in (reactant, product):
+            atoms.calc = None
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  make_launcher=emt_launcher,
+                                  n_images=4, geo_int=False,
+                                  rm_ro_trans=False, timeout=120) as neb:
+            got = [neb.images[0].get_potential_energy(),
+                   neb.images[-1].get_potential_energy()]
+
+        assert got == pytest.approx(expected)
+
+    def test_ignores_an_energy_left_over_from_the_other_endpoint(self,
+                                                                 slab_endpoints):
+        """Regression: optimise_reactant_product sends both endpoints through
+        one calculator, so its cached result belongs to whichever went last.
+
+        Trusting it blind handed the reactant the product's energy. Asking the
+        calculator for a fresh one was no better: after the ``with`` block that
+        opened it, the socket behind an endpoint is shut, and re-evaluating
+        through it died on a closed log file rather than on anything legible.
+        """
+        reactant, product = slab_endpoints
+        # The hop is symmetric, so lift the adatom to tell the two ends apart:
+        # otherwise the reactant reading the product's energy looks correct.
+        product.positions[-1, 2] += 0.2
+        product.calc = EMT()
+        expected = [reactant.get_potential_energy(),
+                    product.get_potential_energy()]
+        assert expected[0] != pytest.approx(expected[1])
+
+        # What the documented workflow does: price both endpoints through one
+        # socket, then build the band once that socket has been closed.
+        with socket_calculators(1, make_launcher=emt_launcher,
+                                timeout=120) as (calc,):
+            for atoms in (reactant, product):  # product priced last, and cached
+                atoms.calc = calc
+                atoms.get_potential_energy()
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  make_launcher=emt_launcher,
+                                  n_images=4, geo_int=False,
+                                  rm_ro_trans=False, timeout=120) as neb:
+            got = [neb.images[0].get_potential_energy(),
+                   neb.images[-1].get_potential_energy()]
+
+        assert got == pytest.approx(expected)
+
+    def test_relaxes_the_same_band_as_the_serial_route(self, slab_endpoints):
+        """The whole point: same physics, evaluated concurrently.
+
+        Runs the Al(100) hop from the README both ways and compares the
+        converged profile image by image.
+        """
+        reactant, product = slab_endpoints
+
+        with prepare_parallel_neb(reactant, product, None,
+                                  make_launcher=emt_launcher,
+                                  n_images=5, climb=True, rm_ro_trans=False,
+                                  geo_int=False, timeout=120) as neb:
+            parallel = optimise_neb(neb, fmax=0.05, steps=200,
+                                    ts_traj="parallel.traj")
+
+        serial = optimise_neb(
+            prepare_neb(reactant, product, EMT(), n_images=5, climb=True,
+                        rm_ro_trans=False, geo_int=False),
+            fmax=0.05, steps=200, ts_traj="serial.traj")
+
+        assert ([image.get_potential_energy() for image in parallel]
+                == pytest.approx([image.get_potential_energy()
+                                  for image in serial], abs=1e-6))
+
+
 class TestGetTsImage:
     def test_returns_the_highest_energy_image(self, calc, endpoints):
         reactant, product = endpoints
@@ -416,3 +720,28 @@ class TestGetTsImage:
         ts = get_ts_image(chain, calc)
 
         assert ts.calc is not None
+
+    def test_uses_the_energies_the_images_carry(self, slab_endpoints):
+        """A band from prepare_parallel_neb comes back after its sockets have
+        closed, so there is no calculator left to hand over."""
+        reactant, product = slab_endpoints
+        neb = prepare_neb(reactant, product, EMT(), n_images=5,
+                          rm_ro_trans=False, geo_int=False)
+        images = optimise_neb(neb, fmax=0.5, steps=3, ts_traj="band.traj")
+
+        ts = get_ts_image(images)
+
+        energies = [image.get_potential_energy() for image in images]
+        assert ts is images[int(np.argmax(energies))]
+
+    def test_a_given_calculator_still_overrides(self, calc, chain):
+        """Passing one must re-evaluate, not defer to a stale cached energy."""
+        for atoms in chain:
+            atoms.calc = EMT()
+            atoms.get_potential_energy()
+        originals = [atoms.calc for atoms in chain]
+
+        get_ts_image(chain, calc)
+
+        assert all(atoms.calc is not original
+                   for atoms, original in zip(chain, originals))

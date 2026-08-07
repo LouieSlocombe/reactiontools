@@ -1,13 +1,16 @@
 import copy
-from contextlib import nullcontext
+import os
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 
 import geodesic_interpolate as gi
 import numpy as np
+from ase.calculators.calculator import Calculator
 from ase.calculators.socketio import SocketIOCalculator
 from ase.io import read
 from ase.mep import NEB
 from ase.optimize import BFGS
+from ase.parallel import world
 from scipy.interpolate import CubicSpline
 
 
@@ -217,6 +220,62 @@ def optimise_reactant_product(reactant, product, calc,
     return reactant, product
 
 
+def _build_band(reactant, product,
+                n_images,
+                climb,
+                rm_ro_trans,
+                geo_int,
+                k,
+                parallel=False):
+    """Build an interpolated NEB whose images carry no calculators yet.
+
+    Shared by :func:`prepare_neb` and :func:`prepare_parallel_neb`, which
+    differ only in how they attach calculators afterwards.
+
+    Parameters
+    ----------
+    reactant, product : ase.Atoms
+        End states. They become the first and last images as given, so pass
+        copies if the caller's objects must not be touched.
+    n_images : int
+        Total number of images, including endpoints.
+    climb : bool
+        Enable the climbing-image NEB variant.
+    rm_ro_trans : bool
+        Remove rigid-body rotation and translation during interpolation.
+    geo_int : bool
+        Use geodesic interpolation instead of linear plus IDPP.
+    k : float
+        Spring constant passed to ASE's NEB.
+    parallel : bool, optional
+        Distribute the images over threads or MPI ranks. See
+        :func:`prepare_parallel_neb`.
+
+    Returns
+    -------
+    ase.mep.NEB
+        Interpolated band with ``image.calc`` still ``None`` throughout.
+    """
+    neb_images = [reactant]
+    for ii in range(n_images - 2):
+        neb_images.append(reactant.copy())
+    neb_images.append(product)
+
+    if geo_int:
+        neb_images = _geodesic_interpolate(neb_images, n_images)
+
+    neb = NEB(neb_images,
+              climb=climb,
+              remove_rotation_and_translation=rm_ro_trans,
+              k=k,
+              method='improvedtangent',
+              parallel=parallel)
+    if not geo_int:
+        neb.interpolate()
+        neb.interpolate("idpp")
+    return neb
+
+
 def prepare_neb(reactant, product, calc,
                 n_images=5,
                 climb=True,
@@ -263,10 +322,7 @@ def prepare_neb(reactant, product, calc,
     ase.mep.NEB
         Configured NEB object.
     """
-    neb_images = [reactant]
-    for ii in range(n_images - 2):
-        neb_images.append(reactant.copy())
-    neb_images.append(product)
+    neb = _build_band(reactant, product, n_images, climb, rm_ro_trans, geo_int, k)
 
     if geo_int:
         neb_images = _geodesic_interpolate(neb_images, n_images)
@@ -281,7 +337,6 @@ def prepare_neb(reactant, product, calc,
     if not geo_int:
         neb.interpolate()
         neb.interpolate("idpp")
-
     # deepcopy, not copy: shallow copies of a calculator that has already run
     # share its internal arrays, so the images overwrite each other's forces.
     for image in neb.images:
@@ -321,23 +376,289 @@ def optimise_neb(neb,
     return read(ts_traj, index=f"-{n_images}:")
 
 
-def get_ts_image(neb_images, calc):
+class _FixedEnergy(Calculator):
+    """Report a pre-computed energy wherever the atoms happen to sit.
+
+    The NEB tangent needs the endpoint energies on every force call, but the
+    band never relaxes its endpoints, so one evaluation is enough. Holding
+    that value in a ``SinglePointCalculator`` does not work: with
+    ``remove_rotation_and_translation`` the band rigidly re-aligns the final
+    image on every call, and a ``SinglePointCalculator`` refuses to hand back
+    an energy once the atoms have moved. Rigid-body motion leaves the energy
+    unchanged, so returning the stored value stays correct.
+
+    Forces are deliberately not implemented — the band only ever asks the
+    endpoints for their energy, and writing zeros to the trajectory would
+    claim a converged minimum that was never verified.
+    """
+
+    implemented_properties = ["energy", "free_energy"]
+
+    def __init__(self, energy):
+        super().__init__()
+        self.energy = energy
+
+    def calculate(self, atoms=None, properties=("energy",),
+                  system_changes=None):
+        super().calculate(atoms, properties, system_changes or [])
+        self.results = {"energy": self.energy, "free_energy": self.energy}
+
+
+def _cached_energy(atoms):
+    """Return an energy ``atoms`` already holds, without running anything.
+
+    Deliberately reads the stored result rather than calling
+    ``get_potential_energy``, which would evaluate the calculator when the
+    result is missing or stale. Both are bad here: the calculator on an
+    endpoint is typically the socket that priced it, and by the time the band
+    is built that socket may have been closed, or — because
+    :func:`optimise_reactant_product` sends both endpoints through one
+    calculator — be holding the *other* endpoint's result.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        Structure that may or may not carry a calculator holding an energy.
+
+    Returns
+    -------
+    float or None
+        The stored energy, or ``None`` if there is none, or it belongs to a
+        different geometry. Callers price the endpoint themselves in that case.
+    """
+    calc = atoms.calc
+    if calc is None or "energy" not in getattr(calc, "results", {}):
+        return None
+    if calc.check_state(atoms):  # non-empty: the atoms moved since
+        return None
+    return calc.results["energy"]
+
+
+@contextmanager
+def socket_calculators(n_calculators, make_calc=None,
+                       make_launcher=None,
+                       unixsocket=None,
+                       port=None,
+                       timeout=None,
+                       log=None):
+    """Open one :class:`~ase.calculators.socketio.SocketIOCalculator` per image.
+
+    Each calculator gets its own socket, so the external codes behind them
+    run as independent processes and can compute at the same time. The
+    calculators are closed — and their clients shut down — when the block
+    exits, including when it exits by exception.
+
+    Parameters
+    ----------
+    n_calculators : int
+        How many calculators to open.
+    make_calc : callable or None, optional
+        Called as ``make_calc(index)`` and must return a fresh ASE calculator
+        for that image, which ASE then launches as a socket client. The index
+        is passed so each client can be given its own working directory:
+        file-based codes write their input and output relative to
+        ``calc.directory``, and clients sharing a directory overwrite each
+        other. Pass ``None`` to run only the servers and launch the clients
+        yourself, for example from a batch script.
+    make_launcher : callable or None, optional
+        Called as ``make_launcher(index)`` and must return a client launcher,
+        such as :class:`~ase.calculators.socketio.PySocketIOClient`, which
+        drives a Python calculator in a separate process. Mutually exclusive
+        with ``make_calc``.
+    unixsocket : str or None, optional
+        Prefix for UNIX socket names; image ``i`` uses ``f"{unixsocket}-{i}"``,
+        which ASE places at ``/tmp/ipi_{unixsocket}-{i}``. Defaults to a
+        prefix containing this process's PID, so concurrent jobs on one node
+        do not collide. Mutually exclusive with ``port``.
+    port : int or None, optional
+        Base TCP port; image ``i`` listens on ``port + i``. Mutually exclusive
+        with ``unixsocket``.
+    timeout : float or None, optional
+        Socket timeout in seconds, unlimited by default. Worth setting for
+        long jobs, so a client that dies without closing its socket raises
+        instead of hanging the run forever.
+    log : str or None, optional
+        Filename prefix for the socket communication logs; image ``i`` writes
+        ``f"{log}-{i}.log"``. Off by default, but the first thing to turn on
+        when a run stalls with no output.
+
+    Yields
+    ------
+    list of ase.calculators.socketio.SocketIOCalculator
+        One calculator per image, in index order.
+
+    Raises
+    ------
+    ValueError
+        If ``n_calculators`` is not positive, or if both members of a
+        mutually exclusive pair are given.
+    """
+    if n_calculators < 1:
+        raise ValueError(f"n_calculators must be positive, got {n_calculators}")
+    if make_calc is not None and make_launcher is not None:
+        raise ValueError("Specify only one of make_calc and make_launcher")
+    if unixsocket is not None and port is not None:
+        raise ValueError("Specify only one of unixsocket and port")
+    if unixsocket is None and port is None:
+        unixsocket = f"reactiontools-{os.getpid()}"
+
+    # ExitStack, not a loop of with-blocks: if the fourth socket of eight
+    # fails to bind, the three already listening still have to be closed.
+    with ExitStack() as stack:
+        calculators = [
+            stack.enter_context(SocketIOCalculator(
+                calc=None if make_calc is None else make_calc(i),
+                launch_client=None if make_launcher is None else make_launcher(i),
+                unixsocket=None if unixsocket is None else f"{unixsocket}-{i}",
+                port=None if port is None else port + i,
+                timeout=timeout,
+                log=None if log is None else f"{log}-{i}.log"))
+            for i in range(n_calculators)]
+        yield calculators
+
+
+@contextmanager
+def prepare_parallel_neb(reactant, product, make_calc,
+                         n_images=5,
+                         climb=True,
+                         rm_ro_trans=True,
+                         geo_int=True,
+                         k=2.0,
+                         **socket_kwargs):
+    """Build a NEB that evaluates its images concurrently over sockets.
+
+    The serial :func:`prepare_neb` walks the band one image at a time, so a
+    seven-image band costs five sequential energy evaluations per step. Here
+    each interior image gets its own socket calculator, and ASE's parallel
+    NEB runs one thread per interior image. Every thread blocks in
+    ``socket.recv`` while its external code works, which releases the GIL, so
+    the calculations genuinely overlap and a step costs about as much as its
+    slowest image.
+
+    Only the interior images need sockets. The endpoints are evaluated once
+    and pinned, reusing the energy their calculator already holds if there is
+    one — normally the one left behind by
+    :func:`optimise_reactant_product` — and otherwise evaluating them through
+    the first socket. Without pinning, ``rm_ro_trans`` would have the band
+    recompute the final endpoint on every step, for an energy that rigid-body
+    motion cannot change.
+
+    Because the parallelism is threads and sockets, this must run as a single
+    process. Launching it under ``mpirun`` makes ASE distribute the images
+    over MPI ranks instead, and every rank would then try to bind the same
+    sockets.
+
+    Parameters
+    ----------
+    reactant : ase.Atoms
+        Initial state. Not modified; the band is built from a copy.
+    product : ase.Atoms
+        Final state. Not modified.
+    make_calc : callable or None
+        Called as ``make_calc(index)`` to build the calculator for interior
+        image ``index``, counting from zero. Give each one its own working
+        directory. Pass ``None`` to launch the clients yourself.
+    n_images : int, optional
+        Total number of images, including endpoints. Must be at least three.
+    climb : bool, optional
+        Enable the climbing-image NEB variant.
+    rm_ro_trans : bool, optional
+        Remove rigid-body rotation and translation during interpolation.
+    geo_int : bool, optional
+        Use geodesic interpolation before NEB construction.
+    k : float, optional
+        Spring constant passed to ASE's NEB.
+    **socket_kwargs
+        Passed to :func:`socket_calculators`: ``make_launcher``,
+        ``unixsocket``, ``port``, ``timeout`` and ``log``.
+
+    Yields
+    ------
+    ase.mep.NEB
+        Configured band, ready for :func:`optimise_neb`. The sockets stay
+        open for the lifetime of the block and close on the way out, so the
+        band must be optimised inside it.
+
+    Raises
+    ------
+    ValueError
+        If ``n_images`` is less than three.
+    RuntimeError
+        If more than one MPI rank is running.
+    ImportError
+        If ``geo_int`` is ``True`` and geodesic_interpolate is not installed.
+
+    Examples
+    --------
+    Each image runs its own Quantum Espresso client, in its own directory::
+
+        from ase.calculators.espresso import Espresso
+
+        def make_calc(index):
+            return Espresso(directory=f"image-{index}", pseudopotentials=...)
+
+        with prepare_parallel_neb(reactant, product, make_calc,
+                                  n_images=7, timeout=600) as neb:
+            images = optimise_neb(neb, fmax=0.05)
+
+        # The sockets are shut by now, but the band carries its energies.
+        ts = get_ts_image(images)
+    """
+    n_interior = n_images - 2
+    if n_interior < 1:
+        raise ValueError(
+            f"n_images must be at least 3 to leave an interior image to "
+            f"relax, got {n_images}")
+    if world.size != 1:
+        raise RuntimeError(
+            f"prepare_parallel_neb parallelises over sockets within one "
+            f"process, but {world.size} MPI ranks are running. Run it "
+            f"without mpirun and give the clients the ranks instead.")
+
+    # Read the endpoint energies before copying: Atoms.copy() drops the
+    # calculator, and with it the energy the endpoint optimisation left.
+    energies = [_cached_energy(reactant), _cached_energy(product)]
+
+    neb = _build_band(reactant.copy(), product.copy(),
+                      n_images, climb, rm_ro_trans, geo_int, k,
+                      parallel=True)
+
+    with socket_calculators(n_interior, make_calc, **socket_kwargs) as calcs:
+        for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
+            if energy is None:
+                endpoint.calc = calcs[0]
+                energy = endpoint.get_potential_energy()
+            endpoint.calc = _FixedEnergy(energy)
+
+        for image, calc in zip(neb.images[1:-1], calcs):
+            image.calc = calc
+
+        yield neb
+
+
+def get_ts_image(neb_images, calc=None):
     """Return the highest-energy image along a NEB band.
 
     Parameters
     ----------
     neb_images : sequence of ase.Atoms
         Images along the band.
-    calc : ase.calculators.Calculator
-        Calculator used to evaluate the potential energies.
+    calc : ase.calculators.Calculator or None, optional
+        Calculator used to evaluate the potential energies, replacing
+        whatever the images carry. Leave it out to use the energies they
+        already hold, as images read back by :func:`optimise_neb` do. That is
+        the way to pick the TS out of a band from
+        :func:`prepare_parallel_neb`, whose sockets are closed by the time the
+        band comes back and so cannot be handed to anything.
 
     Returns
     -------
     ase.Atoms
         Image with the maximum potential energy.
     """
-    for image in neb_images:
-        image.calc = copy.deepcopy(calc)
+    if calc is not None:
+        for image in neb_images:
+            image.calc = copy.deepcopy(calc)
     index = np.argmax([image.get_potential_energy() for image in neb_images])
     return neb_images[index]
 

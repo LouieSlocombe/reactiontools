@@ -3,8 +3,9 @@
 The package is organised into three modules, all of which are re-exported here:
 
 ``tools_reaction``
-    Build, optimise and post-process nudged elastic band (NEB) paths, and take
-    quick geodesic guesses at a path or a transition state.
+    Build, optimise and post-process nudged elastic band (NEB) paths, either
+    one image at a time or with the images spread over socket calculators,
+    and take quick geodesic guesses at a path or a transition state.
 ``tools_plumed``
     Prepare PLUMED input and turn metadynamics hills into a free-energy
     surface.
@@ -30,6 +31,8 @@ from .tools_reaction import (get_neb_path,
                              optimise_geom,
                              optimise_reactant_product,
                              prepare_neb,
+                             socket_calculators,
+                             prepare_parallel_neb,
                              optimise_neb,
                              get_ts_image,
                              quick_guess_path,
@@ -45,6 +48,8 @@ __all__ = [
     "optimise_geom",
     "optimise_reactant_product",
     "prepare_neb",
+    "socket_calculators",
+    "prepare_parallel_neb",
     "optimise_neb",
     "get_ts_image",
     "quick_guess_path",

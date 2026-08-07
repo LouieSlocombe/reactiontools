@@ -142,6 +142,82 @@ Images read back from a trajectory already carry their energies, so `plot_neb`
 reuses them and only falls back to the calculator you pass for images that have
 none.
 
+### Running the images in parallel
+
+`prepare_neb` walks the band one image at a time, so a seven-image band costs
+five sequential energy evaluations per step. That is fine for EMT and painful
+for DFT. `prepare_parallel_neb` gives each interior image its own
+[socket calculator](https://ase-lib.org/ase/calculators/socketio/socketio.html)
+and asks ASE to spread the band over threads. Each thread blocks waiting on its
+own socket while the external code works, which releases the GIL, so the
+calculations genuinely overlap and a step costs about as much as its slowest
+image:
+
+```python
+from ase.calculators.espresso import Espresso
+
+from reactiontools import get_ts_image, optimise_neb, prepare_parallel_neb
+
+def make_calc(index):
+    # One directory per client: file-based codes write their input and output
+    # relative to calc.directory, and clients sharing one overwrite each other.
+    return Espresso(directory=f"image-{index}", pseudopotentials=...)
+
+with prepare_parallel_neb(reactant, product, make_calc,
+                          n_images=7, timeout=600) as neb:
+    images = optimise_neb(neb, fmax=0.05, ts_traj="ts.traj")
+
+# The sockets are shut by now, but the band read back from ts.traj carries its
+# energies, so get_ts_image and plot_neb need no calculator.
+ts = get_ts_image(images)
+```
+
+It is a context manager because the sockets and the client processes behind
+them have to be shut down, including when the band blows up partway through.
+Optimise inside the block; once it exits the calculators are closed.
+
+Three things to know:
+
+- **Run it as a single process.** The parallelism is threads and sockets, so
+  give the ranks to the clients, not to the driver. Under `mpirun` ASE would
+  distribute the images over MPI ranks instead and every rank would try to bind
+  the same sockets, so this raises rather than hanging.
+- **Only the interior images get sockets.** The endpoints are evaluated once
+  and pinned, reusing the energy their calculator already holds — normally the
+  one `optimise_reactant_product` left behind — and otherwise pricing them
+  through the first socket. Two more clients idling all run for a pair of
+  energies that are already known is not worth it.
+- **Set a `timeout`.** Without one, a client that dies without closing its
+  socket hangs the run forever rather than raising. `log="socket"` writes the
+  i-PI traffic to `socket-0.log`, `socket-1.log`, … and is the first thing to
+  reach for when a run stalls with no output.
+
+Sockets are named `/tmp/ipi_reactiontools-<pid>-<image>` by default, so
+concurrent jobs on one node do not collide. Pass `unixsocket="..."` to choose
+the prefix, or `port=31415` to use TCP ports counting up from there instead.
+
+To drive a Python calculator — an ML potential, say — in separate processes
+rather than an external binary, pass `make_launcher` instead of `make_calc`:
+
+```python
+from ase.calculators.socketio import PySocketIOClient
+
+with prepare_parallel_neb(reactant, product, None,
+                          make_launcher=lambda index: PySocketIOClient(MyMLIP),
+                          n_images=7, timeout=600) as neb:
+    images = optimise_neb(neb, fmax=0.05)
+```
+
+`socket_calculators` is the same machinery without the band, for when you want
+a pool of socket calculators for something else:
+
+```python
+from reactiontools import optimise_reactant_product, socket_calculators
+
+with socket_calculators(1, make_calc) as (calc,):
+    reactant, product = optimise_reactant_product(reactant, product, calc)
+```
+
 ### PLUMED
 
 Build a selection string, sum the hills, and plot the free-energy surface:
@@ -179,8 +255,10 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `optimise_geom(atoms, calc, ..., use_socket=False)` | Relax a structure with BFGS and return the final image. `use_socket=True` drives `calc` over an ASE `SocketIOCalculator`. |
 | `optimise_reactant_product(reactant, product, calc, ..., use_socket=False)` | Relax both endpoints independently, one after the other. |
 | `prepare_neb(reactant, product, calc, n_images=5, climb=True, geo_int=True, k=2.0, parallel=False)` | Build a configured `ase.mep.NEB`, interpolating geodesically or with IDPP. `parallel=True` evaluates images concurrently. |
+| `prepare_parallel_neb(reactant, product, make_calc, n_images=5, ...)` | Context manager giving each interior image its own socket calculator, so the images are evaluated concurrently. |
+| `socket_calculators(n_calculators, make_calc=None, ...)` | Context manager opening a pool of `SocketIOCalculator`s, one socket each, closed on exit. |
 | `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj')` | Relax the band and return the final images. |
-| `get_ts_image(neb_images, calc)` | The highest-energy image along a band. |
+| `get_ts_image(neb_images, calc=None)` | The highest-energy image along a band, reusing the energies the images carry unless a calculator is given. |
 | `quick_guess_path(reactant, product, n_images=25)` | Geodesic path guess, no optimisation. |
 | `quick_guess_ts(reactant, product, n_images=25)` | Midpoint of a geodesic guess, as a cheap TS starting structure. |
 
@@ -199,7 +277,7 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `n_plot(xlab, ylab)` | Apply the house style to the current pyplot axes. |
 | `ax_plot(fig, ax, xlab, ylab)` | Same, for an explicit `Figure`/`Axes` pair. |
 | `plot_images(images, view='tilted', n_cols=4, ...)` | Grid of rendered structures, one panel per image. |
-| `plot_neb(images, calc, smooth=True, ...)` | NEB energy profile in meV against path length. |
+| `plot_neb(images, calc=None, smooth=True, ...)` | NEB energy profile in meV against path length. |
 | `plot_temperature(trajectories, labels=None, timestep=None, ax=None)` | Temperature against frame or time for one or more trajectories. |
 | `plot_total_energy(trajectories, labels=None, timestep=None, ax=None)` | Total energy against frame or time. |
 | `plot_plumed(file='fes.dat', ...)` | One-dimensional PLUMED free-energy surface. |

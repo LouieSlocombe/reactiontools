@@ -20,7 +20,8 @@ def test_public_api_is_complete():
     expected = {
         # tools_reaction
         "get_neb_path", "stitch_path", "resample_path", "optimise_geom",
-        "optimise_reactant_product", "prepare_neb", "optimise_neb",
+        "optimise_reactant_product", "prepare_neb", "socket_calculators",
+        "prepare_parallel_neb", "optimise_neb",
         "get_ts_image", "quick_guess_path", "quick_guess_ts",
         # tools_plumed
         "plumed_selection", "find_molecules", "run_sum_hills",
