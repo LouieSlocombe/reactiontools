@@ -33,18 +33,20 @@ including building PLUMED with the OPES module.
 
 ### Dependencies
 
-Runtime requirements are `numpy`, `scipy`, `matplotlib`, `ase>=3.23` (the
-version where `NEB` moved to `ase.mep`) and
+Runtime requirements are `numpy`, `scipy`, `matplotlib`, `pandas`, `ase>=3.23`
+(the version where `NEB` moved to `ase.mep`) and
 [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
 (installed from git, used by `prepare_neb`, `quick_guess_path` and
 `quick_guess_ts`).
 
-Two dependencies are optional:
+Three dependencies are external — none is pulled in by `pip install`, and each
+is only needed by the functions named:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |
 | [`sella`](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` | Install with `pip install "reactiontools[ts]"`. Imported on first use, so the rest of the package works without it. |
 | `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. |
+| [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` | Licensed separately and installed by hand; point `ORCA_PATH` at the binary. See [build_tools/README.md](build_tools/README.md#orca). |
 
 ## Quickstart
 
@@ -321,11 +323,28 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `quick_guess_path(reactant, product, n_images=25)` | Geodesic path guess, no optimisation. |
 | `quick_guess_ts(reactant, product, n_images=25)` | Midpoint of a geodesic guess, as a cheap TS starting structure. |
 
-### `tools_geometry` — building flipped end states
+### `tools_orca` — ORCA calculators and conformer searches
 
-A NEB needs a product as well as a reactant. For a stacked dimer the product is
-the awkward one to draw by hand, so these build it: find the two halves, then
-swap them over.
+Needs an ORCA install; see the dependency table above.
+
+| Function | Description |
+| --- | --- |
+| `orca_calc_preset(calc_type='DFT', xc='r2SCAN-3c', charge=0, multiplicity=1, ...)` | Build an ASE ORCA calculator from presets for DFT, MP2, CCSD(T) or QM/XTB2, without hand-writing ORCA input. Drop the result into any function that takes a `calc`. |
+| `orca_optimise_atoms(atoms, xc='r2SCAN-3c', tight_opt=True, ...)` | Relax a geometry with ORCA's own optimiser rather than ASE's, for molecules that BFGS in Cartesians struggles with. |
+| `orca_calculate_goat(atoms, charge=0, multiplicity=1, n_procs=1)` | Run a GOAT conformer search, returning `(conformers, DataFrame)` of energies and populations. |
+
+`f_solv` and `f_disp` take either `True` for the default (SMD water, D4) or a
+string naming the solvent or dispersion keyword directly.
+
+Worth running `orca_calculate_goat` before building a band: a NEB between two
+arbitrary conformers explores the conformational change as well as the
+reaction, and the barrier that comes back is not the one you wanted.
+
+### `tools_geometry` — building product end states
+
+A NEB needs a product as well as a reactant, and the product is usually the
+awkward one to draw by hand. These build it: for a stacked dimer, find the two
+halves and swap them over; for a proton transfer, move the hydrogen across.
 
 | Function | Description |
 | --- | --- |
@@ -334,6 +353,7 @@ swap them over.
 | `flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, rot_matrix=None)` | Swap two fragments over, each landing on the other's anchor and facing it. |
 | `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05)` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
 | `get_best_flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, optimise_after=True, calc=None)` | Search the reflection signs and keep whichever leaves the fragment centres of mass closest. |
+| `swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index)` | Turn O-H...O into O...H-O, keeping the O-H length, to make the product of a proton transfer. |
 
 ### `tools_plumed` — metadynamics support
 
@@ -343,12 +363,38 @@ swap them over.
 | `find_molecules(atoms)` | Split a structure into connected components using an ASE neighbour list. |
 | `run_sum_hills(hills='HILLS', outfile='fes.dat', mintozero=True)` | Run `plumed sum_hills` to build a free-energy surface. |
 
+### `tools_fes` — free-energy surfaces
+
+Reads any PLUMED-style file — `COLVAR`, `fes.dat`, `HILLS`, `FES_from_State.py`
+output — and plots it in one or two dimensions. Sources can be mixed freely:
+paths, arrays, `(x, y, Z)` tuples or `FES` objects, one or many at a time, so a
+single surface, a convergence series and a method comparison are all the same
+call.
+
+| Function | Description |
+| --- | --- |
+| `read_plumed_file(path, drop_der=True)` | Parse a PLUMED file into a `PlumedData` of columns, `#! FIELDS` names and `#! SET` metadata. |
+| `as_fes(source, ...)` | Normalise any supported source into an `FES`. |
+| `convert_energy(values, source, target)` | Convert between the units in `ENERGY_UNITS` (kJ/mol, kcal/mol, eV, meV, hartree, kT300). |
+| `plot_fes(sources, **kwargs)` | Plot, dispatching on dimensionality. |
+| `plot_fes_1d(sources, labels=None, energy_unit=None, ...)` | One or many 1-D profiles on one axes. |
+| `plot_fes_2d(sources, levels=30, cmap=None, ...)` | Filled contours, one panel per surface. |
+| `plot_fes_2d_overlay(sources, ...)` | Several 2-D surfaces as contour lines on shared axes. |
+| `plot_fes_slices(sources, ...)` | 1-D cuts through a 2-D surface. |
+| `plot_plumed_fes(path, ...)` | Convenience wrapper over `plot_fes` for a single file. |
+| `plot_plumed_colvar(path, x_axis='time', columns=None, ...)` | One stacked panel per collective variable in a `COLVAR`. |
+
+Energies are read as kJ/mol unless `source_unit` says otherwise, because that
+is what PLUMED writes when driven from OpenMM. `max_energy` masks poorly
+sampled regions rather than letting them dominate the colour scale, and
+`filename=None` means write nothing.
+
 ### `tools_plotting` — figures
 
 | Function | Description |
 | --- | --- |
 | `n_plot(xlab, ylab)` | Apply the house style to the current pyplot axes. |
-| `ax_plot(fig, ax, xlab, ylab)` | Same, for an explicit `Figure`/`Axes` pair. |
+| `ax_plot(fig, ax, xlab, ylab)` | Same, for an explicit `Figure`/`Axes` pair. `None` for either label leaves it untouched. |
 | `plot_images(images, view='tilted', n_cols=4, ...)` | Grid of rendered structures, one panel per image. |
 | `show_atoms(atoms, view='tilted', ...)` | Structures superimposed on one axes, for seeing how far a band has moved. |
 | `plot_neb(images, calc=None, smooth=True, ...)` | NEB energy profile in meV against path length. |
@@ -357,6 +403,11 @@ swap them over.
 | `plot_total_energy(trajectories, labels=None, timestep=None, ax=None)` | Total energy against frame or time. |
 | `plot_plumed(file='fes.dat', ...)` | One-dimensional PLUMED free-energy surface. |
 | `plot_plumed_multi(files, mintozero=False, ...)` | Several surfaces overlaid; directories expand to the `fes.dat` files beneath them. |
+
+`plot_plumed` and `plot_plumed_multi` are ASE-flavoured wrappers over
+`tools_fes`: they assume `fes.dat` is in eV, as `plumed sum_hills` writes it
+for an ASE-driven run, and plot meV. For a run driven from OpenMM the file is
+in kJ/mol — use `tools_fes` directly and set `source_unit`.
 
 Plotting functions return `(fig, ax)` so you can keep customising, and accept an
 existing `fig`/`ax` to compose subplots. `plot_images` returns `(fig, axes)`
@@ -370,7 +421,12 @@ dpi) and `.pdf`.
 
 ASE works in eV and Å, and that is what the functions take and return. The
 plotting layer converts to meV for readability: `plot_neb` shifts energies so
-the lowest image sits at zero, and the PLUMED readers scale `fes.dat` by 1000.
+the lowest image sits at zero, and `plot_plumed`/`plot_plumed_multi` scale
+`fes.dat` by 1000.
+
+`tools_fes` is the exception, because PLUMED's units depend on what drove it:
+it defaults to kJ/mol, and any of the units in `ENERGY_UNITS` can be selected
+per call with `source_unit` and `energy_unit`.
 
 ## Testing
 
@@ -394,6 +450,16 @@ the codes it wraps you actually exercised — all in
 | `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts` |
 | `hermes2022sella` | [Sella](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` |
 | `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills` |
+| `jonsson1998nudged`, `henkelman2000improved`, `henkelman2000climbing` | The NEB method, the improved tangent and the climbing image | `prepare_neb`, `optimise_neb` |
+| `smidstrup2014improved` | IDPP interpolation | `prepare_neb(geo_int=False)` |
+| `nocedal2006numerical` | BFGS | every `optimise_*` that is not Sella |
+| `neese2012orca`, `neese2022orca5`, `neese2025orca6` | [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` |
+| `desouza2025goat` | The GOAT conformer search | `orca_calculate_goat` |
+| `grimme2021r2scan3c`, `furness2020r2scan` | The default `r2SCAN-3c` functional | `orca_calc_preset`, `orca_optimise_atoms` |
+| `caldeweyher2019d4` | D4 dispersion | `f_disp=True` |
+| `barone1998cpcm`, `marenich2009smd` | CPCM/SMD implicit solvation | `f_solv` |
+| `riplinger2013efficient`, `riplinger2013natural`, `pinski2015sparse` | DLPNO-MP2 and DLPNO-CCSD(T) | `calc_type='MP2'`, `calc_type='CCSD'` |
+| `bannwarth2019gfn2` | GFN2-xTB | `calc_type='QM/XTB2'` |
 
 ## License
 

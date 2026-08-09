@@ -19,8 +19,7 @@ from reactiontools import (ax_plot,
                            show_atoms)
 from reactiontools.tools_plotting import (_expand_fes_files,
                                           _fes_labels,
-                                          _get_energy,
-                                          _load_fes)
+                                          _get_energy)
 
 
 @pytest.fixture
@@ -284,11 +283,6 @@ class TestPlotTotalEnergy:
 
 
 class TestFesHelpers:
-    def test_load_fes_converts_ev_to_mev(self, fes_file):
-        cv, fes = _load_fes(fes_file)
-
-        assert fes == pytest.approx(cv ** 2 * 1000.0)
-
     def test_expand_accepts_a_single_file(self, fes_file):
         assert _expand_fes_files(fes_file) == [fes_file]
 
@@ -328,10 +322,22 @@ class TestPlotPlumed:
         assert fig is ax.get_figure()
 
     def test_plots_the_surface_in_mev(self, fes_file):
+        """The fixture writes a cv**2 parabola in eV; meV is 1000x that.
+
+        This is the seam between the two unit conventions: sum_hills driven
+        from ASE writes eV, and these wrappers plot meV, so the conversion
+        going through tools_fes has to come out at exactly 1000.
+        """
         fig, ax = plot_plumed(fes_file, save=False, show=False)
 
-        cv, fes = _load_fes(fes_file)
-        assert ax.lines[0].get_ydata() == pytest.approx(fes)
+        cv = np.loadtxt(fes_file, usecols=0)
+        assert ax.lines[0].get_ydata() == pytest.approx(cv ** 2 * 1000.0)
+
+    def test_does_not_shift_the_surface(self, fes_file):
+        """sum_hills is normally run with --mintozero; don't shift again."""
+        fig, ax = plot_plumed(fes_file, save=False, show=False)
+
+        assert ax.lines[0].get_ydata().min() == pytest.approx(0.0)
 
     def test_x_range_is_applied(self, fes_file):
         fig, ax = plot_plumed(fes_file, save=False, show=False, x_range=(-0.5, 0.5))

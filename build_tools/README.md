@@ -48,3 +48,20 @@ Update your .bashrc file to include the following lines:
 ```bash
 export PLUMED_KERNEL="$HOME/plumed/src/lib/libplumedKernel.so"
 ```
+
+## ORCA
+
+The helpers in `reactiontools.tools_orca` shell out to ORCA, which is licensed
+separately and must be installed by hand:
+
+1. Download it from the [ORCA website](https://www.faccts.de/orca/).
+2. Extract it: `tar -xf orca-x.y.z.tar.gz`
+3. Point `ORCA_PATH` at the `orca` binary, adding this to your `~/.bashrc`:
+
+   ```bash
+   export ORCA_PATH="/path/to/orca_6_1_1/orca"
+   ```
+
+`orca_calc_preset()`, `orca_optimise_atoms()` and `orca_calculate_goat()` read
+`ORCA_PATH` when no explicit path is passed, as do the ORCA tests — which skip
+rather than fail when it is unset.

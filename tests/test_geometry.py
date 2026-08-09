@@ -9,7 +9,8 @@ from reactiontools import (bonded_cluster_indices_no_anchor_hub,
                            flip_and_face_bases,
                            get_best_flip_and_face_bases,
                            get_dimer_bonded_cluster_indices,
-                           optimize_with_fixed_anchors)
+                           optimize_with_fixed_anchors,
+                           swap_bonding_configuration)
 from reactiontools.tools_geometry import (_orient_normal_toward,
                                           _pca_frame,
                                           _rigid_transform)
@@ -275,3 +276,57 @@ class TestGetBestFlipAndFaceBases:
                                      optimise_after=False)
 
         assert dimer.positions == pytest.approx(before)
+
+
+class TestSwapBondingConfiguration:
+    """O-H...O becoming O...H-O, the product end state of a proton transfer."""
+
+    @pytest.fixture
+    def h_bond(self):
+        """A collinear O-H...O along x, with O-H = 1.0 and O...O = 2.8."""
+        return Atoms("OHO", positions=[[0.0, 0.0, 0.0],
+                                       [1.0, 0.0, 0.0],
+                                       [2.8, 0.0, 0.0]])
+
+    def test_hydrogen_moves_to_the_acceptor(self, h_bond):
+        swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
+
+        # Was 1.0 from the donor; now 1.0 from the acceptor instead.
+        assert np.linalg.norm(swapped.positions[1] - swapped.positions[2]) \
+            == pytest.approx(1.0)
+
+    def test_the_new_bond_length_matches_the_old_one(self, h_bond):
+        h_bond.positions[1] = [0.7, 0.0, 0.0]
+
+        swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
+
+        assert np.linalg.norm(swapped.positions[1] - swapped.positions[2]) \
+            == pytest.approx(0.7)
+
+    def test_the_hydrogen_stays_between_the_heavy_atoms(self, h_bond):
+        swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
+
+        assert swapped.positions[1][0] == pytest.approx(1.8)
+
+    def test_the_heavy_atoms_do_not_move(self, h_bond):
+        swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
+
+        assert swapped.positions[0] == pytest.approx(h_bond.positions[0])
+        assert swapped.positions[2] == pytest.approx(h_bond.positions[2])
+
+    def test_does_not_modify_the_input(self, h_bond):
+        before = h_bond.positions.copy()
+
+        swap_bonding_configuration(h_bond, 0, 1, 2)
+
+        assert h_bond.positions == pytest.approx(before)
+
+    def test_works_off_axis(self, h_bond):
+        """The donor->acceptor direction is what matters, not the frame."""
+        h_bond.rotate(37, "z")
+        h_bond.rotate(-19, "y")
+
+        swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
+
+        assert np.linalg.norm(swapped.positions[1] - swapped.positions[2]) \
+            == pytest.approx(1.0)

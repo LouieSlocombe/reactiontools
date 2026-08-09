@@ -49,3 +49,217 @@
   pages   = {6974--6988},
   doi     = {10.1021/acs.jctc.2c00395}
 }
+
+@incollection{jonsson1998nudged,
+  author    = {J{\'o}nsson, Hannes and Mills, Greg and Jacobsen, Karsten W.},
+  title     = {Nudged Elastic Band Method for Finding Minimum Energy Paths of Transitions},
+  booktitle = {Classical and Quantum Dynamics in Condensed Phase Simulations},
+  editor    = {Berne, Bruce J. and Ciccotti, Giovanni and Coker, David F.},
+  publisher = {World Scientific},
+  pages     = {385--404},
+  year      = {1998},
+  doi       = {10.1142/9789812839664_0016}
+}
+
+@article{henkelman2000improved,
+  author  = {Henkelman, Graeme and J{\'o}nsson, Hannes},
+  title   = {Improved tangent estimate in the nudged elastic band method for finding minimum energy paths and saddle points},
+  journal = {The Journal of Chemical Physics},
+  volume  = {113},
+  number  = {22},
+  pages   = {9978--9985},
+  year    = {2000},
+  doi     = {10.1063/1.1323224}
+}
+
+@article{henkelman2000climbing,
+  author  = {Henkelman, Graeme and Uberuaga, Blas P. and J{\'o}nsson, Hannes},
+  title   = {A climbing image nudged elastic band method for finding saddle points and minimum energy paths},
+  journal = {The Journal of Chemical Physics},
+  volume  = {113},
+  number  = {22},
+  pages   = {9901--9904},
+  year    = {2000},
+  doi     = {10.1063/1.1329672},
+  note    = {\texttt{climb=True} in \texttt{qm.prepare\_neb}}
+}
+
+@article{smidstrup2014improved,
+  author  = {Smidstrup, S{\o}ren and Pedersen, Andreas and Stokbro, Kurt and J{\'o}nsson, Hannes},
+  title   = {Improved initial guess for minimum energy path calculations},
+  journal = {The Journal of Chemical Physics},
+  volume  = {140},
+  number  = {21},
+  pages   = {214106},
+  year    = {2014},
+  doi     = {10.1063/1.4878664},
+  note    = {IDPP interpolation; the \texttt{geo\_int=False} branch of \texttt{qm.prepare\_neb}}
+}
+
+@book{nocedal2006numerical,
+  author    = {Nocedal, Jorge and Wright, Stephen J.},
+  title     = {Numerical Optimization},
+  edition   = {2},
+  publisher = {Springer},
+  address   = {New York},
+  year      = {2006},
+  doi       = {10.1007/978-0-387-40065-5},
+  note      = {BFGS, the optimiser used for geometry and NEB relaxation}
+}
+
+
+% =====================================================================
+% Analysis, trajectory handling and plotting
+% =====================================================================
+
+@article{neese2012orca,
+  author  = {Neese, Frank},
+  title   = {The {ORCA} program system},
+  journal = {WIREs Computational Molecular Science},
+  volume  = {2},
+  number  = {1},
+  pages   = {73--78},
+  year    = {2012},
+  doi     = {10.1002/wcms.81}
+}
+
+@article{neese2022orca5,
+  author  = {Neese, Frank},
+  title   = {Software update: The {ORCA} program system---Version 5.0},
+  journal = {WIREs Computational Molecular Science},
+  volume  = {12},
+  number  = {5},
+  pages   = {e1606},
+  year    = {2022},
+  doi     = {10.1002/wcms.1606}
+}
+
+@article{neese2025orca6,
+  author  = {Neese, Frank},
+  title   = {Software Update: The {ORCA} Program System---Version 6.0},
+  journal = {WIREs Computational Molecular Science},
+  volume  = {15},
+  number  = {2},
+  pages   = {e70019},
+  year    = {2025},
+  doi     = {10.1002/wcms.70019},
+  note    = {Cite the version actually run; GOAT requires ORCA 6}
+}
+
+@article{desouza2025goat,
+  author  = {de Souza, Bernardo},
+  title   = {{GOAT}: A Global Optimization Algorithm for Molecules and Atomic Clusters},
+  journal = {Angewandte Chemie International Edition},
+  volume  = {64},
+  number  = {18},
+  pages   = {e202500393},
+  year    = {2025},
+  doi     = {10.1002/anie.202500393},
+  note    = {\texttt{qm.orca\_calculate\_goat} conformer search}
+}
+
+@article{furness2020r2scan,
+  author  = {Furness, James W. and Kaplan, Aaron D. and Ning, Jinliang and Perdew, John P. and Sun, Jianwei},
+  title   = {Accurate and Numerically Efficient {r$^2$SCAN} Meta-Generalized Gradient Approximation},
+  journal = {The Journal of Physical Chemistry Letters},
+  volume  = {11},
+  number  = {19},
+  pages   = {8208--8215},
+  year    = {2020},
+  doi     = {10.1021/acs.jpclett.0c02405}
+}
+
+@article{grimme2021r2scan3c,
+  author  = {Grimme, Stefan and Hansen, Andreas and Ehlert, Sebastian and Mewes, Jan-Michael},
+  title   = {{r$^2$SCAN-3c}: A ``Swiss army knife'' composite electronic-structure method},
+  journal = {The Journal of Chemical Physics},
+  volume  = {154},
+  number  = {6},
+  pages   = {064103},
+  year    = {2021},
+  doi     = {10.1063/5.0040021},
+  note    = {Default \texttt{xc} in \texttt{qm.orca\_calc\_preset}}
+}
+
+@article{caldeweyher2019d4,
+  author  = {Caldeweyher, Eike and Ehlert, Sebastian and Hansen, Andreas and Neugebauer, Hagen and Spicher, Sebastian and Bannwarth, Christoph and Grimme, Stefan},
+  title   = {A generally applicable atomic-charge dependent {London} dispersion correction},
+  journal = {The Journal of Chemical Physics},
+  volume  = {150},
+  number  = {15},
+  pages   = {154122},
+  year    = {2019},
+  doi     = {10.1063/1.5090222},
+  note    = {\texttt{f\_disp=True} requests D4}
+}
+
+@article{barone1998cpcm,
+  author  = {Barone, Vincenzo and Cossi, Maurizio},
+  title   = {Quantum Calculation of Molecular Energies and Energy Gradients in Solution by a Conductor Solvent Model},
+  journal = {The Journal of Physical Chemistry A},
+  volume  = {102},
+  number  = {11},
+  pages   = {1995--2001},
+  year    = {1998},
+  doi     = {10.1021/jp9716997},
+  note    = {CPCM, the \texttt{\%CPCM} block written by \texttt{orca\_calc\_preset}}
+}
+
+@article{marenich2009smd,
+  author  = {Marenich, Aleksandr V. and Cramer, Christopher J. and Truhlar, Donald G.},
+  title   = {Universal Solvation Model Based on Solute Electron Density and on a Continuum Model of the Solvent Defined by the Bulk Dielectric Constant and Atomic Surface Tensions},
+  journal = {The Journal of Physical Chemistry B},
+  volume  = {113},
+  number  = {18},
+  pages   = {6378--6396},
+  year    = {2009},
+  doi     = {10.1021/jp810292n},
+  note    = {\texttt{SMD TRUE} solvation}
+}
+
+@article{riplinger2013efficient,
+  author  = {Riplinger, Christoph and Neese, Frank},
+  title   = {An efficient and near linear scaling pair natural orbital based local coupled cluster method},
+  journal = {The Journal of Chemical Physics},
+  volume  = {138},
+  number  = {3},
+  pages   = {034106},
+  year    = {2013},
+  doi     = {10.1063/1.4773581},
+  note    = {DLPNO-CCSD(T); \texttt{calc\_type='CCSD'}}
+}
+
+@article{riplinger2013natural,
+  author  = {Riplinger, Christoph and Sandhoefer, Barbara and Hansen, Andreas and Neese, Frank},
+  title   = {Natural triple excitations in local coupled cluster calculations with pair natural orbitals},
+  journal = {The Journal of Chemical Physics},
+  volume  = {139},
+  number  = {13},
+  pages   = {134101},
+  year    = {2013},
+  doi     = {10.1063/1.4821834}
+}
+
+@article{pinski2015sparse,
+  author  = {Pinski, Peter and Riplinger, Christoph and Valeev, Edward F. and Neese, Frank},
+  title   = {Sparse maps---A systematic infrastructure for reduced-scaling electronic structure methods. {I}. An efficient and simple linear scaling local {MP2} method that uses an intermediate basis of pair natural orbitals},
+  journal = {The Journal of Chemical Physics},
+  volume  = {143},
+  number  = {3},
+  pages   = {034108},
+  year    = {2015},
+  doi     = {10.1063/1.4926879},
+  note    = {DLPNO-MP2; \texttt{calc\_type='MP2'}}
+}
+
+@article{bannwarth2019gfn2,
+  author  = {Bannwarth, Christoph and Ehlert, Sebastian and Grimme, Stefan},
+  title   = {{GFN2-xTB}---An Accurate and Broadly Parametrized Self-Consistent Tight-Binding Quantum Chemical Method with Multipole Electrostatics and Density-Dependent Dispersion Contributions},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {15},
+  number  = {3},
+  pages   = {1652--1671},
+  year    = {2019},
+  doi     = {10.1021/acs.jctc.8b01176},
+  note    = {The low level of \texttt{calc\_type='QM/XTB2'}}
+}

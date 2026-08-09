@@ -8,13 +8,17 @@ dependencies:
   - python>=3.13
   - numpy
   - matplotlib
+  - pandas
   - ase
   - scipy
   - pip
   - pytest
   - plumed
   - py-plumed
-  - sella
 
   - pip:
       - git+https://github.com/LouieSlocombe/geodesic_interpolate.git
+      # conda-forge's sella has no build past Python 3.10, so it comes from
+      # PyPI instead. This is the [ts] extra; drop it if you do not need
+      # optimise_ts / optimise_irc.
+      - sella

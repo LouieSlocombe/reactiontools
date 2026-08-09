@@ -7,6 +7,9 @@ works out which atoms form each half of a stacked dimer, and
 :func:`get_best_flip_and_face_bases` swaps those halves over to give the
 flipped structure, ready to pass to
 :func:`~reactiontools.tools_reaction.prepare_neb`.
+
+:func:`swap_bonding_configuration` does the same job for the much smaller case
+of a proton transfer, moving one hydrogen across a hydrogen bond.
 """
 
 from itertools import permutations
@@ -471,3 +474,42 @@ def get_best_flip_and_face_bases(
         )
 
     return swapped
+
+
+def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index):
+    """
+    Swap the bonding configuration from O-H...O to O...H-O in an Atoms object.
+
+    Builds the product end state of a proton transfer: the hydrogen is moved
+    to the acceptor side of the hydrogen bond, keeping the same bond length it
+    had to the donor, so the result is a sensible starting geometry for
+    :func:`~reactiontools.tools_reaction.optimise_geom` and then a band.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        The ASE Atoms object.  Not modified; a copy is returned.
+    donor_index : int
+        The index of the donor oxygen atom.
+    hydrogen_index : int
+        The index of the hydrogen atom.
+    acceptor_index : int
+        The index of the acceptor oxygen atom.
+
+    Returns
+    -------
+    ase.Atoms
+        The updated Atoms object with the swapped bonding configuration.
+    """
+    atoms = atoms.copy()
+    donor_pos = atoms.positions[donor_index]
+    hydrogen_pos = atoms.positions[hydrogen_index]
+    acceptor_pos = atoms.positions[acceptor_index]
+
+    direction = acceptor_pos - donor_pos
+    direction /= np.linalg.norm(direction)
+    new_hydrogen_pos = acceptor_pos - direction * np.linalg.norm(hydrogen_pos - donor_pos)
+
+    atoms.positions[hydrogen_index] = new_hydrogen_pos
+
+    return atoms

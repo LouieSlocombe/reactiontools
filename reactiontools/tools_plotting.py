@@ -4,12 +4,14 @@ import numpy as np
 from ase import Atoms
 from ase.io import read
 from ase.visualize.plot import plot_atoms
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from pathlib import Path
 from scipy.interpolate import make_interp_spline
 
+from .tools_fes import plot_fes_1d
 from .tools_reaction import get_neb_path
+# Re-exported: the styling helpers used to live here, and callers import them
+# from this module.
+from .tools_style import ax_plot, n_plot  # noqa: F401
 
 C_CYCLE = ("#D4447E", "#2F3E56", "#5FABA2", "#E9A66C", "#7B6CA8", "#9AA5B1")
 
@@ -18,85 +20,6 @@ _ATOM_VIEWS = {"top": "0x,0y,0z",
                "side": "-90x,0y,0z",
                "front": "-90x,-90y,0z",
                "tilted": "300x,0y,0z"}
-
-# Setting plot aesthetics for better visibility
-plt.rcParams['axes.linewidth'] = 2.0
-
-
-def n_plot(xlab: str,
-           ylab: str,
-           xs: int = 14,
-           ys: int = 14
-           ) -> None:
-    """Apply a consistent styling to the current matplotlib axes.
-
-    This convenience function configures tick visibility, sizes and label
-    fonts for the current pyplot axes and sets x/y labels.
-
-    Parameters
-    ----------
-    xlab : str
-        Label for the x-axis.
-    ylab : str
-        Label for the y-axis.
-    xs : int, optional
-        Font size for axis labels on the x-axis (default 14).
-    ys : int, optional
-        Font size for axis labels on the y-axis (default 14).
-
-    Returns
-    -------
-    None
-    """
-    plt.minorticks_on()
-    plt.tick_params(axis='both', which='major', labelsize=ys - 2, direction='in', length=6, width=2)
-    plt.tick_params(axis='both', which='minor', labelsize=ys - 2, direction='in', length=4, width=2)
-    plt.tick_params(axis='both', which='both', top=True, right=True)
-    plt.xlabel(xlab, fontsize=xs)
-    plt.ylabel(ylab, fontsize=ys)
-    plt.tight_layout()
-    return None
-
-
-def ax_plot(fig: Figure,
-            ax: Axes,
-            xlab: str,
-            ylab: str,
-            xs: int = 14,
-            ys: int = 14
-            ) -> None:
-    """Apply a consistent styling to a specific matplotlib Axes object.
-
-    This function mirrors `n_plot` but operates on a provided `Axes` and
-    `Figure` so it can be used when creating subplots.
-
-    Parameters
-    ----------
-    fig : matplotlib.figure.Figure
-        Figure instance that contains the axes.
-    ax : matplotlib.axes.Axes
-        Axes instance to style.
-    xlab : str
-        Label for the x-axis.
-    ylab : str
-        Label for the y-axis.
-    xs : int, optional
-        Font size for axis labels on the x-axis (default 14).
-    ys : int, optional
-        Font size for axis labels on the y-axis (default 14).
-
-    Returns
-    -------
-    None
-    """
-    ax.minorticks_on()
-    ax.tick_params(axis='both', which='major', labelsize=ys - 2, direction='in', length=6, width=2)
-    ax.tick_params(axis='both', which='minor', labelsize=ys - 2, direction='in', length=4, width=2)
-    ax.tick_params(axis='both', which='both', top=True, right=True)
-    ax.set_xlabel(xlab, fontsize=xs)
-    ax.set_ylabel(ylab, fontsize=ys)
-    fig.tight_layout()
-    return None
 
 
 def plot_images(images,
@@ -504,21 +427,12 @@ def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
     return fig, ax
 
 
-def _load_fes(file):
-    """Read a PLUMED ``fes.dat`` file, converting the free energy to meV.
-
-    Parameters
-    ----------
-    file : str or path-like
-        Path to a PLUMED ``fes.dat``-style file.
-
-    Returns
-    -------
-    tuple of numpy.ndarray
-        ``(cv, fes)`` with the collective variable and the free energy in meV.
-    """
-    cv, fes = np.loadtxt(file, usecols=(0, 1), unpack=True)
-    return cv, fes * 1000.0
+#: Unit conversion applied to every ``fes.dat`` these wrappers read.  ASE works
+#: in eV and that is what ``plumed sum_hills`` writes for an ASE-driven run, so
+#: the surfaces are read as eV and plotted in meV.  A run driven from OpenMM
+#: writes kJ/mol instead -- reach for :mod:`reactiontools.tools_fes` directly
+#: for those, which is where these wrappers send the work anyway.
+_FES_UNITS = {"source_unit": "eV", "energy_unit": "meV"}
 
 
 def _expand_fes_files(files):
@@ -608,11 +522,19 @@ def plot_plumed(file='fes.dat',
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
 
-    cv, fes = _load_fes(file)
-    ax.plot(cv, fes, lw=2, color='black')
+    # shift_min_to_zero=False: sum_hills is normally run with --mintozero, so
+    # shifting again here would hide a surface that was not.
+    fig, ax = plot_fes_1d(file,
+                          fig=fig,
+                          ax=ax,
+                          shift_min_to_zero=False,
+                          x_lab=x_label,
+                          y_lab="Free Energy (meV)",
+                          lw=2,
+                          color='black',
+                          **_FES_UNITS)
     if x_range is not None:
         ax.set_xlim(x_range)
-    ax_plot(fig, ax, x_label, "Free Energy (meV)")
     if save:
         fig.savefig(f"{filename}.png", dpi=600)
         fig.savefig(f"{filename}.pdf")
@@ -680,16 +602,23 @@ def plot_plumed_multi(files,
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=fig_size)
 
+    # One call per file rather than one call with every file, so each curve
+    # keeps its own colour from C_CYCLE.
     for i, (file, label) in enumerate(zip(files, labels)):
-        cv, fes = _load_fes(file)
-        if mintozero:
-            fes = fes - fes.min()
-        ax.plot(cv, fes, lw=2, color=colors[i % len(colors)], label=label)
+        fig, ax = plot_fes_1d(file,
+                              fig=fig,
+                              ax=ax,
+                              labels=[label],
+                              shift_min_to_zero=mintozero,
+                              x_lab=x_label,
+                              y_lab="Free Energy (meV)",
+                              lw=2,
+                              color=colors[i % len(colors)],
+                              **_FES_UNITS)
 
     if x_range is not None:
         ax.set_xlim(x_range)
     ax.legend(frameon=False, fontsize=12)
-    ax_plot(fig, ax, x_label, "Free Energy (meV)")
     if save:
         fig.savefig(f"{filename}.png", dpi=600)
         fig.savefig(f"{filename}.pdf")

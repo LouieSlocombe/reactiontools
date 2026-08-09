@@ -25,6 +25,8 @@ keywords = [
   "saddle-point",
   "metadynamics",
   "plumed",
+  "orca",
+  "free-energy",
   "ase",
 ]
 
@@ -32,9 +34,12 @@ dependencies = [
   "numpy",
   "scipy",
   "matplotlib",
+  "pandas",  # reactiontools/tools_fes.py, reactiontools/tools_orca.py
   "ase>=3.23",
   "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
 ]
+# ORCA is needed at runtime by reactiontools.tools_orca but is licensed
+# separately and cannot be installed from PyPI; see build_tools/README.md.
 
 classifiers = [
   "Development Status :: 3 - Alpha",
