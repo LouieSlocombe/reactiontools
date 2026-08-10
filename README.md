@@ -149,6 +149,73 @@ The flag never costs you the work already done: `optimise_neb` writes
 reporting either, so the trajectories are on disk to restart from even when the
 call raises.
 
+### Continuing a band
+
+A band that ran out of steps is not wasted work — it is a better starting path
+than any interpolation. `restart_neb` takes the images back and builds a fresh
+NEB around them:
+
+```python
+from reactiontools import optimise_neb, restart_neb
+
+images = optimise_neb(neb, fmax=0.05, steps=200)
+if not images[0].info["converged"]:
+    images = optimise_neb(restart_neb(images, calc), fmax=0.05, steps=500)
+```
+
+The same call covers the other reasons to go round again: tighten `fmax`, swap
+in a better calculator, or turn on climbing for a second pass having left it
+off for the first, which is the usual way to run a band that is expensive to
+converge.
+
+```python
+neb = restart_neb(images, better_calc, climb=True)
+```
+
+From disk it is the last `n_images` entries of the trajectory, since the
+optimiser writes the whole band on every step:
+
+```python
+from ase.io import read
+
+images = read("ts.traj", index="-7:")
+neb = restart_neb(images, calc)
+```
+
+Pass `n_images` to resample the band on the way in — for a path too coarse to
+resolve the barrier, or one whose images have bunched up, since resampling
+spaces them evenly along the path:
+
+```python
+neb = restart_neb(images, calc, n_images=11)
+```
+
+`restart_parallel_neb` is the same thing over sockets, and is a context manager
+like `prepare_parallel_neb`. It costs less than starting a parallel band from
+scratch: a band read back from a trajectory carries its endpoint energies, so
+those are reused rather than priced through a socket.
+
+```python
+with restart_parallel_neb(images, make_calc, timeout=600) as neb:
+    images = optimise_neb(neb, fmax=0.05, steps=500)
+```
+
+Both copy the images they are given, so the band you passed in stays as it was
+— it is what to fall back on if the restart goes worse than the run it
+continues. Neither interpolates, so there is no `geo_int` argument.
+
+**Give the restart the same band settings as the run it continues.** A band
+records its geometries and nothing else, so `rm_ro_trans`, `k` and `climb` all
+have to be supplied again. `rm_ro_trans` is the one that bites: it defaults to
+`True`, as in `prepare_neb`, and leaving it there for the Al(100) slab from the
+quickstart — built with `rm_ro_trans=False`, being periodic and constrained —
+stops the continued band converging just as surely as it would have stopped the
+first one. Continuing that quickstart properly means:
+
+```python
+neb = restart_neb(images, calc, climb=True, rm_ro_trans=False)
+```
+
 ### Minimising with a socket calculator
 
 `optimise_geom` and `optimise_reactant_product` take the same `use_socket`,
@@ -167,7 +234,8 @@ This needs a calculator ASE knows how to launch as an i-PI client — built-in
 support covers `Espresso`, `Aims` and `Siesta`. A calculator without that
 support, such as EMT, will fail with `use_socket=True`.
 
-Already have a band on disk? Read it back and plot it directly:
+Already have a band on disk? Read it back and plot it directly — or hand it to
+`restart_neb` and carry on relaxing it:
 
 ```python
 from ase.calculators.emt import EMT
@@ -181,7 +249,8 @@ plot_neb(images, EMT(), smooth=True)
 
 Images read back from a trajectory already carry their energies, so `plot_neb`
 reuses them and only falls back to the calculator you pass for images that have
-none.
+none. One thing they do not carry is `info["converged"]`, which is written onto
+the images `optimise_neb` returns rather than into the trajectory itself.
 
 ### Running the images in parallel
 
@@ -349,7 +418,9 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `optimise_geom(atoms, calc, ..., use_socket=False)` | Relax a structure with BFGS and return the final image. `use_socket=True` drives `calc` over an ASE `SocketIOCalculator`. |
 | `optimise_reactant_product(reactant, product, calc, ..., use_socket=False)` | Relax both endpoints independently, one after the other. Reports the two separately. |
 | `prepare_neb(reactant, product, calc, n_images=5, climb=True, geo_int=True, k=2.0, parallel=False)` | Build a configured `ase.mep.NEB`, interpolating geodesically or with IDPP. `parallel=True` evaluates images concurrently. |
+| `restart_neb(images, calc, n_images=None, climb=True, ...)` | Build a band from one already relaxed, to continue it rather than interpolate afresh. `n_images` resamples on the way in. |
 | `prepare_parallel_neb(reactant, product, make_calc, n_images=5, ...)` | Context manager giving each interior image its own socket calculator, so the images are evaluated concurrently. |
+| `restart_parallel_neb(images, make_calc, n_images=None, ...)` | `restart_neb` over sockets, reusing the endpoint energies stored with the band. |
 | `socket_calculators(n_calculators, make_calc=None, ...)` | Context manager opening a pool of `SocketIOCalculator`s, one socket each, closed on exit. |
 | `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj')` | Relax the band and return the final images. |
 | `ConvergenceWarning`, `ConvergenceError` | Warned, or raised under `raise_on_unconverged=True`, when an `optimise_*` run hits its step limit. |

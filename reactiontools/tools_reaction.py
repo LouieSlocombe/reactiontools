@@ -425,6 +425,120 @@ def _build_band(reactant, product,
     return neb
 
 
+def _validate_band(images):
+    """Check a sequence of images can be relaxed as a band, and listify it.
+
+    ASE builds a two-image NEB happily and then fails with an ``IndexError``
+    from inside the tangent calculation, because there is no interior image to
+    take a tangent between. Catching it here says what is actually wrong.
+
+    Parameters
+    ----------
+    images : sequence of ase.Atoms
+        Band to check.
+
+    Returns
+    -------
+    list of ase.Atoms
+        The same images as a list, so a one-shot iterator can be indexed.
+
+    Raises
+    ------
+    ValueError
+        If there are fewer than three images.
+    """
+    images = list(images)
+    if len(images) < 3:
+        raise ValueError(
+            f"A band needs at least 3 images to leave an interior image to "
+            f"relax, got {len(images)}")
+    return images
+
+
+def _band_from_images(images,
+                      n_images,
+                      climb,
+                      rm_ro_trans,
+                      k,
+                      parallel=False,
+                      world=None):
+    """Build a NEB from an existing band, interpolating nothing.
+
+    The counterpart to :func:`_build_band`: the images are already where they
+    belong, so the only work is optionally re-spacing them and handing them to
+    ASE. Shared by :func:`restart_neb` and :func:`restart_parallel_neb`, which
+    differ only in how they attach calculators afterwards.
+
+    Parameters
+    ----------
+    images : sequence of ase.Atoms
+        Band to continue from. Copied, so the caller keeps the images it
+        passed in — they are what to fall back on if the restart goes worse
+        than the run it continues.
+    n_images : int or None
+        Resample the band to this many images with :func:`resample_path`.
+        ``None`` keeps it as it is.
+    climb, rm_ro_trans, k, parallel, world
+        As for :func:`_build_band`.
+
+    Returns
+    -------
+    ase.mep.NEB
+        Band with ``image.calc`` still ``None`` throughout.
+
+    Raises
+    ------
+    ValueError
+        If there are fewer than three images, before or after resampling.
+    """
+    images = _validate_band(images)
+
+    if n_images is not None:
+        images = _validate_band(resample_path(images, n_images))
+
+    band = [image.copy() for image in images]
+    for image in band:
+        # Whether the run that produced these images converged says nothing
+        # about the band they are about to become, and a stale True is worse
+        # than no answer.
+        image.info.pop("converged", None)
+
+    return NEB(band,
+               climb=climb,
+               remove_rotation_and_translation=rm_ro_trans,
+               k=k,
+               method='improvedtangent',
+               parallel=parallel,
+               world=world)
+
+
+def _attach_calculators(neb, calc):
+    """Give every image its own copy of ``calc`` and evaluate the band once.
+
+    Parameters
+    ----------
+    neb : ase.mep.NEB
+        Band whose images carry no calculators yet.
+    calc : ase.calculators.Calculator
+        Calculator to copy onto each image.
+
+    Returns
+    -------
+    ase.mep.NEB
+        The same band, primed.
+    """
+    # deepcopy, not copy: shallow copies of a calculator that has already run
+    # share its internal arrays, so the images overwrite each other's forces.
+    for image in neb.images:
+        image.calc = copy.deepcopy(calc)
+
+    # Evaluate once the geometries are final, and through the NEB itself
+    # rather than image by image: that's what makes parallel=True actually
+    # run the images concurrently instead of always evaluating them in turn.
+    neb.get_forces()
+    return neb
+
+
 def prepare_neb(reactant, product, calc,
                 n_images=5,
                 climb=True,
@@ -475,17 +589,91 @@ def prepare_neb(reactant, product, calc,
                       n_images, climb, rm_ro_trans, geo_int, k,
                       parallel=parallel,
                       world=world)
+    return _attach_calculators(neb, calc)
 
-    # deepcopy, not copy: shallow copies of a calculator that has already run
-    # share its internal arrays, so the images overwrite each other's forces.
-    for image in neb.images:
-        image.calc = copy.deepcopy(calc)
 
-    # Evaluate once the geometries are final, and through the NEB itself
-    # rather than image by image: that's what makes parallel=True actually
-    # run the images concurrently instead of always evaluating them in turn.
-    neb.get_forces()
-    return neb
+def restart_neb(images, calc,
+                n_images=None,
+                climb=True,
+                rm_ro_trans=True,
+                k=2.0,
+                parallel=False,
+                world=None):
+    """Build a NEB from a band that has already been relaxed once.
+
+    :func:`prepare_neb` interpolates a fresh band between two endpoints, which
+    throws away everything a previous run learned. This takes the band itself,
+    so an optimisation that ran out of steps can be continued, a converged one
+    tightened, or the whole thing re-run against a better calculator, each
+    starting from the path already found rather than from a straight line.
+
+    The usual source is whatever :func:`optimise_neb` returned. From disk it
+    is the last ``n_images`` entries of the trajectory, since the optimiser
+    writes the whole band on every step::
+
+        images = read("ts.traj", index="-7:")
+
+    A band records its geometries and nothing else, so the settings of the run
+    that produced it have to be given again here. ``rm_ro_trans`` is the one
+    that bites: it defaults to ``True``, as in :func:`prepare_neb`, and
+    leaving it there for the periodic or constrained system that was built
+    with ``rm_ro_trans=False`` stops the continued band converging just as
+    surely as it would have stopped the first one.
+
+    Parameters
+    ----------
+    images : sequence of ase.Atoms
+        Band to continue from, endpoints included. Copied, so the caller keeps
+        the originals. Any calculators they carry are dropped in favour of
+        ``calc``.
+    calc : ase.calculators.Calculator
+        Calculator copied onto each image, as in :func:`prepare_neb`. Needed
+        even when continuing with the same one as before, because the images
+        come back from a trajectory holding only stored results.
+    n_images : int or None, optional
+        Resample the band to this many images with :func:`resample_path`
+        before relaxing it, for a path too coarse to resolve the barrier.
+        ``None`` keeps the images as they are. Note that resampling spaces the
+        images evenly along the path, so passing the count the band already
+        has is not a no-op — it re-spaces a band whose images have bunched up.
+    climb : bool, optional
+        Enable the climbing-image NEB variant. Turning this on for a second
+        pass, having left it off for the first, is the standard way to run a
+        band that is expensive to converge.
+    rm_ro_trans : bool, optional
+        Remove rigid-body rotation and translation. Give this the same value
+        the original run had; see above.
+    k : float, optional
+        Spring constant passed to ASE's NEB.
+    parallel : bool, optional
+        Evaluate the interior images concurrently. See :func:`prepare_neb`.
+    world : object, optional
+        MPI communicator used to distribute images. Defaults to
+        ``ase.parallel.world``.
+
+    Returns
+    -------
+    ase.mep.NEB
+        Configured band, ready for :func:`optimise_neb`.
+
+    Raises
+    ------
+    ValueError
+        If fewer than three images are given, or asked for.
+
+    Examples
+    --------
+    Continue an unconverged band, with a tighter criterion and climbing on::
+
+        images = optimise_neb(neb, fmax=0.1, steps=100)
+        if not images[0].info["converged"]:
+            neb = restart_neb(images, calc, climb=True, rm_ro_trans=False)
+            images = optimise_neb(neb, fmax=0.05, steps=500)
+    """
+    neb = _band_from_images(images, n_images, climb, rm_ro_trans, k,
+                            parallel=parallel,
+                            world=world)
+    return _attach_calculators(neb, calc)
 
 
 def optimise_neb(neb,
@@ -678,6 +866,72 @@ def socket_calculators(n_calculators, make_calc=None,
         yield calculators
 
 
+def _require_single_rank(name):
+    """Refuse to run under more than one MPI rank.
+
+    The parallelism here is threads and sockets, so the ranks belong to the
+    clients, not the driver. Under ``mpirun`` ASE would distribute the images
+    over MPI ranks instead and every rank would try to bind the same sockets,
+    so this raises rather than hanging.
+
+    Parameters
+    ----------
+    name : str
+        Name of the calling function, quoted in the error message.
+
+    Raises
+    ------
+    RuntimeError
+        If more than one MPI rank is running.
+    """
+    if world.size != 1:
+        raise RuntimeError(
+            f"{name} parallelises over sockets within one process, but "
+            f"{world.size} MPI ranks are running. Run it without mpirun and "
+            f"give the clients the ranks instead.")
+
+
+@contextmanager
+def _parallel_band(neb, energies, make_calc, socket_kwargs):
+    """Put a built band onto a pool of socket calculators.
+
+    Only the interior images need sockets. The endpoints are pinned to a fixed
+    energy, reusing one they already carry if there is one and otherwise
+    pricing them through the first socket. Without pinning, ``rm_ro_trans``
+    would have the band recompute the final endpoint on every step, for an
+    energy that rigid-body motion cannot change.
+
+    Parameters
+    ----------
+    neb : ase.mep.NEB
+        Band whose images carry no calculators yet.
+    energies : sequence of (float or None)
+        Known energies of the first and last image, ``None`` where unknown.
+    make_calc : callable or None
+        Builds the calculator for each interior image; see
+        :func:`socket_calculators`.
+    socket_kwargs : dict
+        Passed to :func:`socket_calculators`.
+
+    Yields
+    ------
+    ase.mep.NEB
+        The band, wired up. The sockets close when the block exits.
+    """
+    with socket_calculators(len(neb.images) - 2, make_calc,
+                            **socket_kwargs) as calcs:
+        for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
+            if energy is None:
+                endpoint.calc = calcs[0]
+                energy = endpoint.get_potential_energy()
+            endpoint.calc = _FixedEnergy(energy)
+
+        for image, calc in zip(neb.images[1:-1], calcs):
+            image.calc = calc
+
+        yield neb
+
+
 @contextmanager
 def prepare_parallel_neb(reactant, product, make_calc,
                          n_images=5,
@@ -765,16 +1019,11 @@ def prepare_parallel_neb(reactant, product, make_calc,
         # The sockets are shut by now, but the band carries its energies.
         ts = get_ts_image(images)
     """
-    n_interior = n_images - 2
-    if n_interior < 1:
+    if n_images - 2 < 1:
         raise ValueError(
             f"n_images must be at least 3 to leave an interior image to "
             f"relax, got {n_images}")
-    if world.size != 1:
-        raise RuntimeError(
-            f"prepare_parallel_neb parallelises over sockets within one "
-            f"process, but {world.size} MPI ranks are running. Run it "
-            f"without mpirun and give the clients the ranks instead.")
+    _require_single_rank("prepare_parallel_neb")
 
     # Read the endpoint energies before copying: Atoms.copy() drops the
     # calculator, and with it the energy the endpoint optimisation left.
@@ -784,17 +1033,92 @@ def prepare_parallel_neb(reactant, product, make_calc,
                       n_images, climb, rm_ro_trans, geo_int, k,
                       parallel=True)
 
-    with socket_calculators(n_interior, make_calc, **socket_kwargs) as calcs:
-        for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
-            if energy is None:
-                endpoint.calc = calcs[0]
-                energy = endpoint.get_potential_energy()
-            endpoint.calc = _FixedEnergy(energy)
+    with _parallel_band(neb, energies, make_calc, socket_kwargs) as band:
+        yield band
 
-        for image, calc in zip(neb.images[1:-1], calcs):
-            image.calc = calc
 
-        yield neb
+@contextmanager
+def restart_parallel_neb(images, make_calc,
+                         n_images=None,
+                         climb=True,
+                         rm_ro_trans=True,
+                         k=2.0,
+                         **socket_kwargs):
+    """Continue an existing band over sockets, evaluating its images at once.
+
+    :func:`restart_neb` for the case where the images are expensive enough to
+    want one client each — the same relationship
+    :func:`prepare_parallel_neb` has to :func:`prepare_neb`, and all three of
+    that function's caveats apply here too: run it as a single process, only
+    the interior images get sockets, and set a ``timeout``.
+
+    A band read back from a trajectory carries its endpoint energies in the
+    single-point calculators ASE stores with it, so those are reused and the
+    endpoints cost nothing to pin — the case
+    :func:`prepare_parallel_neb` has to fall back to a socket for whenever the
+    endpoints were not relaxed in the same session.
+
+    As for :func:`restart_neb`, the settings of the run being continued have
+    to be given again, ``rm_ro_trans`` above all.
+
+    Parameters
+    ----------
+    images : sequence of ase.Atoms
+        Band to continue from, endpoints included. Copied, so the caller keeps
+        the originals.
+    make_calc : callable or None
+        Called as ``make_calc(index)`` to build the calculator for interior
+        image ``index``, counting from zero. Give each one its own working
+        directory. Pass ``None`` to launch the clients yourself.
+    n_images : int or None, optional
+        Resample the band to this many images before relaxing it. See
+        :func:`restart_neb`.
+    climb : bool, optional
+        Enable the climbing-image NEB variant.
+    rm_ro_trans : bool, optional
+        Remove rigid-body rotation and translation. Give this the same value
+        the original run had; see above.
+    k : float, optional
+        Spring constant passed to ASE's NEB.
+    **socket_kwargs
+        Passed to :func:`socket_calculators`: ``make_launcher``,
+        ``unixsocket``, ``port``, ``timeout`` and ``log``.
+
+    Yields
+    ------
+    ase.mep.NEB
+        Configured band, ready for :func:`optimise_neb`. The sockets stay open
+        for the lifetime of the block and close on the way out, so the band
+        must be optimised inside it.
+
+    Raises
+    ------
+    ValueError
+        If fewer than three images are given, or asked for.
+    RuntimeError
+        If more than one MPI rank is running.
+
+    Examples
+    --------
+    Pick a run back up where it stopped, with more steps::
+
+        images = read("ts.traj", index="-7:")
+
+        with restart_parallel_neb(images, make_calc, timeout=600) as neb:
+            images = optimise_neb(neb, fmax=0.05, steps=500)
+    """
+    _require_single_rank("restart_parallel_neb")
+    images = _validate_band(images)
+
+    # Read the endpoint energies before copying, as above. resample_path
+    # passes the endpoints through untouched, so these stay right either way.
+    energies = [_cached_energy(images[0]), _cached_energy(images[-1])]
+
+    neb = _band_from_images(images, n_images, climb, rm_ro_trans, k,
+                            parallel=True)
+
+    with _parallel_band(neb, energies, make_calc, socket_kwargs) as band:
+        yield band
 
 
 def get_ts_image(neb_images, calc=None):

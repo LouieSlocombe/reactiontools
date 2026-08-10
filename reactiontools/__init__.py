@@ -5,9 +5,10 @@ The package is organised into six modules, all of which are re-exported here:
 ``tools_reaction``
     Build, optimise and post-process nudged elastic band (NEB) paths, either
     one image at a time or with the images spread over socket calculators,
-    refine the top of a band into a true saddle point and follow the intrinsic
-    reaction coordinate away from it, and take quick geodesic guesses at a
-    path or a transition state.
+    continue a band that has already been relaxed once, refine the top of a
+    band into a true saddle point and follow the intrinsic reaction coordinate
+    away from it, and take quick geodesic guesses at a path or a transition
+    state.
 ``tools_orca``
     Build ASE ORCA calculators from a few presets, optimise a geometry with
     ORCA's own driver, and run a GOAT conformer search.
@@ -86,8 +87,10 @@ from .tools_reaction import (ConvergenceError,
                              optimise_geom,
                              optimise_reactant_product,
                              prepare_neb,
+                             restart_neb,
                              socket_calculators,
                              prepare_parallel_neb,
+                             restart_parallel_neb,
                              optimise_neb,
                              get_ts_image,
                              optimise_ts,
@@ -110,8 +113,10 @@ __all__ = [
     "optimise_geom",
     "optimise_reactant_product",
     "prepare_neb",
+    "restart_neb",
     "socket_calculators",
     "prepare_parallel_neb",
+    "restart_parallel_neb",
     "optimise_neb",
     "get_ts_image",
     "optimise_ts",

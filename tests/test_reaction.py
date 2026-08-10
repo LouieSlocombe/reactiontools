@@ -11,6 +11,7 @@ from ase.build import add_adsorbate, fcc100, molecule
 from ase.calculators.emt import EMT
 from ase.calculators.socketio import PySocketIOClient, SocketIOCalculator
 from ase.constraints import FixAtoms
+from ase.io import read
 from ase.mep import NEB
 
 from reactiontools import (ConvergenceError,
@@ -27,6 +28,8 @@ from reactiontools import (ConvergenceError,
                            prepare_neb,
                            prepare_parallel_neb,
                            resample_path,
+                           restart_neb,
+                           restart_parallel_neb,
                            socket_calculators,
                            stitch_path)
 from reactiontools import tools_reaction
@@ -537,6 +540,164 @@ class TestOptimiseNeb:
         assert Path("band.traj").exists()
 
 
+@pytest.fixture
+def partial_band(calc, endpoints):
+    """A band stopped well short of convergence, as a restart source.
+
+    Comes back through the trajectory, so the images carry stored results
+    exactly as a band read off disk in a later session would.
+    """
+    reactant, product = endpoints
+    neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+    with pytest.warns(ConvergenceWarning):
+        return optimise_neb(neb, fmax=0.01, steps=3, ts_traj="partial.traj")
+
+
+class TestRestartNeb:
+    def test_builds_a_band_of_the_same_length(self, calc, partial_band):
+        neb = restart_neb(partial_band, calc)
+
+        assert isinstance(neb, NEB)
+        assert len(neb.images) == len(partial_band)
+
+    def test_starts_from_the_band_it_was_given(self, calc, partial_band):
+        """The whole point: continue the path, do not rebuild it.
+
+        With rm_ro_trans off nothing re-aligns the images, so the positions
+        must come through untouched.
+        """
+        neb = restart_neb(partial_band, calc, rm_ro_trans=False)
+
+        for restarted, original in zip(neb.images, partial_band):
+            assert restarted.positions == pytest.approx(original.positions)
+
+    def test_carries_the_energies_of_the_band_it_continues(self, calc,
+                                                           partial_band):
+        expected = [image.get_potential_energy() for image in partial_band]
+
+        neb = restart_neb(partial_band, calc)
+
+        assert [image.get_potential_energy() for image in neb.images] == \
+            pytest.approx(expected)
+
+    def test_differs_from_a_freshly_interpolated_band(self, calc, endpoints,
+                                                      partial_band):
+        """Guards the test above: it would also pass if nothing had moved."""
+        reactant, product = endpoints
+        fresh = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        continued = [image.get_potential_energy()
+                     for image in restart_neb(partial_band, calc).images]
+        interpolated = [image.get_potential_energy() for image in fresh.images]
+
+        assert continued != pytest.approx(interpolated)
+
+    def test_leaves_the_callers_images_alone(self, calc, partial_band):
+        """The band passed in is the fallback if the restart goes worse."""
+        positions = [image.positions.copy() for image in partial_band]
+
+        neb = restart_neb(partial_band, calc)
+        neb.get_forces()
+
+        for image, before in zip(partial_band, positions):
+            assert image.positions == pytest.approx(before)
+
+    def test_drops_a_stale_convergence_flag(self, calc, partial_band):
+        """The old run's verdict is not true of the band about to be relaxed."""
+        assert partial_band[0].info["converged"] is False
+
+        neb = restart_neb(partial_band, calc)
+
+        assert all("converged" not in image.info for image in neb.images)
+
+    def test_gives_each_image_its_own_calculator(self, calc, partial_band):
+        """ASE refuses a band whose images share one."""
+        neb = restart_neb(partial_band, calc)
+
+        assert len({id(image.calc) for image in neb.images}) == len(neb.images)
+
+    def test_can_turn_on_climbing_for_the_second_pass(self, calc, partial_band):
+        """Running without climb and then with it is the standard two-pass."""
+        neb = restart_neb(partial_band, calc, climb=True)
+
+        assert neb.climb is True
+
+    def test_resamples_when_asked(self, calc, partial_band):
+        neb = restart_neb(partial_band, calc, n_images=9)
+
+        assert len(neb.images) == 9
+
+    def test_resampling_keeps_the_endpoints(self, calc, partial_band):
+        neb = restart_neb(partial_band, calc, n_images=9, rm_ro_trans=False)
+
+        assert neb.images[0].positions == pytest.approx(partial_band[0].positions)
+        assert neb.images[-1].positions == pytest.approx(partial_band[-1].positions)
+
+    def test_rejects_a_band_with_no_interior(self, calc, partial_band):
+        """ASE would take it and fail later inside the tangent calculation."""
+        with pytest.raises(ValueError, match="at least 3"):
+            restart_neb([partial_band[0], partial_band[-1]], calc)
+
+    def test_rejects_resampling_below_three_images(self, calc, partial_band):
+        with pytest.raises(ValueError, match="at least 3"):
+            restart_neb(partial_band, calc, n_images=2)
+
+    def test_accepts_a_band_read_back_from_disk(self, calc, partial_band):
+        """The band on disk is what a later session actually has to work with."""
+        from_disk = read("partial.traj", index=f"-{len(partial_band)}:")
+
+        neb = restart_neb(from_disk, calc)
+
+        assert len(neb.images) == len(partial_band)
+        assert np.isfinite(neb.get_forces()).all()
+
+    def test_the_continued_band_can_be_optimised_further(self, calc,
+                                                         partial_band):
+        neb = restart_neb(partial_band, calc)
+
+        # Whether this toy band reaches fmax is beside the point; that it
+        # relaxes and writes a trajectory at all is what is being checked.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            images = optimise_neb(neb, fmax=0.5, steps=50,
+                                  ts_traj="restarted.traj")
+
+        assert len(images) == len(partial_band)
+        assert Path("restarted.traj").exists()
+
+    def test_reaches_the_same_barrier_as_an_uninterrupted_run(self,
+                                                              slab_endpoints):
+        """Stopping and continuing must land where running straight through does.
+
+        The Al(100) hop from the README, which converges either way. Note
+        rm_ro_trans=False on the restart as well: the band records geometries
+        and nothing else, so a setting the first run needed has to be given
+        again, and this one stops a periodic band converging if it is not.
+        """
+        reactant, product = slab_endpoints
+        settings = {"n_images": 5, "climb": True, "rm_ro_trans": False,
+                    "geo_int": False}
+
+        with pytest.warns(ConvergenceWarning):
+            partial = optimise_neb(
+                prepare_neb(reactant, product, EMT(), **settings),
+                fmax=0.05, steps=3, ts_traj="stopped.traj")
+        continued = optimise_neb(
+            restart_neb(partial, EMT(), climb=True, rm_ro_trans=False),
+            fmax=0.05, steps=200, ts_traj="continued.traj")
+
+        straight_through = optimise_neb(
+            prepare_neb(reactant, product, EMT(), **settings),
+            fmax=0.05, steps=200, ts_traj="straight.traj")
+
+        assert continued[0].info["converged"] is True
+        barrier = (get_ts_image(continued).get_potential_energy()
+                   - continued[0].get_potential_energy())
+        expected = (get_ts_image(straight_through).get_potential_energy()
+                    - straight_through[0].get_potential_energy())
+        assert barrier == pytest.approx(expected, abs=1e-3)
+
+
 def emt_launcher(index):
     """Launch EMT in its own process, as a stand-in for an external code.
 
@@ -834,6 +995,106 @@ class TestPrepareParallelNeb:
         assert ([image.get_potential_energy() for image in parallel]
                 == pytest.approx([image.get_potential_energy()
                                   for image in serial], abs=1e-6))
+
+
+class TestRestartParallelNeb:
+    def test_builds_a_band_of_the_same_length(self, partial_band):
+        with restart_parallel_neb(partial_band, None) as neb:
+            assert isinstance(neb, NEB)
+            assert len(neb.images) == len(partial_band)
+
+    def test_asks_ase_to_spread_the_images(self, partial_band):
+        with restart_parallel_neb(partial_band, None) as neb:
+            assert neb.parallel is True
+
+    def test_starts_from_the_band_it_was_given(self, partial_band):
+        with restart_parallel_neb(partial_band, None,
+                                  rm_ro_trans=False) as neb:
+            for restarted, original in zip(neb.images, partial_band):
+                assert restarted.positions == pytest.approx(original.positions)
+
+    def test_gives_each_interior_image_its_own_socket(self, partial_band):
+        with restart_parallel_neb(partial_band, None) as neb:
+            interior = [image.calc for image in neb.images[1:-1]]
+
+        assert len(interior) == 3
+        assert all(isinstance(c, SocketIOCalculator) for c in interior)
+        assert len({id(c) for c in interior}) == 3
+
+    def test_reuses_the_endpoint_energies_stored_with_the_band(self,
+                                                               partial_band):
+        """A band off disk carries them, so no client is needed to price them.
+
+        make_calc=None here means the servers have nothing behind them: if
+        the endpoints were not pinned from the stored values this would hang
+        or fail rather than pass.
+        """
+        expected = [partial_band[0].get_potential_energy(),
+                    partial_band[-1].get_potential_energy()]
+
+        with restart_parallel_neb(partial_band, None) as neb:
+            got = [neb.images[0].get_potential_energy(),
+                   neb.images[-1].get_potential_energy()]
+
+        assert got == pytest.approx(expected)
+
+    def test_does_not_give_the_endpoints_sockets(self, partial_band):
+        with restart_parallel_neb(partial_band, None) as neb:
+            ends = [neb.images[0].calc, neb.images[-1].calc]
+
+        assert not any(isinstance(c, SocketIOCalculator) for c in ends)
+
+    def test_closes_the_sockets_on_exit(self, partial_band):
+        with restart_parallel_neb(partial_band, None) as neb:
+            calcs = [image.calc for image in neb.images[1:-1]]
+
+        assert all(c.server is None for c in calcs)
+
+    def test_closes_the_sockets_when_the_block_raises(self, partial_band):
+        with (pytest.raises(RuntimeError, match="band diverged"),
+              restart_parallel_neb(partial_band, None) as neb):
+            calcs = [image.calc for image in neb.images[1:-1]]
+            raise RuntimeError("band diverged")
+
+        assert all(c.server is None for c in calcs)
+
+    def test_leaves_the_callers_images_alone(self, partial_band):
+        positions = [image.positions.copy() for image in partial_band]
+
+        with restart_parallel_neb(partial_band, None):
+            pass
+
+        for image, before in zip(partial_band, positions):
+            assert image.positions == pytest.approx(before)
+
+    def test_resamples_when_asked(self, partial_band):
+        with restart_parallel_neb(partial_band, None, n_images=7) as neb:
+            assert len(neb.images) == 7
+            assert len([i.calc for i in neb.images[1:-1]]) == 5
+
+    def test_rejects_a_band_with_no_interior(self, partial_band):
+        with (pytest.raises(ValueError, match="at least 3"),
+              restart_parallel_neb([partial_band[0], partial_band[-1]], None)):
+            pass
+
+    def test_relaxes_the_band_it_continues(self, slab_endpoints):
+        """End to end: stop a band early, then pick it up over sockets."""
+        reactant, product = slab_endpoints
+
+        neb = prepare_neb(reactant, product, EMT(), n_images=5, climb=True,
+                          rm_ro_trans=False, geo_int=False)
+        with pytest.warns(ConvergenceWarning):
+            partial = optimise_neb(neb, fmax=0.05, steps=3,
+                                   ts_traj="partial_slab.traj")
+
+        with restart_parallel_neb(partial, None, make_launcher=emt_launcher,
+                                  climb=True, rm_ro_trans=False,
+                                  timeout=120) as band:
+            finished = optimise_neb(band, fmax=0.05, steps=200,
+                                    ts_traj="finished.traj")
+
+        assert finished[0].info["converged"] is True
+        assert get_fmax(get_ts_image(finished, EMT())) < 0.05
 
 
 class TestGetTsImage:
