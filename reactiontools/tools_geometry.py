@@ -326,7 +326,9 @@ def optimize_with_fixed_anchors(atoms: Atoms,
                                 calc,
                                 fmax: float = 0.05,
                                 steps: int = 1000,
-                                raise_on_unconverged: bool = False) -> Atoms:
+                                raise_on_unconverged: bool = False,
+                                optimiser=BFGS,
+                                logfile='-') -> Atoms:
     """Relax the two fragments while holding their anchors still.
 
     A structure straight out of :func:`flip_and_face_bases` is rigid-body
@@ -359,6 +361,14 @@ def optimize_with_fixed_anchors(atoms: Atoms,
     raise_on_unconverged : bool, optional
         Raise :exc:`~reactiontools.ConvergenceError` instead of warning when
         the relaxation hits ``steps`` without reaching ``fmax``.
+    optimiser : callable, optional
+        ASE optimiser class to relax with, or anything callable as
+        ``optimiser(atoms, logfile=...)``. Defaults to
+        :class:`~ase.optimize.BFGS`. See
+        :func:`~reactiontools.tools_reaction.optimise_geom`.
+    logfile : str, file object or None, optional
+        Where the optimiser writes its per-step table. ``'-'``, the default,
+        is stdout; a filename writes there instead; ``None`` silences it.
 
     Returns
     -------
@@ -383,8 +393,8 @@ def optimize_with_fixed_anchors(atoms: Atoms,
     atoms_opt = atoms_opt[selection]
 
     atoms_opt.calc = calc
-    optimizer = BFGS(atoms_opt)
-    converged = optimizer.run(fmax=fmax, steps=steps)
+    converged = optimiser(atoms_opt, logfile=logfile).run(fmax=fmax,
+                                                          steps=steps)
 
     # Write the relaxed coordinates back through the full position array:
     # indexing an Atoms object returns a new object, so assigning to
@@ -408,6 +418,8 @@ def get_best_flip_and_face_bases(
         optimise_after: bool = True,
         calc=None,
         raise_on_unconverged: bool = False,
+        optimiser=BFGS,
+        logfile='-',
 ) -> Atoms:
     """Search the reflection signs for the tightest flipped structure.
 
@@ -434,6 +446,11 @@ def get_best_flip_and_face_bases(
     raise_on_unconverged : bool, optional
         Passed to :func:`optimize_with_fixed_anchors`; ignored when
         ``optimise_after`` is ``False``, since nothing is then relaxed.
+    optimiser, logfile
+        Passed to :func:`optimize_with_fixed_anchors` for the single
+        relaxation at the end; the reflection search itself moves the
+        fragments rigidly and never touches the calculator. Ignored when
+        ``optimise_after`` is ``False``.
 
     Returns
     -------
@@ -507,6 +524,8 @@ def get_best_flip_and_face_bases(
             anchor_indices=anchors,
             calc=calc,
             raise_on_unconverged=raise_on_unconverged,
+            optimiser=optimiser,
+            logfile=logfile,
         )
 
     return swapped

@@ -216,12 +216,15 @@ def optimise_geom(atoms, calc,
                   socket_unixsocket=None,
                   socket_log=None,
                   raise_on_unconverged=False,
+                  optimiser=BFGS,
+                  logfile='-',
+                  keep_traj=False,
                   _what="Geometry optimisation"):
-    """Relax a structure with BFGS and return the final image.
+    """Relax a structure and return the final image.
 
-    Whether BFGS actually converged is recorded in ``info["converged"]`` on
-    the returned structure, and a run that hits ``steps`` first warns
-    :class:`ConvergenceWarning`.
+    Whether the optimiser actually converged is recorded in
+    ``info["converged"]`` on the returned structure, and a run that hits
+    ``steps`` first warns :class:`ConvergenceWarning`.
 
     Parameters
     ----------
@@ -234,7 +237,8 @@ def optimise_geom(atoms, calc,
     steps : int, optional
         Maximum number of optimiser steps.
     opti_traj : str, optional
-        Temporary trajectory filename used to store the optimisation.
+        Trajectory filename used to store the optimisation. Deleted on the way
+        out unless ``keep_traj`` says otherwise.
     use_socket : bool, optional
         Drive ``calc`` through an
         ``ase.calculators.socketio.SocketIOCalculator`` instead of calling
@@ -256,6 +260,20 @@ def optimise_geom(atoms, calc,
         ``steps`` without reaching ``fmax``. Worth turning on in a batch
         script, where a silently unrelaxed structure would otherwise be
         carried into everything downstream.
+    optimiser : callable, optional
+        ASE optimiser class to relax with, or anything callable as
+        ``optimiser(atoms, trajectory=..., logfile=...)`` returning an object
+        with a ``run(fmax, steps)``. Defaults to
+        :class:`~ase.optimize.BFGS`. Pass a class for a plain swap
+        (``optimiser=FIRE``) or a ``functools.partial`` to preset an
+        optimiser's own arguments.
+    logfile : str, file object or None, optional
+        Where the optimiser writes its per-step table. ``'-'``, the default,
+        is stdout; a filename writes there instead; ``None`` silences it.
+    keep_traj : bool, optional
+        Keep ``opti_traj`` instead of deleting it. Off by default because a
+        successful relaxation only needs its final structure, and on is what
+        to reach for when one misbehaves and the path it took is the evidence.
 
     Returns
     -------
@@ -266,7 +284,8 @@ def optimise_geom(atoms, calc,
     Raises
     ------
     ConvergenceError
-        If the run did not converge and ``raise_on_unconverged`` is True.
+        If the run did not converge and ``raise_on_unconverged`` is True. The
+        trajectory survives that only if ``keep_traj`` is True.
     """
     atoms = atoms.copy()
     if use_socket:
@@ -277,9 +296,12 @@ def optimise_geom(atoms, calc,
         context = nullcontext(calc)
     with context as live_calc:
         atoms.calc = live_calc
-        converged = BFGS(atoms, trajectory=opti_traj).run(fmax=fmax, steps=steps)
+        converged = optimiser(atoms,
+                              trajectory=opti_traj,
+                              logfile=logfile).run(fmax=fmax, steps=steps)
     atoms = read(opti_traj, index=-1)
-    Path(opti_traj).unlink()
+    if not keep_traj:
+        Path(opti_traj).unlink()
     atoms.calc = calc
     atoms.info["converged"] = _check_converged(
         converged, _what, fmax, steps, raise_on_unconverged)
@@ -295,7 +317,10 @@ def optimise_reactant_product(reactant, product, calc,
                               socket_port=None,
                               socket_unixsocket=None,
                               socket_log=None,
-                              raise_on_unconverged=False):
+                              raise_on_unconverged=False,
+                              optimiser=BFGS,
+                              logfile='-',
+                              keep_traj=False):
     """Optimise reactant and product structures independently.
 
     Each endpoint carries its own ``info["converged"]``, and the two are
@@ -326,6 +351,9 @@ def optimise_reactant_product(reactant, product, calc,
         Raise :exc:`ConvergenceError` on the first endpoint that fails to
         reach ``fmax`` within ``steps``, instead of warning. See
         :func:`optimise_geom`.
+    optimiser, logfile, keep_traj
+        See :func:`optimise_geom`. Both endpoints use the same optimiser and
+        log, and keep their own trajectory under the name given for it.
 
     Returns
     -------
@@ -349,6 +377,9 @@ def optimise_reactant_product(reactant, product, calc,
                              socket_unixsocket=socket_unixsocket,
                              socket_log=socket_log,
                              raise_on_unconverged=raise_on_unconverged,
+                             optimiser=optimiser,
+                             logfile=logfile,
+                             keep_traj=keep_traj,
                              _what="Reactant optimisation")
 
     print('Optimising product...', flush=True)
@@ -361,6 +392,9 @@ def optimise_reactant_product(reactant, product, calc,
                             socket_unixsocket=socket_unixsocket,
                             socket_log=socket_log,
                             raise_on_unconverged=raise_on_unconverged,
+                            optimiser=optimiser,
+                            logfile=logfile,
+                            keep_traj=keep_traj,
                             _what="Product optimisation")
     return reactant, product
 
@@ -680,7 +714,9 @@ def optimise_neb(neb,
                  fmax=0.01,
                  steps=1000,
                  ts_traj='ts.traj',
-                 raise_on_unconverged=False):
+                 raise_on_unconverged=False,
+                 optimiser=BFGS,
+                 logfile='-'):
     """Optimise an NEB band and return the final trajectory images.
 
     A band that runs out of steps warns :class:`ConvergenceWarning` rather
@@ -702,6 +738,14 @@ def optimise_neb(neb,
         ``steps`` without reaching ``fmax``. The top of an unconverged band
         is not a transition state, so this is worth turning on wherever
         :func:`get_ts_image` feeds a barrier straight into a result.
+    optimiser : callable, optional
+        ASE optimiser class to relax the band with; see
+        :func:`optimise_geom`. Defaults to :class:`~ase.optimize.BFGS`.
+        :class:`~ase.optimize.FIRE` is worth trying for a band that BFGS
+        cannot settle, being less easily thrown by the spring forces.
+    logfile : str, file object or None, optional
+        Where the optimiser writes its per-step table. ``'-'``, the default,
+        is stdout; a filename writes there instead; ``None`` silences it.
 
     Returns
     -------
@@ -716,7 +760,9 @@ def optimise_neb(neb,
         If the band did not converge and ``raise_on_unconverged`` is True.
     """
     n_images = len(neb.images)
-    converged = BFGS(neb, trajectory=ts_traj).run(fmax=fmax, steps=steps)
+    converged = optimiser(neb,
+                          trajectory=ts_traj,
+                          logfile=logfile).run(fmax=fmax, steps=steps)
     images = read(ts_traj, index=f"-{n_images}:")
     converged = _check_converged(converged, "NEB optimisation", fmax, steps,
                                  raise_on_unconverged)
@@ -1154,7 +1200,8 @@ def optimise_ts(ts_image, calc,
                 eta=1e-4,
                 gamma=0.1,
                 sella_traj='sella.traj',
-                raise_on_unconverged=False):
+                raise_on_unconverged=False,
+                logfile='-'):
     """Refine a transition-state guess to a true saddle point with Sella.
 
     A NEB band gets close to the saddle but rarely converges tightly onto it,
@@ -1182,6 +1229,11 @@ def optimise_ts(ts_image, calc,
     raise_on_unconverged : bool, optional
         Raise :exc:`ConvergenceError` instead of warning when the search hits
         ``steps`` without reaching ``fmax``.
+    logfile : str, file object or None, optional
+        Where Sella writes its per-step table. ``'-'``, the default, is
+        stdout; a filename writes there instead; ``None`` silences it. The
+        two energy lines printed before the search are not affected. There is
+        no ``optimiser`` argument here: the search is Sella's.
 
     Returns
     -------
@@ -1210,6 +1262,7 @@ def optimise_ts(ts_image, calc,
 
     sella_ts = Sella(ts_image,
                      trajectory=sella_traj,
+                     logfile=logfile,
                      eta=eta,
                      gamma=gamma)
     converged = sella_ts.run(fmax=fmax, steps=steps)
@@ -1229,7 +1282,8 @@ def optimise_irc(ts_image, calc,
                  keep_going=True,
                  irc_f_traj='irc_f.traj',
                  irc_r_traj='irc_r.traj',
-                 raise_on_unconverged=False):
+                 raise_on_unconverged=False,
+                 logfile='-'):
     """Follow the intrinsic reaction coordinate downhill from a saddle point.
 
     Runs Sella's IRC in both directions, which is what confirms that a saddle
@@ -1265,6 +1319,10 @@ def optimise_irc(ts_image, calc,
         direction hits ``steps`` without reaching ``fmax``. A half that
         stopped early has not reached its minimum, so it does not show which
         state that direction connects to — the whole point of running it.
+    logfile : str, file object or None, optional
+        Where Sella writes its per-step table. ``'-'``, the default, is
+        stdout; a filename writes there instead; ``None`` silences it. Both
+        directions share it, so a filename collects the two runs in order.
 
     Returns
     -------
@@ -1291,6 +1349,7 @@ def optimise_irc(ts_image, calc,
     print("Running IRC forward", flush=True)
     sella_irc_f = IRC(irc_f,
                       trajectory=irc_f_traj,
+                      logfile=logfile,
                       dx=dx,
                       eta=eta,
                       gamma=gamma,
@@ -1305,6 +1364,7 @@ def optimise_irc(ts_image, calc,
     print("Running IRC reverse", flush=True)
     sella_irc_r = IRC(irc_r,
                       trajectory=irc_r_traj,
+                      logfile=logfile,
                       dx=dx,
                       eta=eta,
                       gamma=gamma,

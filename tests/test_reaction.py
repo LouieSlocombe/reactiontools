@@ -3,6 +3,7 @@
 import importlib.util
 import os
 import warnings
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,7 @@ from ase.calculators.socketio import PySocketIOClient, SocketIOCalculator
 from ase.constraints import FixAtoms
 from ase.io import read
 from ase.mep import NEB
+from ase.optimize import FIRE, LBFGS
 
 from reactiontools import (ConvergenceError,
                            ConvergenceWarning,
@@ -266,6 +268,57 @@ class TestOptimiseGeom:
 
         assert not Path("scratch.traj").exists()
 
+    def test_uses_the_optimiser_it_is_given(self, calc, water, capsys):
+        optimise_geom(water, calc, fmax=0.05, steps=20, optimiser=FIRE)
+
+        log = capsys.readouterr().out
+        assert "FIRE" in log
+        assert "BFGS" not in log
+
+    def test_accepts_a_factory_for_optimiser_specific_arguments(self, calc):
+        """partial() is how an optimiser's own settings get through."""
+        atoms = molecule("H2O")
+        atoms.positions[1] += [0.2, 0.0, 0.0]
+
+        relaxed = optimise_geom(atoms, calc, fmax=0.05, steps=200,
+                                optimiser=partial(FIRE, a=0.15))
+
+        assert relaxed.info["converged"] is True
+
+    def test_logs_to_stdout_by_default(self, calc, water, capsys):
+        optimise_geom(water, calc, fmax=0.05, steps=5)
+
+        assert "Step" in capsys.readouterr().out
+
+    def test_a_logfile_takes_the_log_off_stdout(self, calc, water, capsys):
+        optimise_geom(water, calc, fmax=0.05, steps=5, logfile="opt.log")
+
+        assert capsys.readouterr().out == ""
+        assert "Step" in Path("opt.log").read_text()
+
+    def test_no_logfile_silences_it(self, calc, water, capsys):
+        optimise_geom(water, calc, fmax=0.05, steps=5, logfile=None)
+
+        assert capsys.readouterr().out == ""
+
+    def test_keeps_the_trajectory_when_asked(self, calc, water):
+        optimise_geom(water, calc, fmax=0.05, steps=5, opti_traj="kept.traj",
+                      keep_traj=True)
+
+        assert Path("kept.traj").exists()
+
+    def test_the_kept_trajectory_survives_a_raise(self, calc):
+        """Keeping it matters most when the run is the one that went wrong."""
+        atoms = molecule("H2O")
+        atoms.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.raises(ConvergenceError):
+            optimise_geom(atoms, calc, fmax=1e-3, steps=2,
+                          opti_traj="kept.traj", keep_traj=True,
+                          raise_on_unconverged=True)
+
+        assert Path("kept.traj").exists()
+
     def test_a_warning_filter_can_promote_it_to_an_error(self, calc):
         """ConvergenceWarning is its own class so a whole script can escalate."""
         atoms = molecule("H2O")
@@ -308,6 +361,26 @@ class TestOptimiseReactantProduct:
 
         assert len(fake_socketio.instances) == 2
         assert all(i.unixsocket == "rt-test" for i in fake_socketio.instances)
+
+    def test_forwards_the_optimiser_and_logfile_to_both(self, calc, water,
+                                                        capsys):
+        optimise_reactant_product(water, water.copy(), calc, fmax=0.05,
+                                  steps=20, optimiser=LBFGS, logfile="rp.log")
+
+        # The package's own progress lines still go to stdout; only the
+        # optimiser's per-step table moves to the file.
+        out = capsys.readouterr().out
+        assert "Optimising reactant" in out and "Optimising product" in out
+        assert "Step" not in out
+        assert Path("rp.log").read_text().count("LBFGS") >= 2
+
+    def test_forwards_keep_traj_to_both(self, calc, water):
+        optimise_reactant_product(water, water.copy(), calc, fmax=0.05,
+                                  steps=5, reactant_opti="r.traj",
+                                  product_opti="p.traj", keep_traj=True)
+
+        assert Path("r.traj").exists()
+        assert Path("p.traj").exists()
 
     def test_reports_the_two_endpoints_separately(self, calc):
         """Both must be named, or one silently stands in for the other.
@@ -502,6 +575,36 @@ class TestOptimiseNeb:
             optimise_neb(neb, fmax=0.5, steps=3, ts_traj="band.traj")
 
         assert Path("band.traj").exists()
+
+    def test_uses_the_optimiser_it_is_given(self, calc, endpoints, capsys):
+        """FIRE is the usual second thing to try on a band BFGS cannot settle."""
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        optimise_neb(neb, fmax=0.5, steps=30, optimiser=FIRE)
+
+        log = capsys.readouterr().out
+        assert "FIRE" in log
+        assert "BFGS" not in log
+
+    def test_a_logfile_takes_the_log_off_stdout(self, calc, endpoints, capsys):
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        with pytest.warns(ConvergenceWarning):
+            optimise_neb(neb, fmax=0.5, steps=3, logfile="band.log")
+
+        assert capsys.readouterr().out == ""
+        assert "Step" in Path("band.log").read_text()
+
+    def test_no_logfile_silences_it(self, calc, endpoints, capsys):
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        with pytest.warns(ConvergenceWarning):
+            optimise_neb(neb, fmax=0.5, steps=3, logfile=None)
+
+        assert capsys.readouterr().out == ""
 
     def test_marks_every_image_with_the_bands_convergence(self, calc, endpoints):
         """A band converges as a whole, so each image carries the same answer."""
@@ -1204,6 +1307,14 @@ class TestOptimiseTs:
 
         assert ts.info["converged"] is True
 
+    def test_a_logfile_takes_sellas_log_off_stdout(self, calc, water, capsys):
+        optimise_ts(water, calc, fmax=0.5, steps=2, logfile="ts.log")
+
+        out = capsys.readouterr().out
+        assert "Initial energy" in out  # the function's own lines stay
+        assert "Step" not in out
+        assert Path("ts.log").exists()
+
     def test_warns_and_records_when_it_runs_out_of_steps(self, calc):
         strained = molecule("H2O")
         strained.positions[1] += [0.5, 0.0, 0.0]
@@ -1239,6 +1350,14 @@ class TestOptimiseIrc:
         path = stitch_path(reverse, forward)
 
         assert len(path) == len(forward) + len(reverse) - 1
+
+    def test_both_directions_share_one_logfile(self, calc, water, capsys):
+        optimise_irc(water, calc, fmax=0.5, steps=2, logfile="irc.log")
+
+        out = capsys.readouterr().out
+        assert "Running IRC forward" in out and "Running IRC reverse" in out
+        assert "Step" not in out
+        assert Path("irc.log").exists()
 
     def test_reports_the_two_directions_separately(self, calc):
         """One direction commonly reaches its minimum while the other does not.

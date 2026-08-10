@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase.build import molecule
+from ase.optimize import FIRE
 
 from reactiontools import (ConvergenceError,
                            ConvergenceWarning,
@@ -242,6 +243,20 @@ class TestOptimizeWithFixedAnchors:
                                               [0, 3], calc, fmax=0.5)
 
         assert relaxed.info["converged"] is True
+
+    def test_uses_the_optimiser_it_is_given(self, calc, dimer, capsys):
+        optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc,
+                                    fmax=0.5, optimiser=FIRE)
+
+        log = capsys.readouterr().out
+        assert "FIRE" in log
+        assert "BFGS" not in log
+
+    def test_no_logfile_silences_it(self, calc, dimer, capsys):
+        optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc,
+                                    fmax=0.5, logfile=None)
+
+        assert capsys.readouterr().out == ""
 
     def test_warns_and_records_when_it_runs_out_of_steps(self, calc, dimer):
         strained = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3])

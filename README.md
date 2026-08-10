@@ -149,6 +149,53 @@ The flag never costs you the work already done: `optimise_neb` writes
 reporting either, so the trajectories are on disk to restart from even when the
 call raises.
 
+### Choosing the optimiser, and where it logs
+
+Every function that relaxes something takes an `optimiser`, defaulting to
+BFGS. Pass any ASE optimiser class — FIRE is the usual second thing to try on
+a band BFGS cannot settle, being less easily thrown by the spring forces:
+
+```python
+from ase.optimize import FIRE
+
+images = optimise_neb(neb, fmax=0.05, optimiser=FIRE)
+```
+
+Anything callable as `optimiser(atoms, trajectory=..., logfile=...)` works, so
+`functools.partial` is how an optimiser's own settings get through:
+
+```python
+from functools import partial
+
+reactant = optimise_geom(reactant, calc, optimiser=partial(FIRE, a=0.15))
+```
+
+`optimise_ts` and `optimise_irc` have no `optimiser` argument — the search
+there is Sella's, which is the point of them.
+
+`logfile` says where the per-step table goes, following ASE's convention:
+`'-'` is stdout and the default, a filename writes there instead, and `None`
+silences it. Useful when a band's log would otherwise bury everything else:
+
+```python
+images = optimise_neb(neb, fmax=0.05, logfile="neb.log")
+```
+
+This covers the optimiser's own output. The few progress lines the package
+prints itself — `Optimising reactant...`, and the energy and force `optimise_ts`
+reports before it starts — still go to stdout.
+
+`optimise_geom` deletes its trajectory once it has read the final structure
+back, since a successful relaxation needs nothing else from it. When one
+misbehaves, the path it took is the evidence, so keep it:
+
+```python
+relaxed = optimise_geom(atoms, calc, opti_traj="opt.traj", keep_traj=True)
+```
+
+That also holds when the run raises: with `keep_traj=True` the trajectory
+survives a `ConvergenceError`, which is exactly the case worth looking at.
+
 ### Continuing a band
 
 A band that ran out of steps is not wasted work — it is a better starting path
@@ -415,19 +462,19 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `get_neb_path(images)` | Cumulative reaction-path distance along a band, starting at zero. |
 | `stitch_path(path1, path2, f_reverse_path=False)` | Join a reactant-side and product-side path into one IRC-like sequence. |
 | `resample_path(path, n_resample)` | Cubic-spline resample a path to a fixed number of images, preserving the endpoints. |
-| `optimise_geom(atoms, calc, ..., use_socket=False)` | Relax a structure with BFGS and return the final image. `use_socket=True` drives `calc` over an ASE `SocketIOCalculator`. |
+| `optimise_geom(atoms, calc, ..., optimiser=BFGS, logfile='-', keep_traj=False)` | Relax a structure and return the final image. `use_socket=True` drives `calc` over an ASE `SocketIOCalculator`. |
 | `optimise_reactant_product(reactant, product, calc, ..., use_socket=False)` | Relax both endpoints independently, one after the other. Reports the two separately. |
 | `prepare_neb(reactant, product, calc, n_images=5, climb=True, geo_int=True, k=2.0, parallel=False)` | Build a configured `ase.mep.NEB`, interpolating geodesically or with IDPP. `parallel=True` evaluates images concurrently. |
 | `restart_neb(images, calc, n_images=None, climb=True, ...)` | Build a band from one already relaxed, to continue it rather than interpolate afresh. `n_images` resamples on the way in. |
 | `prepare_parallel_neb(reactant, product, make_calc, n_images=5, ...)` | Context manager giving each interior image its own socket calculator, so the images are evaluated concurrently. |
 | `restart_parallel_neb(images, make_calc, n_images=None, ...)` | `restart_neb` over sockets, reusing the endpoint energies stored with the band. |
 | `socket_calculators(n_calculators, make_calc=None, ...)` | Context manager opening a pool of `SocketIOCalculator`s, one socket each, closed on exit. |
-| `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj')` | Relax the band and return the final images. |
+| `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj', optimiser=BFGS, logfile='-')` | Relax the band and return the final images. |
 | `ConvergenceWarning`, `ConvergenceError` | Warned, or raised under `raise_on_unconverged=True`, when an `optimise_*` run hits its step limit. |
 | `get_ts_image(neb_images, calc=None)` | The highest-energy image along a band, reusing the energies the images carry unless a calculator is given. |
 | `get_fmax(atoms)` | Largest per-atom force, the quantity the optimisers converge against. |
-| `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1)` | Refine a TS guess to a true saddle point with Sella. Needs the `[ts]` extra. |
-| `optimise_irc(ts_image, calc, dx=0.1, ...)` | Follow the IRC downhill in both directions, returning `(forward, reverse)`. Needs the `[ts]` extra. |
+| `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1, logfile='-')` | Refine a TS guess to a true saddle point with Sella. Needs the `[ts]` extra. |
+| `optimise_irc(ts_image, calc, dx=0.1, ..., logfile='-')` | Follow the IRC downhill in both directions, returning `(forward, reverse)`. Needs the `[ts]` extra. |
 | `get_vibrations(atoms, calc)` | Finite-difference frequencies in cm⁻¹; one imaginary mode confirms a saddle. |
 | `quick_guess_path(reactant, product, n_images=25)` | Geodesic path guess, no optimisation. |
 | `quick_guess_ts(reactant, product, n_images=25)` | Midpoint of a geodesic guess, as a cheap TS starting structure. |
@@ -460,7 +507,7 @@ halves and swap them over; for a proton transfer, move the hydrogen across.
 | `bonded_cluster_indices_no_anchor_hub(atoms, anchor, mult=1.0, multi_h=1.3)` | Atoms bonded to an anchor, without the walk routing back through it. |
 | `get_dimer_bonded_cluster_indices(atoms, anchors, mults=None, multi_h=1.3)` | Union of the two clusters, one per anchor. |
 | `flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, rot_matrix=None)` | Swap two fragments over, each landing on the other's anchor and facing it. |
-| `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05, steps=1000)` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
+| `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05, steps=1000, optimiser=BFGS, logfile='-')` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
 | `get_best_flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, optimise_after=True, calc=None)` | Search the reflection signs and keep whichever leaves the fragment centres of mass closest. |
 | `swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index)` | Turn O-H...O into O...H-O, keeping the O-H length, to make the product of a proton transfer. |
 
