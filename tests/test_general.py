@@ -19,6 +19,7 @@ def test_public_api_is_complete():
     """The documented API must all be reachable from the top-level package."""
     expected = {
         # tools_reaction
+        "ConvergenceError", "ConvergenceWarning",
         "get_neb_path", "get_fmax", "stitch_path", "resample_path",
         "optimise_geom", "optimise_reactant_product", "prepare_neb",
         "socket_calculators", "prepare_parallel_neb", "optimise_neb",

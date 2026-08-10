@@ -112,6 +112,43 @@ about:
   distributes the images across MPI ranks; pass a specific communicator with
   `world` if you don't want `ase.parallel.world`.
 
+### Knowing whether it converged
+
+Every `optimise_*` function records whether it actually reached `fmax` in
+`info["converged"]` on the structures it hands back, and warns
+`ConvergenceWarning` when it did not. A run that quietly hits its step limit is
+the expensive kind of mistake: nothing looks wrong until the vibrational
+analysis, several jobs later.
+
+```python
+images = optimise_neb(neb, fmax=0.05, steps=200)
+if not images[0].info["converged"]:
+    print("band still moving — restart from ts.traj with more steps")
+```
+
+For a script that should stop rather than carry on with a half-relaxed
+structure, ask for an exception instead:
+
+```python
+reactant, product = optimise_reactant_product(
+    reactant, product, calc, fmax=0.05, raise_on_unconverged=True)
+```
+
+`raise_on_unconverged` is per call. To hold a whole script to it, promote the
+warning once:
+
+```python
+import warnings
+from reactiontools import ConvergenceWarning
+
+warnings.simplefilter("error", ConvergenceWarning)
+```
+
+The flag never costs you the work already done: `optimise_neb` writes
+`ts_traj` before the check, and `optimise_irc` runs both directions before
+reporting either, so the trajectories are on disk to restart from even when the
+call raises.
+
 ### Minimising with a socket calculator
 
 `optimise_geom` and `optimise_reactant_product` take the same `use_socket`,
@@ -310,11 +347,12 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `stitch_path(path1, path2, f_reverse_path=False)` | Join a reactant-side and product-side path into one IRC-like sequence. |
 | `resample_path(path, n_resample)` | Cubic-spline resample a path to a fixed number of images, preserving the endpoints. |
 | `optimise_geom(atoms, calc, ..., use_socket=False)` | Relax a structure with BFGS and return the final image. `use_socket=True` drives `calc` over an ASE `SocketIOCalculator`. |
-| `optimise_reactant_product(reactant, product, calc, ..., use_socket=False)` | Relax both endpoints independently, one after the other. |
+| `optimise_reactant_product(reactant, product, calc, ..., use_socket=False)` | Relax both endpoints independently, one after the other. Reports the two separately. |
 | `prepare_neb(reactant, product, calc, n_images=5, climb=True, geo_int=True, k=2.0, parallel=False)` | Build a configured `ase.mep.NEB`, interpolating geodesically or with IDPP. `parallel=True` evaluates images concurrently. |
 | `prepare_parallel_neb(reactant, product, make_calc, n_images=5, ...)` | Context manager giving each interior image its own socket calculator, so the images are evaluated concurrently. |
 | `socket_calculators(n_calculators, make_calc=None, ...)` | Context manager opening a pool of `SocketIOCalculator`s, one socket each, closed on exit. |
 | `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj')` | Relax the band and return the final images. |
+| `ConvergenceWarning`, `ConvergenceError` | Warned, or raised under `raise_on_unconverged=True`, when an `optimise_*` run hits its step limit. |
 | `get_ts_image(neb_images, calc=None)` | The highest-energy image along a band, reusing the energies the images carry unless a calculator is given. |
 | `get_fmax(atoms)` | Largest per-atom force, the quantity the optimisers converge against. |
 | `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1)` | Refine a TS guess to a true saddle point with Sella. Needs the `[ts]` extra. |
@@ -351,7 +389,7 @@ halves and swap them over; for a proton transfer, move the hydrogen across.
 | `bonded_cluster_indices_no_anchor_hub(atoms, anchor, mult=1.0, multi_h=1.3)` | Atoms bonded to an anchor, without the walk routing back through it. |
 | `get_dimer_bonded_cluster_indices(atoms, anchors, mults=None, multi_h=1.3)` | Union of the two clusters, one per anchor. |
 | `flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, rot_matrix=None)` | Swap two fragments over, each landing on the other's anchor and facing it. |
-| `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05)` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
+| `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05, steps=1000)` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
 | `get_best_flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, optimise_after=True, calc=None)` | Search the reflection signs and keep whichever leaves the fragment centres of mass closest. |
 | `swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index)` | Turn O-H...O into O...H-O, keeping the O-H length, to make the product of a proton transfer. |
 

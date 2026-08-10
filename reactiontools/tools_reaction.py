@@ -1,5 +1,6 @@
 import copy
 import os
+import warnings
 from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 
@@ -16,6 +17,77 @@ from scipy.interpolate import CubicSpline
 
 _SELLA_HINT = ("{name} needs sella, which is not installed. "
                "Install it with `pip install 'reactiontools[ts]'`.")
+
+
+class ConvergenceWarning(UserWarning):
+    """An optimisation stopped before reaching its force criterion.
+
+    Warned rather than raised because a partly relaxed structure is often
+    still worth looking at, and because a band that ran out of steps is a
+    perfectly good starting point for the next run. Pass
+    ``raise_on_unconverged=True`` to any of the ``optimise_*`` functions for a
+    :exc:`ConvergenceError` instead, or turn every one of them into an error
+    at once with ``warnings.simplefilter("error", ConvergenceWarning)``.
+    """
+
+
+class ConvergenceError(RuntimeError):
+    """An optimisation stopped before reaching its force criterion.
+
+    Raised by the ``optimise_*`` functions in place of
+    :class:`ConvergenceWarning` when they are called with
+    ``raise_on_unconverged=True``.
+    """
+
+
+def _check_converged(converged, what, fmax, steps, raise_on_unconverged):
+    """Report an optimisation that ran out of steps.
+
+    ASE's optimisers return whether they converged and otherwise say nothing,
+    so a run that hits its step limit hands back a structure that looks like
+    any other. That is the worst way to find out, because the next thing to
+    notice is usually the vibrational analysis, several expensive steps later.
+
+    Parameters
+    ----------
+    converged : bool
+        What the optimiser's ``run`` returned.
+    what : str
+        Name of the run, quoted in the message so that the two halves of an
+        IRC, or the two endpoints of a band, can be told apart. Also what
+        keeps the warnings distinct, since the warnings module shows a
+        repeated message from one call site only once.
+    fmax : float
+        Force criterion the run was asked for, in eV/Å.
+    steps : int
+        Step limit it hit.
+    raise_on_unconverged : bool
+        Raise :exc:`ConvergenceError` instead of warning.
+
+    Returns
+    -------
+    bool
+        ``converged`` unchanged, for the caller to record on the structures it
+        returns.
+
+    Raises
+    ------
+    ConvergenceError
+        If the run did not converge and ``raise_on_unconverged`` is True.
+    """
+    if converged:
+        return True
+
+    message = (f"{what} hit its {steps}-step limit without reaching "
+               f"fmax={fmax} eV/Å, so the result is not a converged "
+               f"stationary point. Raise steps, loosen fmax, or start from a "
+               f"better guess.")
+    if raise_on_unconverged:
+        raise ConvergenceError(message)
+    # stacklevel=3: past this helper and past the optimise_* function that
+    # called it, onto the caller's own line.
+    warnings.warn(message, ConvergenceWarning, stacklevel=3)
+    return False
 
 
 def _import_sella(name):
@@ -142,8 +214,14 @@ def optimise_geom(atoms, calc,
                   use_socket=False,
                   socket_port=None,
                   socket_unixsocket=None,
-                  socket_log=None):
+                  socket_log=None,
+                  raise_on_unconverged=False,
+                  _what="Geometry optimisation"):
     """Relax a structure with BFGS and return the final image.
+
+    Whether BFGS actually converged is recorded in ``info["converged"]`` on
+    the returned structure, and a run that hits ``steps`` first warns
+    :class:`ConvergenceWarning`.
 
     Parameters
     ----------
@@ -173,11 +251,22 @@ def optimise_geom(atoms, calc,
         Name of a Unix socket to use instead of ``socket_port``.
     socket_log : file object, optional
         Logfile for the socket communication, for debugging.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`ConvergenceError` instead of warning when the run hits
+        ``steps`` without reaching ``fmax``. Worth turning on in a batch
+        script, where a silently unrelaxed structure would otherwise be
+        carried into everything downstream.
 
     Returns
     -------
     ase.Atoms
-        Relaxed structure.
+        Relaxed structure, with ``info["converged"]`` recording whether the
+        force criterion was met.
+
+    Raises
+    ------
+    ConvergenceError
+        If the run did not converge and ``raise_on_unconverged`` is True.
     """
     atoms = atoms.copy()
     if use_socket:
@@ -188,10 +277,12 @@ def optimise_geom(atoms, calc,
         context = nullcontext(calc)
     with context as live_calc:
         atoms.calc = live_calc
-        BFGS(atoms, trajectory=opti_traj).run(fmax=fmax, steps=steps)
+        converged = BFGS(atoms, trajectory=opti_traj).run(fmax=fmax, steps=steps)
     atoms = read(opti_traj, index=-1)
     Path(opti_traj).unlink()
     atoms.calc = calc
+    atoms.info["converged"] = _check_converged(
+        converged, _what, fmax, steps, raise_on_unconverged)
     return atoms
 
 
@@ -203,8 +294,13 @@ def optimise_reactant_product(reactant, product, calc,
                               use_socket=False,
                               socket_port=None,
                               socket_unixsocket=None,
-                              socket_log=None):
+                              socket_log=None,
+                              raise_on_unconverged=False):
     """Optimise reactant and product structures independently.
+
+    Each endpoint carries its own ``info["converged"]``, and the two are
+    reported separately, so an endpoint that failed to relax can be told from
+    one that did.
 
     Parameters
     ----------
@@ -226,11 +322,22 @@ def optimise_reactant_product(reactant, product, calc,
         See :func:`optimise_geom`. Passed through to both optimisations,
         which run one after the other and so can safely reuse the same
         port or Unix socket.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`ConvergenceError` on the first endpoint that fails to
+        reach ``fmax`` within ``steps``, instead of warning. See
+        :func:`optimise_geom`.
 
     Returns
     -------
     tuple of ase.Atoms
-        Optimised reactant and product structures.
+        Optimised reactant and product structures, each with
+        ``info["converged"]`` recording whether it reached ``fmax``.
+
+    Raises
+    ------
+    ConvergenceError
+        If either endpoint did not converge and ``raise_on_unconverged`` is
+        True.
     """
     print('Optimising reactant...', flush=True)
     reactant = optimise_geom(reactant, calc,
@@ -240,7 +347,9 @@ def optimise_reactant_product(reactant, product, calc,
                              use_socket=use_socket,
                              socket_port=socket_port,
                              socket_unixsocket=socket_unixsocket,
-                             socket_log=socket_log)
+                             socket_log=socket_log,
+                             raise_on_unconverged=raise_on_unconverged,
+                             _what="Reactant optimisation")
 
     print('Optimising product...', flush=True)
     product = optimise_geom(product, calc,
@@ -250,7 +359,9 @@ def optimise_reactant_product(reactant, product, calc,
                             use_socket=use_socket,
                             socket_port=socket_port,
                             socket_unixsocket=socket_unixsocket,
-                            socket_log=socket_log)
+                            socket_log=socket_log,
+                            raise_on_unconverged=raise_on_unconverged,
+                            _what="Product optimisation")
     return reactant, product
 
 
@@ -380,8 +491,13 @@ def prepare_neb(reactant, product, calc,
 def optimise_neb(neb,
                  fmax=0.01,
                  steps=1000,
-                 ts_traj='ts.traj'):
+                 ts_traj='ts.traj',
+                 raise_on_unconverged=False):
     """Optimise an NEB band and return the final trajectory images.
+
+    A band that runs out of steps warns :class:`ConvergenceWarning` rather
+    than failing, because the images it reached are still the best starting
+    point for the next attempt — and are still on disk in ``ts_traj``.
 
     Parameters
     ----------
@@ -393,15 +509,32 @@ def optimise_neb(neb,
         Maximum number of optimiser steps.
     ts_traj : str, optional
         Output trajectory filename.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`ConvergenceError` instead of warning when the band hits
+        ``steps`` without reaching ``fmax``. The top of an unconverged band
+        is not a transition state, so this is worth turning on wherever
+        :func:`get_ts_image` feeds a barrier straight into a result.
 
     Returns
     -------
     list of ase.Atoms
-        Final NEB images read back from ``ts_traj``.
+        Final NEB images read back from ``ts_traj``. Every image carries the
+        band's ``info["converged"]``, which is a property of the band as a
+        whole rather than of any one image.
+
+    Raises
+    ------
+    ConvergenceError
+        If the band did not converge and ``raise_on_unconverged`` is True.
     """
     n_images = len(neb.images)
-    BFGS(neb, trajectory=ts_traj).run(fmax=fmax, steps=steps)
-    return read(ts_traj, index=f"-{n_images}:")
+    converged = BFGS(neb, trajectory=ts_traj).run(fmax=fmax, steps=steps)
+    images = read(ts_traj, index=f"-{n_images}:")
+    converged = _check_converged(converged, "NEB optimisation", fmax, steps,
+                                 raise_on_unconverged)
+    for image in images:
+        image.info["converged"] = converged
+    return images
 
 
 class _FixedEnergy(Calculator):
@@ -696,7 +829,8 @@ def optimise_ts(ts_image, calc,
                 steps=1000,
                 eta=1e-4,
                 gamma=0.1,
-                sella_traj='sella.traj'):
+                sella_traj='sella.traj',
+                raise_on_unconverged=False):
     """Refine a transition-state guess to a true saddle point with Sella.
 
     A NEB band gets close to the saddle but rarely converges tightly onto it,
@@ -721,16 +855,25 @@ def optimise_ts(ts_image, calc,
         Convergence criterion for Sella's iterative diagonalisation.
     sella_traj : str, optional
         Trajectory filename, kept after the run.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`ConvergenceError` instead of warning when the search hits
+        ``steps`` without reaching ``fmax``.
 
     Returns
     -------
     ase.Atoms
-        Refined transition state, read back from the trajectory.
+        Refined transition state, read back from the trajectory, with
+        ``info["converged"]`` recording whether the search reached ``fmax``.
+        Converging here says the search found *a* stationary point, not that
+        it is a first-order saddle — that is what :func:`get_vibrations` is
+        for.
 
     Raises
     ------
     ImportError
         If sella is not installed.
+    ConvergenceError
+        If the search did not converge and ``raise_on_unconverged`` is True.
     """
     Sella, _IRC = _import_sella("optimise_ts")
 
@@ -745,9 +888,12 @@ def optimise_ts(ts_image, calc,
                      trajectory=sella_traj,
                      eta=eta,
                      gamma=gamma)
-    sella_ts.run(fmax=fmax, steps=steps)
+    converged = sella_ts.run(fmax=fmax, steps=steps)
 
-    return read(sella_traj, index=-1)
+    ts = read(sella_traj, index=-1)
+    ts.info["converged"] = _check_converged(
+        converged, "Sella TS search", fmax, steps, raise_on_unconverged)
+    return ts
 
 
 def optimise_irc(ts_image, calc,
@@ -758,7 +904,8 @@ def optimise_irc(ts_image, calc,
                  gamma=0.1,
                  keep_going=True,
                  irc_f_traj='irc_f.traj',
-                 irc_r_traj='irc_r.traj'):
+                 irc_r_traj='irc_r.traj',
+                 raise_on_unconverged=False):
     """Follow the intrinsic reaction coordinate downhill from a saddle point.
 
     Runs Sella's IRC in both directions, which is what confirms that a saddle
@@ -789,17 +936,29 @@ def optimise_irc(ts_image, calc,
         Trajectory filename for the forward direction.
     irc_r_traj : str, optional
         Trajectory filename for the reverse direction.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`ConvergenceError` instead of warning when either
+        direction hits ``steps`` without reaching ``fmax``. A half that
+        stopped early has not reached its minimum, so it does not show which
+        state that direction connects to — the whole point of running it.
 
     Returns
     -------
     tuple of list of ase.Atoms
         ``(forward, reverse)`` paths, each read back from its trajectory and
-        starting at the transition state.
+        starting at the transition state. Every image of a path carries that
+        direction's ``info["converged"]``; the two are reported separately,
+        since one direction commonly reaches its minimum while the other
+        does not.
 
     Raises
     ------
     ImportError
         If sella is not installed.
+    ConvergenceError
+        If either direction did not converge and ``raise_on_unconverged`` is
+        True. The forward direction is checked first, and only once both have
+        run, so a failure there does not cost the reverse run.
     """
     _Sella, IRC = _import_sella("optimise_irc")
 
@@ -812,9 +971,9 @@ def optimise_irc(ts_image, calc,
                       eta=eta,
                       gamma=gamma,
                       keep_going=keep_going)
-    sella_irc_f.run(fmax=fmax,
-                    steps=steps,
-                    direction='forward')
+    converged_f = sella_irc_f.run(fmax=fmax,
+                                  steps=steps,
+                                  direction='forward')
 
     irc_r = ts_image.copy()
     irc_r.calc = calc
@@ -826,11 +985,19 @@ def optimise_irc(ts_image, calc,
                       eta=eta,
                       gamma=gamma,
                       keep_going=keep_going)
-    sella_irc_r.run(fmax=fmax,
-                    steps=steps,
-                    direction='reverse')
+    converged_r = sella_irc_r.run(fmax=fmax,
+                                  steps=steps,
+                                  direction='reverse')
 
-    return read(irc_f_traj, index=":"), read(irc_r_traj, index=":")
+    forward = read(irc_f_traj, index=":")
+    reverse = read(irc_r_traj, index=":")
+    for path, ran_to_fmax, what in ((forward, converged_f, "Forward IRC"),
+                                    (reverse, converged_r, "Reverse IRC")):
+        converged = _check_converged(ran_to_fmax, what, fmax, steps,
+                                     raise_on_unconverged)
+        for image in path:
+            image.info["converged"] = converged
+    return forward, reverse
 
 
 def get_vibrations(atoms, calc):

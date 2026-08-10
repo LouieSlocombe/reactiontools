@@ -29,6 +29,12 @@ Consistent matplotlib styling lives in ``tools_style`` and is applied by every
 plotting function; ``n_plot`` and ``ax_plot`` are exported for use on your own
 axes.
 
+Every ``optimise_*`` function records whether it actually reached its force
+criterion in ``info["converged"]`` on the structures it returns, and warns
+``ConvergenceWarning`` when it did not. Pass ``raise_on_unconverged=True`` for
+a ``ConvergenceError`` instead, or promote every one of them at once with
+``warnings.simplefilter("error", ConvergenceWarning)``.
+
 Two dependencies are needed only by part of the package. The saddle-point
 searches (``optimise_ts`` and ``optimise_irc``) are built on sella, an optional
 extra: install it with ``pip install 'reactiontools[ts]'``. The ``tools_orca``
@@ -71,7 +77,9 @@ from .tools_plotting import (show_atoms,
 from .tools_plumed import (plumed_selection,
                            find_molecules,
                            run_sum_hills)
-from .tools_reaction import (get_neb_path,
+from .tools_reaction import (ConvergenceError,
+                             ConvergenceWarning,
+                             get_neb_path,
                              get_fmax,
                              stitch_path,
                              resample_path,
@@ -93,6 +101,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     # tools_reaction
+    "ConvergenceError",
+    "ConvergenceWarning",
     "get_neb_path",
     "get_fmax",
     "stitch_path",

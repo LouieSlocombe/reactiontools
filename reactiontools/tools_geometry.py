@@ -21,6 +21,8 @@ from ase.data import covalent_radii
 from ase.neighborlist import NeighborList, natural_cutoffs
 from ase.optimize import BFGS
 
+from .tools_reaction import _check_converged
+
 
 def bonded_cluster_indices_no_anchor_hub(atoms: Atoms,
                                          anchor: int,
@@ -322,7 +324,9 @@ def optimize_with_fixed_anchors(atoms: Atoms,
                                 baseB_idxs: list,
                                 anchor_indices: list,
                                 calc,
-                                fmax: float = 0.05) -> Atoms:
+                                fmax: float = 0.05,
+                                steps: int = 1000,
+                                raise_on_unconverged: bool = False) -> Atoms:
     """Relax the two fragments while holding their anchors still.
 
     A structure straight out of :func:`flip_and_face_bases` is rigid-body
@@ -347,11 +351,27 @@ def optimize_with_fixed_anchors(atoms: Atoms,
         Calculator used for the relaxation.
     fmax : float, optional
         Maximum force criterion in eV/Å.
+    steps : int, optional
+        Maximum number of optimiser steps. A flipped structure needing more
+        than the default has usually landed somewhere unphysical, which the
+        :class:`~reactiontools.ConvergenceWarning` then says out loud instead
+        of grinding on against ASE's effectively unlimited default.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`~reactiontools.ConvergenceError` instead of warning when
+        the relaxation hits ``steps`` without reaching ``fmax``.
 
     Returns
     -------
     ase.Atoms
-        Copy of ``atoms`` with the relaxed fragment positions written back.
+        Copy of ``atoms`` with the relaxed fragment positions written back,
+        and ``info["converged"]`` recording whether the relaxation reached
+        ``fmax``.
+
+    Raises
+    ------
+    ConvergenceError
+        If the relaxation did not converge and ``raise_on_unconverged`` is
+        True.
     """
     # Create a copy to avoid modifying the original
     atoms_opt = atoms.copy()
@@ -364,7 +384,7 @@ def optimize_with_fixed_anchors(atoms: Atoms,
 
     atoms_opt.calc = calc
     optimizer = BFGS(atoms_opt)
-    optimizer.run(fmax=fmax)
+    converged = optimizer.run(fmax=fmax, steps=steps)
 
     # Write the relaxed coordinates back through the full position array:
     # indexing an Atoms object returns a new object, so assigning to
@@ -373,6 +393,9 @@ def optimize_with_fixed_anchors(atoms: Atoms,
     positions = atoms_out.get_positions()
     positions[selection] = atoms_opt.get_positions()
     atoms_out.set_positions(positions)
+    atoms_out.info["converged"] = _check_converged(
+        converged, "Fixed-anchor relaxation", fmax, steps,
+        raise_on_unconverged)
 
     return atoms_out
 
@@ -384,6 +407,7 @@ def get_best_flip_and_face_bases(
         anchors: list,
         optimise_after: bool = True,
         calc=None,
+        raise_on_unconverged: bool = False,
 ) -> Atoms:
     """Search the reflection signs for the tightest flipped structure.
 
@@ -407,16 +431,24 @@ def get_best_flip_and_face_bases(
     calc : ase.calculators.Calculator, optional
         Calculator for that relaxation. Required when ``optimise_after`` is
         ``True``.
+    raise_on_unconverged : bool, optional
+        Passed to :func:`optimize_with_fixed_anchors`; ignored when
+        ``optimise_after`` is ``False``, since nothing is then relaxed.
 
     Returns
     -------
     ase.Atoms
-        Flipped structure, relaxed when ``optimise_after`` is ``True``.
+        Flipped structure, relaxed when ``optimise_after`` is ``True``, in
+        which case ``info["converged"]`` records whether that relaxation
+        reached ``fmax``.
 
     Raises
     ------
     ValueError
         If ``optimise_after`` is ``True`` and no calculator is given.
+    ConvergenceError
+        If the relaxation did not converge and ``raise_on_unconverged`` is
+        True.
     """
     if optimise_after and calc is None:
         raise ValueError("optimise_after=True needs a calculator; pass calc=, "
@@ -474,6 +506,7 @@ def get_best_flip_and_face_bases(
             baseB_idxs=baseB_idxs,
             anchor_indices=anchors,
             calc=calc,
+            raise_on_unconverged=raise_on_unconverged,
         )
 
     return swapped

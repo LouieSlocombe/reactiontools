@@ -5,7 +5,9 @@ import pytest
 from ase import Atoms
 from ase.build import molecule
 
-from reactiontools import (bonded_cluster_indices_no_anchor_hub,
+from reactiontools import (ConvergenceError,
+                           ConvergenceWarning,
+                           bonded_cluster_indices_no_anchor_hub,
                            flip_and_face_bases,
                            get_best_flip_and_face_bases,
                            get_dimer_bonded_cluster_indices,
@@ -234,6 +236,30 @@ class TestOptimizeWithFixedAnchors:
                                               [0, 3], calc, fmax=0.5)
 
         assert relaxed.positions[6] == pytest.approx([8.0, 8.0, 8.0])
+
+    def test_records_convergence_on_the_result(self, calc, dimer):
+        relaxed = optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5],
+                                              [0, 3], calc, fmax=0.5)
+
+        assert relaxed.info["converged"] is True
+
+    def test_warns_and_records_when_it_runs_out_of_steps(self, calc, dimer):
+        strained = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3])
+
+        with pytest.warns(ConvergenceWarning, match="Fixed-anchor relaxation"):
+            relaxed = optimize_with_fixed_anchors(strained, [0, 1, 2],
+                                                  [3, 4, 5], [0, 3], calc,
+                                                  fmax=1e-3, steps=2)
+
+        assert relaxed.info["converged"] is False
+
+    def test_raises_instead_when_asked(self, calc, dimer):
+        strained = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3])
+
+        with pytest.raises(ConvergenceError):
+            optimize_with_fixed_anchors(strained, [0, 1, 2], [3, 4, 5], [0, 3],
+                                        calc, fmax=1e-3, steps=2,
+                                        raise_on_unconverged=True)
 
 
 class TestGetBestFlipAndFaceBases:

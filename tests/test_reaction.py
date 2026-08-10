@@ -2,6 +2,7 @@
 
 import importlib.util
 import os
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +13,9 @@ from ase.calculators.socketio import PySocketIOClient, SocketIOCalculator
 from ase.constraints import FixAtoms
 from ase.mep import NEB
 
-from reactiontools import (get_fmax,
+from reactiontools import (ConvergenceError,
+                           ConvergenceWarning,
+                           get_fmax,
                            get_neb_path,
                            get_ts_image,
                            get_vibrations,
@@ -224,6 +227,52 @@ class TestOptimiseGeom:
 
         assert fake_socketio.instances == []
 
+    def test_records_convergence_on_the_result(self, calc):
+        atoms = molecule("H2O")
+        atoms.positions[1] += [0.2, 0.0, 0.0]
+
+        relaxed = optimise_geom(atoms, calc, fmax=0.05, steps=200)
+
+        assert relaxed.info["converged"] is True
+
+    def test_warns_and_records_when_it_runs_out_of_steps(self, calc):
+        """The whole point: an unrelaxed structure must not come back silent."""
+        atoms = molecule("H2O")
+        atoms.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.warns(ConvergenceWarning, match="2-step limit"):
+            relaxed = optimise_geom(atoms, calc, fmax=1e-3, steps=2)
+
+        assert relaxed.info["converged"] is False
+
+    def test_raises_instead_when_asked(self, calc):
+        atoms = molecule("H2O")
+        atoms.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.raises(ConvergenceError, match="fmax=0.001"):
+            optimise_geom(atoms, calc, fmax=1e-3, steps=2,
+                          raise_on_unconverged=True)
+
+    def test_still_cleans_up_the_trajectory_when_it_raises(self, calc):
+        atoms = molecule("H2O")
+        atoms.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.raises(ConvergenceError):
+            optimise_geom(atoms, calc, fmax=1e-3, steps=2,
+                          opti_traj="scratch.traj", raise_on_unconverged=True)
+
+        assert not Path("scratch.traj").exists()
+
+    def test_a_warning_filter_can_promote_it_to_an_error(self, calc):
+        """ConvergenceWarning is its own class so a whole script can escalate."""
+        atoms = molecule("H2O")
+        atoms.positions[1] += [0.5, 0.0, 0.0]
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ConvergenceWarning)
+            with pytest.raises(ConvergenceWarning):
+                optimise_geom(atoms, calc, fmax=1e-3, steps=2)
+
 
 class TestOptimiseReactantProduct:
     def test_relaxes_both_endpoints(self, calc):
@@ -256,6 +305,27 @@ class TestOptimiseReactantProduct:
 
         assert len(fake_socketio.instances) == 2
         assert all(i.unixsocket == "rt-test" for i in fake_socketio.instances)
+
+    def test_reports_the_two_endpoints_separately(self, calc):
+        """Both must be named, or one silently stands in for the other.
+
+        The warnings module shows a repeated message from one call site only
+        once, so identical text here would collapse the product's warning into
+        the reactant's and leave the second endpoint unreported.
+        """
+        strained = molecule("H2O")
+        strained.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.warns(ConvergenceWarning) as caught:
+            reactant, product = optimise_reactant_product(
+                strained, strained.copy(), calc, fmax=1e-3, steps=2)
+
+        messages = [str(w.message) for w in caught
+                    if issubclass(w.category, ConvergenceWarning)]
+        assert sum("Reactant optimisation" in m for m in messages) == 1
+        assert sum("Product optimisation" in m for m in messages) == 1
+        assert reactant.info["converged"] is False
+        assert product.info["converged"] is False
 
 
 @pytest.fixture
@@ -425,7 +495,44 @@ class TestOptimiseNeb:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
-        optimise_neb(neb, fmax=0.5, steps=3, ts_traj="band.traj")
+        with pytest.warns(ConvergenceWarning):
+            optimise_neb(neb, fmax=0.5, steps=3, ts_traj="band.traj")
+
+        assert Path("band.traj").exists()
+
+    def test_marks_every_image_with_the_bands_convergence(self, calc, endpoints):
+        """A band converges as a whole, so each image carries the same answer."""
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        with pytest.warns(ConvergenceWarning, match="NEB optimisation"):
+            images = optimise_neb(neb, fmax=0.5, steps=3)
+
+        assert [image.info["converged"] for image in images] == [False] * 5
+
+    def test_records_a_converged_band(self, calc, endpoints):
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        images = optimise_neb(neb, fmax=0.5, steps=200)
+
+        assert all(image.info["converged"] for image in images)
+
+    def test_raises_instead_when_asked(self, calc, endpoints):
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        with pytest.raises(ConvergenceError, match="NEB optimisation"):
+            optimise_neb(neb, fmax=0.5, steps=3, raise_on_unconverged=True)
+
+    def test_the_band_is_still_on_disk_when_it_raises(self, calc, endpoints):
+        """An unconverged band is the best start for the next run."""
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+
+        with pytest.raises(ConvergenceError):
+            optimise_neb(neb, fmax=0.5, steps=3, ts_traj="band.traj",
+                         raise_on_unconverged=True)
 
         assert Path("band.traj").exists()
 
@@ -831,6 +938,28 @@ class TestOptimiseTs:
 
         assert water.positions == pytest.approx(before)
 
+    def test_records_convergence_on_the_result(self, calc, water):
+        ts = optimise_ts(water, calc, fmax=0.5, steps=2)
+
+        assert ts.info["converged"] is True
+
+    def test_warns_and_records_when_it_runs_out_of_steps(self, calc):
+        strained = molecule("H2O")
+        strained.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.warns(ConvergenceWarning, match="Sella TS search"):
+            ts = optimise_ts(strained, calc, fmax=1e-4, steps=2)
+
+        assert ts.info["converged"] is False
+
+    def test_raises_instead_when_asked(self, calc):
+        strained = molecule("H2O")
+        strained.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.raises(ConvergenceError, match="Sella TS search"):
+            optimise_ts(strained, calc, fmax=1e-4, steps=2,
+                        raise_on_unconverged=True)
+
 
 @sella_required
 class TestOptimiseIrc:
@@ -849,3 +978,34 @@ class TestOptimiseIrc:
         path = stitch_path(reverse, forward)
 
         assert len(path) == len(forward) + len(reverse) - 1
+
+    def test_reports_the_two_directions_separately(self, calc):
+        """One direction commonly reaches its minimum while the other does not.
+
+        Both checks run from the same line, so only the differing message
+        keeps the warnings module from collapsing them into one.
+        """
+        strained = molecule("H2O")
+        strained.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.warns(ConvergenceWarning) as caught:
+            forward, reverse = optimise_irc(strained, calc, fmax=1e-4, steps=1,
+                                            dx=0.05)
+
+        messages = [str(w.message) for w in caught
+                    if issubclass(w.category, ConvergenceWarning)]
+        assert sum("Forward IRC" in m for m in messages) == 1
+        assert sum("Reverse IRC" in m for m in messages) == 1
+        assert all(image.info["converged"] is False
+                   for image in (*forward, *reverse))
+
+    def test_runs_both_directions_before_raising(self, calc):
+        """The reverse run is already paid for by the time the check fires."""
+        strained = molecule("H2O")
+        strained.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.raises(ConvergenceError, match="Forward IRC"):
+            optimise_irc(strained, calc, fmax=1e-4, steps=1, dx=0.05,
+                         raise_on_unconverged=True)
+
+        assert Path("irc_r.traj").exists()
