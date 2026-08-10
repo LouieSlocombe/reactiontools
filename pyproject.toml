@@ -34,8 +34,9 @@ dependencies = [
   "numpy",
   "scipy",
   "matplotlib",
-  "pandas",  # reactiontools/tools_fes.py, reactiontools/tools_orca.py
+  "pandas", 
   "ase>=3.23",
+  "sella @ git+https://github.com/LouieSlocombe/sella.git",
   "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
 ]
 # ORCA is needed at runtime by reactiontools.tools_orca but is licensed
@@ -51,15 +52,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# Saddle-point searches only: optimise_ts and optimise_irc. Kept out of the
-# main dependencies so the NEB workflows install without them.
-ts = [
-  "sella",
-]
 dev = [
   "pytest",
   "pytest-cov",
-  "sella",
 ]
 
 [project.urls]
