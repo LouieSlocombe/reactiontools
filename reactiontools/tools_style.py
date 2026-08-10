@@ -49,7 +49,6 @@ def n_plot(xlab,
     None
     """
     ax_plot(plt.gcf(), plt.gca(), xlab, ylab, xs=xs, ys=ys)
-    return None
 
 
 def ax_plot(fig,
@@ -97,7 +96,6 @@ def ax_plot(fig,
         ax.set_ylabel(ylab, fontsize=ys)
     if fig.get_layout_engine() is None:
         fig.tight_layout()
-    return None
 
 
 def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
@@ -125,7 +123,6 @@ def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
     axes = np.atleast_1d(axes).ravel()
     for i, ax in enumerate(axes):
         ax_plot(fig, ax, x_lab, y_lab if i == 0 else None, xs=xs, ys=ys)
-    return None
 
 
 def _finalise(fig, filename=None, show=False, dpi=600, formats=("png", "pdf")):
@@ -159,4 +156,3 @@ def _finalise(fig, filename=None, show=False, dpi=600, formats=("png", "pdf")):
             fig.savefig(f"{stem}.{extension}", dpi=dpi)
     if show:
         plt.show()
-    return None

@@ -422,7 +422,10 @@ def get_best_flip_and_face_bases(
         raise ValueError("optimise_after=True needs a calculator; pass calc=, "
                          "or set optimise_after=False to skip the relaxation.")
 
-    rot_matrix_permutations = list(set(list(permutations([-1.0, 1.0, 1.0])) + list(permutations([-1.0, -1.0, 1.0]))))
+    # Sorted so the search order -- and which matrix wins a tie in the COM
+    # distance below -- does not depend on set iteration order.
+    rot_matrix_permutations = sorted(set(permutations((-1.0, 1.0, 1.0)))
+                                     | set(permutations((-1.0, -1.0, 1.0))))
     print(f"All permutations of rot_matrix: {rot_matrix_permutations}", flush=True)
 
     # loop over permutations to see which gives the least COM movement

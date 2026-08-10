@@ -1,10 +1,11 @@
 import copy
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 from ase import Atoms
 from ase.io import read
 from ase.visualize.plot import plot_atoms
-from pathlib import Path
 from scipy.interpolate import make_interp_spline
 
 from .tools_fes import plot_fes_1d
@@ -20,6 +21,32 @@ _ATOM_VIEWS = {"top": "0x,0y,0z",
                "side": "-90x,0y,0z",
                "front": "-90x,-90y,0z",
                "tilted": "300x,0y,0z"}
+
+
+def _save_and_show(fig, save, show, filename):
+    """Write ``<filename>.png`` and ``.pdf`` when asked, then optionally show.
+
+    This is the save interface shared by every plotter in this module: a
+    boolean ``save`` plus a filename stem, always writing both formats.
+    (:func:`~reactiontools.tools_style._finalise` is the other convention,
+    keyed off ``filename`` alone.)
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure to save.
+    save : bool
+        Write the two files when ``True``.
+    show : bool
+        Call ``plt.show()`` when ``True``.
+    filename : str
+        Output filename stem.
+    """
+    if save:
+        fig.savefig(f"{filename}.png", dpi=600)
+        fig.savefig(f"{filename}.pdf")
+    if show:
+        plt.show()
 
 
 def plot_images(images,
@@ -108,11 +135,7 @@ def plot_images(images,
     for ax in axes:
         ax.set_axis_off()
 
-    if save:
-        fig.savefig(f"{filename}.png", dpi=600)
-        fig.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
+    _save_and_show(fig, save, show, filename)
     return fig, axes
 
 
@@ -169,15 +192,30 @@ def show_atoms(atoms,
         plot_atoms(atom, ax, rotation=rotation)
     ax.set_axis_off()
 
-    if save:
-        fig.savefig(f"{filename}.png", dpi=600)
-        fig.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
+    _save_and_show(fig, save, show, filename)
     return fig, ax
 
 
 def _get_energy(image, calc):
+    """Return the energy an image already carries, else evaluate with ``calc``.
+
+    Images read back from a trajectory hold their energies, and re-running the
+    calculator would recompute the band's most expensive quantity. An image
+    without one gets its own deepcopy of ``calc``, so images never share
+    calculator state.
+
+    Parameters
+    ----------
+    image : ase.Atoms
+        Image whose energy is wanted.
+    calc : ase.calculators.Calculator or None
+        Fallback calculator for images that carry no energy.
+
+    Returns
+    -------
+    float
+        Potential energy in eV.
+    """
     if image.calc is not None:
         try:
             return image.calc.results['energy']
@@ -185,6 +223,47 @@ def _get_energy(image, calc):
             pass
     image.calc = copy.deepcopy(calc)
     return image.get_potential_energy()
+
+
+def _plot_profile(images, calc, fig, ax, save, show, smooth, k, fig_size,
+                  filename, label, color=None):
+    """Draw a reaction-path energy profile in meV against path distance.
+
+    Shared body of :func:`plot_neb` and :func:`plot_irc`, which differ only
+    in their defaults and in whether the curve colour is pinned.
+
+    Parameters
+    ----------
+    images, calc, fig, ax, save, show, smooth, k, fig_size, filename, label
+        See :func:`plot_neb`.
+    color : str or None, optional
+        Colour for the curve and its markers. ``None`` leaves matplotlib's
+        colour cycle in charge.
+
+    Returns
+    -------
+    tuple
+        ``(fig, ax)`` containing the matplotlib figure and axes.
+    """
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+    # Use cached energies where available, fall back to calc otherwise
+    energies = np.array([_get_energy(image, calc) for image in images])
+    energies -= min(energies)
+    energies *= 1000.0  # eV -> meV
+    path = get_neb_path(images)
+    color_kwargs = {} if color is None else {"c": color}
+    if smooth:
+        spl = make_interp_spline(path, energies, k=k)
+        path_smooth = np.linspace(min(path), max(path), 100)
+        ax.scatter(path, energies, **color_kwargs)
+        ax.plot(path_smooth, spl(path_smooth), '-', lw=2, label=label,
+                **color_kwargs)
+    else:
+        ax.plot(path, energies, 'o-', lw=2, label=label, **color_kwargs)
+    ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
+    _save_and_show(fig, save, show, filename)
+    return fig, ax
 
 
 def plot_neb(images,
@@ -231,29 +310,8 @@ def plot_neb(images,
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-    # Use cached energies where available, fall back to calc otherwise
-    energies = np.array([_get_energy(image, calc) for image in images])
-    energies -= min(energies)
-    energies *= 1000.0
-    # Get the path
-    path = get_neb_path(images)
-    if smooth:
-        spl = make_interp_spline(path, energies, k=k)
-        path_smooth = np.linspace(min(path), max(path), 100)
-        energies_smooth = spl(path_smooth)
-        ax.scatter(path, energies)
-        ax.plot(path_smooth, energies_smooth, '-', lw=2, label=label)
-    else:
-        ax.plot(path, energies, 'o-', lw=2, label=label)
-    ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
-    if save:
-        fig.savefig(f"{filename}.png", dpi=600)
-        fig.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
-    return fig, ax
+    return _plot_profile(images, calc, fig, ax, save, show, smooth, k,
+                         fig_size, filename, label)
 
 
 def plot_irc(images,
@@ -309,28 +367,55 @@ def plot_irc(images,
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-    # Use cached energies where available, fall back to calc otherwise
-    energies = np.array([_get_energy(image, calc) for image in images])
-    energies -= min(energies)
-    energies *= 1000.0
-    # Get the path
-    path = get_neb_path(images)
-    if smooth:
-        spl = make_interp_spline(path, energies, k=k)
-        path_smooth = np.linspace(min(path), max(path), 100)
-        energies_smooth = spl(path_smooth)
-        ax.scatter(path, energies, c=color)
-        ax.plot(path_smooth, energies_smooth, '-', c=color, lw=2, label=label)
+    return _plot_profile(images, calc, fig, ax, save, show, smooth, k,
+                         fig_size, filename, label, color=color)
+
+
+def _plot_trajectory_series(trajectories, labels, timestep, ax, frame_value,
+                            y_lab):
+    """Plot a per-frame quantity against frame number or time.
+
+    Shared body of :func:`plot_temperature` and :func:`plot_total_energy`,
+    which differ only in the quantity read from each frame.
+
+    Parameters
+    ----------
+    trajectories, labels, timestep, ax
+        See :func:`plot_temperature`.
+    frame_value : callable
+        Called on each frame's ``Atoms`` to get the value to plot.
+    y_lab : str
+        Y-axis label.
+
+    Returns
+    -------
+    tuple
+        ``(fig, ax)`` containing the matplotlib figure and axes.
+    """
+    if isinstance(trajectories, (str, Path)):
+        trajectories = [trajectories]
+
+    if labels is None:
+        labels = [Path(t).name for t in trajectories]
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
     else:
-        ax.plot(path, energies, 'o-', c=color, lw=2, label=label)
-    ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
-    if save:
-        fig.savefig(f"{filename}.png", dpi=600)
-        fig.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
+        fig = ax.get_figure()
+
+    for traj_path, label in zip(trajectories, labels):
+        frames = read(traj_path, index=":")
+        values = [frame_value(atoms) for atoms in frames]
+
+        if timestep is not None:
+            x = [i * timestep for i in range(len(values))]
+        else:
+            x = range(len(values))
+
+        ax.plot(x, values, label=label)
+
+    ax.legend()
+    ax_plot(fig, ax, "Time (fs)" if timestep else "Frame", y_lab)
     return fig, ax
 
 
@@ -353,32 +438,9 @@ def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    if isinstance(trajectories, (str, Path)):
-        trajectories = [trajectories]
-
-    if labels is None:
-        labels = [Path(t).name for t in trajectories]
-
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
-    else:
-        fig = ax.get_figure()
-
-    for traj_path, label in zip(trajectories, labels):
-        frames = read(traj_path, index=":")
-        temperatures = [atoms.get_temperature() for atoms in frames]
-
-        if timestep is not None:
-            x = [i * timestep for i in range(len(temperatures))]
-        else:
-            x = range(len(temperatures))
-
-        ax.plot(x, temperatures, label=label)
-
-    ax.legend()
-    ax_plot(fig, ax, "Time (fs)" if timestep else "Frame", "Temperature (K)")
-
-    return fig, ax
+    return _plot_trajectory_series(trajectories, labels, timestep, ax,
+                                   lambda atoms: atoms.get_temperature(),
+                                   "Temperature (K)")
 
 
 def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
@@ -400,31 +462,9 @@ def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    if isinstance(trajectories, (str, Path)):
-        trajectories = [trajectories]
-
-    if labels is None:
-        labels = [Path(t).name for t in trajectories]
-
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
-    else:
-        fig = ax.get_figure()
-
-    for traj_path, label in zip(trajectories, labels):
-        frames = read(traj_path, index=":")
-        energies = [atoms.get_total_energy() for atoms in frames]
-
-        if timestep is not None:
-            x = [i * timestep for i in range(len(energies))]
-        else:
-            x = range(len(energies))
-
-        ax.plot(x, energies, label=label)
-
-    ax.legend()
-    ax_plot(fig, ax, "Time (fs)" if timestep else "Frame", "Total energy (eV)")
-    return fig, ax
+    return _plot_trajectory_series(trajectories, labels, timestep, ax,
+                                   lambda atoms: atoms.get_total_energy(),
+                                   "Total energy (eV)")
 
 
 #: Unit conversion applied to every ``fes.dat`` these wrappers read.  ASE works
@@ -535,11 +575,7 @@ def plot_plumed(file='fes.dat',
                           **_FES_UNITS)
     if x_range is not None:
         ax.set_xlim(x_range)
-    if save:
-        fig.savefig(f"{filename}.png", dpi=600)
-        fig.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
+    _save_and_show(fig, save, show, filename)
     return fig, ax
 
 
@@ -619,9 +655,5 @@ def plot_plumed_multi(files,
     if x_range is not None:
         ax.set_xlim(x_range)
     ax.legend(frameon=False, fontsize=12)
-    if save:
-        fig.savefig(f"{filename}.png", dpi=600)
-        fig.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
+    _save_and_show(fig, save, show, filename)
     return fig, ax

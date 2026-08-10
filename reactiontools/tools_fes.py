@@ -301,7 +301,7 @@ def read_plumed_file(path, drop_der=True):
     metadata: dict[str, str] = {}
     numeric_lines: list[str] = []
 
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         for line in handle:
             stripped = line.strip()
             if not stripped:
@@ -819,6 +819,50 @@ def _resolve_labels(labels, count, template=None):
     return resolved
 
 
+def _keep_last(fes_list, label_list, max_datasets):
+    """
+    Keep only the last *max_datasets* surfaces and their labels.
+
+    Trimming happens after label resolution, so a convergence series
+    labelled by time keeps the labels of the *latest* surfaces.
+
+    Parameters
+    ----------
+    fes_list : list of FES
+        The prepared surfaces.
+    label_list : list
+        One label per surface.
+    max_datasets : int or None
+        Number of surfaces to keep.  ``None`` keeps everything.
+
+    Returns
+    -------
+    tuple of list
+        ``(fes_list, label_list)``, trimmed together.
+    """
+    if max_datasets is not None and len(fes_list) > max_datasets:
+        return fes_list[-max_datasets:], label_list[-max_datasets:]
+    return fes_list, label_list
+
+
+def _default_colors(count):
+    """
+    Pick one colour per surface from the active colour cycle, repeating.
+
+    Parameters
+    ----------
+    count : int
+        Number of colours needed.
+
+    Returns
+    -------
+    list
+        The colours, cycling when *count* exceeds the cycle length.
+    """
+    cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1"])
+    return [cycle[i % len(cycle)] for i in range(count)]
+
+
 def _shared_levels(fes_list, levels):
     """
     Build contour levels spanning every surface in *fes_list*.
@@ -957,9 +1001,7 @@ def plot_fes_1d(sources,
         raise ValueError("plot_fes_1d expects 1-D free-energy surfaces; use plot_fes_2d instead")
 
     label_list = _resolve_labels(labels, len(fes_list), template=label_template)
-    if max_datasets is not None and len(fes_list) > max_datasets:
-        fes_list = fes_list[-max_datasets:]
-        label_list = label_list[-max_datasets:]
+    fes_list, label_list = _keep_last(fes_list, label_list, max_datasets)
 
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
@@ -1073,9 +1115,7 @@ def plot_fes_2d(sources,
         raise ValueError("plot_fes_2d expects 2-D free-energy surfaces; use plot_fes_1d instead")
 
     label_list = _resolve_labels(labels, len(fes_list), template=label_template)
-    if max_datasets is not None and len(fes_list) > max_datasets:
-        fes_list = fes_list[-max_datasets:]
-        label_list = label_list[-max_datasets:]
+    fes_list, label_list = _keep_last(fes_list, label_list, max_datasets)
 
     n_panels = len(fes_list)
     if fig is None or ax is None:
@@ -1202,8 +1242,7 @@ def plot_fes_2d_overlay(sources,
 
     label_list = _resolve_labels(labels, len(fes_list), template=label_template)
     if colors is None:
-        cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1"])
-        colors = [cycle[i % len(cycle)] for i in range(len(fes_list))]
+        colors = _default_colors(len(fes_list))
 
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
@@ -1324,8 +1363,7 @@ def plot_fes_slices(sources,
     values = np.atleast_1d(np.asarray(at, dtype=float))
     label_list = _resolve_labels(labels, len(fes_list))
     if colors is None:
-        cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1"])
-        colors = [cycle[i % len(cycle)] for i in range(len(fes_list))]
+        colors = _default_colors(len(fes_list))
 
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)

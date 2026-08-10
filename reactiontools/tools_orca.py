@@ -18,7 +18,6 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Union
 
 import pandas as pd
 from ase.calculators.orca import ORCA, OrcaProfile
@@ -108,35 +107,26 @@ def orca_calc_preset(orca_path=None,
         directory = os.path.join(tempfile.mkdtemp(), 'orca')
 
     profile = OrcaProfile(command=orca_path)
-    if n_procs > 1:
-        inpt_procs = f'%pal nprocs {n_procs} end'
-    else:
-        inpt_procs = ''
+    inpt_procs = f'%pal nprocs {n_procs} end' if n_procs > 1 else ''
 
     if f_solv is not None and f_solv is not False:
         # `is True`, not truthiness: a solvent name is truthy too, and testing
         # it that way overwrote every name with WATER.
         if f_solv is True:
             f_solv = 'WATER'
-        inpt_solv = f'''
-                                              %CPCM SMD TRUE
-                                                  SMDSOLVENT "{f_solv}"
-                                              END'''
+        inpt_solv = (f'\n%CPCM SMD TRUE\n'
+                     f'    SMDSOLVENT "{f_solv}"\n'
+                     f'END')
     else:
         inpt_solv = ''
 
     if f_disp is None or f_disp is False:
         inpt_disp = ''
     else:
-        if f_disp is True:
-            f_disp = 'D4'
-        inpt_disp = f_disp
+        inpt_disp = 'D4' if f_disp is True else f_disp
 
     if atom_list is not None and calc_type == 'QM/XTB2':
-        atom_list = '{' + atom_list + '}'
-        inpt_xtb = f'''
-        %QMMM QMATOMS {atom_list} END END
-                   '''
+        inpt_xtb = f'\n%QMMM QMATOMS {{{atom_list}}} END END\n'
     else:
         inpt_xtb = ''
 
@@ -157,11 +147,10 @@ def orca_calc_preset(orca_path=None,
     else:
         inpt_simple = f'{calc_type} {basis_set}'
 
-    if multiplicity > 1:
-        # NOTE: open-shell MP2/CCSD conventionally use a UHF reference;
-        # UKS is kept for all methods to preserve existing behaviour.
-        if calc_type in ('DFT', 'QM/XTB2', 'MP2', 'CCSD'):
-            inpt_simple = 'UKS ' + inpt_simple
+    # NOTE: open-shell MP2/CCSD conventionally use a UHF reference;
+    # UKS is kept for all methods to preserve existing behaviour.
+    if multiplicity > 1 and calc_type in ('DFT', 'QM/XTB2', 'MP2', 'CCSD'):
+        inpt_simple = 'UKS ' + inpt_simple
 
     if scf_option is not None:
         inpt_simple += ' ' + scf_option
@@ -169,7 +158,7 @@ def orca_calc_preset(orca_path=None,
     if calc_extra is not None:
         inpt_simple += ' ' + calc_extra
 
-    calc = ORCA(
+    return ORCA(
         profile=profile,
         charge=charge,
         mult=multiplicity,
@@ -177,7 +166,6 @@ def orca_calc_preset(orca_path=None,
         orcasimpleinput=inpt_simple + ' EnGrad',
         orcablocks=inpt_blocks
     )
-    return calc
 
 
 def orca_optimise_atoms(atoms,
@@ -242,15 +230,8 @@ def orca_optimise_atoms(atoms,
     else:
         orca_path = os.path.abspath(orca_path)
 
-    if tight_opt:
-        opt_option = 'TIGHTOPT'
-    else:
-        opt_option = 'OPT'
-
-    if tight_scf:
-        calc_extra = f'{opt_option} TIGHTSCF'
-    else:
-        calc_extra = f'{opt_option}'
+    opt_option = 'TIGHTOPT' if tight_opt else 'OPT'
+    calc_extra = f'{opt_option} TIGHTSCF' if tight_scf else opt_option
 
     with tempfile.TemporaryDirectory() as temp_dir:
         orca_file = os.path.join(temp_dir, "orca.xyz")
@@ -269,7 +250,7 @@ def orca_optimise_atoms(atoms,
         return read(orca_file, format="xyz")
 
 
-def _extract_conformer_info(filepath: Union[str, Path]):
+def _extract_conformer_info(filepath: str | Path):
     """
     Parse the conformer ensemble table from an ORCA GOAT output file.
 
@@ -302,7 +283,7 @@ def _extract_conformer_info(filepath: Union[str, Path]):
     header_pat = re.compile(r"Conformer\s+Energy.*% total", re.I)
     rows = []
     in_table = False
-    with open(filepath, "r", encoding="utf-8", errors="ignore") as fh:
+    with open(filepath, encoding="utf-8", errors="ignore") as fh:
         for line in fh:
             if not in_table and header_pat.search(line):
                 in_table = True
@@ -370,10 +351,7 @@ def orca_calculate_goat(atoms,
     else:
         orca_path = os.path.abspath(orca_path)
     profile = OrcaProfile(command=orca_path)
-    if n_procs > 1:
-        inpt_procs = f'%pal nprocs {n_procs} end'
-    else:
-        inpt_procs = ''
+    inpt_procs = f'%pal nprocs {n_procs} end' if n_procs > 1 else ''
 
     with tempfile.TemporaryDirectory() as temp_dir:
         calc = ORCA(

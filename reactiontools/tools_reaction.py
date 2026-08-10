@@ -47,24 +47,6 @@ def _import_sella(name):
     return Sella, IRC
 
 
-def _geodesic_interpolate(images, n_images):
-    """Interpolate a path with geodesic_interpolate.
-
-    Parameters
-    ----------
-    images : sequence of ase.Atoms
-        Endpoints, or an existing band, to interpolate between.
-    n_images : int
-        Number of images in the interpolated path.
-
-    Returns
-    -------
-    list of ase.Atoms
-        Interpolated path.
-    """
-    return gi.geodesic_interpolate(images, n_images=n_images)
-
-
 def get_neb_path(images):
     """Compute the cumulative reaction-path distance for NEB images.
 
@@ -260,7 +242,7 @@ def optimise_reactant_product(reactant, product, calc,
                              socket_unixsocket=socket_unixsocket,
                              socket_log=socket_log)
 
-    print('Optimizing product...', flush=True)
+    print('Optimising product...', flush=True)
     product = optimise_geom(product, calc,
                             fmax=fmax,
                             steps=steps,
@@ -312,13 +294,12 @@ def _build_band(reactant, product,
     ase.mep.NEB
         Interpolated band with ``image.calc`` still ``None`` throughout.
     """
-    neb_images = [reactant]
-    for _ii in range(n_images - 2):
-        neb_images.append(reactant.copy())
-    neb_images.append(product)
+    neb_images = ([reactant]
+                  + [reactant.copy() for _ in range(n_images - 2)]
+                  + [product])
 
     if geo_int:
-        neb_images = _geodesic_interpolate(neb_images, n_images)
+        neb_images = gi.geodesic_interpolate(neb_images, n_images=n_images)
 
     neb = NEB(neb_images,
               climb=climb,
@@ -903,7 +884,7 @@ def quick_guess_path(reactant, product, n_images=25):
     list of ase.Atoms
         Interpolated path.
     """
-    return _geodesic_interpolate([reactant, product], n_images)
+    return gi.geodesic_interpolate([reactant, product], n_images=n_images)
 
 
 def quick_guess_ts(reactant, product, n_images=25):
@@ -923,6 +904,5 @@ def quick_guess_ts(reactant, product, n_images=25):
     ase.Atoms
         Midpoint image of the interpolated path.
     """
-    atoms_ts = _geodesic_interpolate([reactant, product], n_images)
-    atoms_ts = atoms_ts[n_images // 2]
-    return atoms_ts
+    path = gi.geodesic_interpolate([reactant, product], n_images=n_images)
+    return path[n_images // 2]
