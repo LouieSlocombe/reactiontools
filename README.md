@@ -59,8 +59,8 @@ from ase.build import add_adsorbate, fcc100
 from ase.calculators.emt import EMT
 from ase.constraints import FixAtoms
 
-from reactiontools import (get_ts_image, optimise_neb,
-                           optimise_reactant_product, plot_neb, prepare_neb)
+from reactiontools import (optimise_neb, optimise_reactant_product, plot_neb,
+                           prepare_neb, summarise_neb)
 
 calc = EMT()
 
@@ -81,15 +81,22 @@ neb = prepare_neb(reactant, product, calc, n_images=7,
                   climb=True, rm_ro_trans=False, geo_int=False)
 images = optimise_neb(neb, fmax=0.05, ts_traj="ts.traj")
 
-ts = get_ts_image(images, calc)
-print(f"Barrier: {ts.get_potential_energy() - reactant.get_potential_energy():.3f} eV")
+print(summarise_neb(images))
 
 plot_neb(images, calc, filename="neb")
 ```
 
-This converges in 17 NEB steps and prints `Barrier: 0.374 eV`. `plot_neb`
-writes `neb.png` and `neb.pdf`, with energies referenced to the lowest image
-and reported in meV.
+This converges in 17 NEB steps and prints:
+
+```
+Barrier:         0.374 eV
+Reverse barrier: 0.374 eV
+Reaction energy: 0.000 eV
+TS image:        3 of 6
+```
+
+`plot_neb` writes `neb.png` and `neb.pdf`, with energies referenced to the
+lowest image and reported in meV.
 
 ### Choosing NEB settings
 
@@ -111,6 +118,46 @@ about:
   calculator like EMT gains nothing). Run under `mpirun` and ASE instead
   distributes the images across MPI ranks; pass a specific communicator with
   `world` if you don't want `ase.parallel.world`.
+
+### Reading the numbers off a band
+
+`summarise_neb` reduces a relaxed band to what it was run for:
+
+```python
+summary = summarise_neb(images)
+summary.barrier           # forward, eV
+summary.reverse_barrier   # eV
+summary.reaction_energy   # product - reactant, eV; negative if exothermic
+summary.ts_index          # which image get_ts_image returns
+summary.energies          # absolute, per image, eV
+```
+
+The barrier is measured from the highest image, so it agrees with
+`get_ts_image` and with the profile `plot_neb` draws. It is not spline-fitted,
+unlike ASE's `NEBTools.get_barrier`, whose default interpolates between images
+and can report a maximum sitting at no image at all.
+
+`summary.is_barrierless` is worth checking before paying for a saddle search:
+it is `True` when the top image is an endpoint, meaning the path runs downhill
+throughout and `get_ts_image` would hand `optimise_ts` a structure that is not
+a saddle.
+
+```python
+summary = summarise_neb(images)
+if not summary.is_barrierless:
+    ts = optimise_ts(get_ts_image(images), calc, fmax=0.01)
+```
+
+A band resolves the barrier only as well as its images allow — the true saddle
+lies between them, so this underestimates. Refining the top image is what turns
+it into a number worth quoting.
+
+`plot_neb` can put the same figure on the plot, in the meV of its y-axis. It is
+off by default, so existing figures do not change:
+
+```python
+plot_neb(images, calc, annotate=True)
+```
 
 ### Knowing whether it converged
 
@@ -472,6 +519,8 @@ plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 | `optimise_neb(neb, fmax=0.01, steps=1000, ts_traj='ts.traj', optimiser=BFGS, logfile='-')` | Relax the band and return the final images. |
 | `ConvergenceWarning`, `ConvergenceError` | Warned, or raised under `raise_on_unconverged=True`, when an `optimise_*` run hits its step limit. |
 | `get_ts_image(neb_images, calc=None)` | The highest-energy image along a band, reusing the energies the images carry unless a calculator is given. |
+| `summarise_neb(images, calc=None)` | Forward and reverse barriers, reaction energy and TS index, as a `NebSummary`. |
+| `NebSummary` | What `summarise_neb` returns: `barrier`, `reverse_barrier`, `reaction_energy`, `ts_index`, `energies`, `is_barrierless`. Prints as a short report. |
 | `get_fmax(atoms)` | Largest per-atom force, the quantity the optimisers converge against. |
 | `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1, logfile='-')` | Refine a TS guess to a true saddle point with Sella. Needs the `[ts]` extra. |
 | `optimise_irc(ts_image, calc, dx=0.1, ..., logfile='-')` | Follow the IRC downhill in both directions, returning `(forward, reverse)`. Needs the `[ts]` extra. |
@@ -553,7 +602,7 @@ sampled regions rather than letting them dominate the colour scale, and
 | `ax_plot(fig, ax, xlab, ylab)` | Same, for an explicit `Figure`/`Axes` pair. `None` for either label leaves it untouched. |
 | `plot_images(images, view='tilted', n_cols=4, ...)` | Grid of rendered structures, one panel per image. |
 | `show_atoms(atoms, view='tilted', ...)` | Structures superimposed on one axes, for seeing how far a band has moved. |
-| `plot_neb(images, calc=None, smooth=True, ...)` | NEB energy profile in meV against path length. |
+| `plot_neb(images, calc=None, smooth=True, annotate=False, ...)` | NEB energy profile in meV against path length. `annotate=True` writes the barrier on the axes. |
 | `plot_irc(images, calc=None, color='black', ...)` | The same profile with IRC defaults; pair with `stitch_path`. |
 | `plot_temperature(trajectories, labels=None, timestep=None, ax=None)` | Temperature against frame or time for one or more trajectories. |
 | `plot_total_energy(trajectories, labels=None, timestep=None, ax=None)` | Total energy against frame or time. |

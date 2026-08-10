@@ -1,4 +1,3 @@
-import copy
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,7 +8,9 @@ from ase.visualize.plot import plot_atoms
 from scipy.interpolate import make_interp_spline
 
 from .tools_fes import plot_fes_1d
-from .tools_reaction import get_neb_path
+# _get_energy lives with the reaction tools so summarise_neb can share it;
+# re-exported here because callers and tests import it from this module.
+from .tools_reaction import _get_energy, get_neb_path
 # Re-exported: the styling helpers used to live here, and callers import them
 # from this module.
 from .tools_style import ax_plot, n_plot  # noqa: F401
@@ -196,37 +197,8 @@ def show_atoms(atoms,
     return fig, ax
 
 
-def _get_energy(image, calc):
-    """Return the energy an image already carries, else evaluate with ``calc``.
-
-    Images read back from a trajectory hold their energies, and re-running the
-    calculator would recompute the band's most expensive quantity. An image
-    without one gets its own deepcopy of ``calc``, so images never share
-    calculator state.
-
-    Parameters
-    ----------
-    image : ase.Atoms
-        Image whose energy is wanted.
-    calc : ase.calculators.Calculator or None
-        Fallback calculator for images that carry no energy.
-
-    Returns
-    -------
-    float
-        Potential energy in eV.
-    """
-    if image.calc is not None:
-        try:
-            return image.calc.results['energy']
-        except (AttributeError, KeyError):
-            pass
-    image.calc = copy.deepcopy(calc)
-    return image.get_potential_energy()
-
-
 def _plot_profile(images, calc, fig, ax, save, show, smooth, k, fig_size,
-                  filename, label, color=None):
+                  filename, label, color=None, annotate=False):
     """Draw a reaction-path energy profile in meV against path distance.
 
     Shared body of :func:`plot_neb` and :func:`plot_irc`, which differ only
@@ -239,6 +211,8 @@ def _plot_profile(images, calc, fig, ax, save, show, smooth, k, fig_size,
     color : str or None, optional
         Colour for the curve and its markers. ``None`` leaves matplotlib's
         colour cycle in charge.
+    annotate : bool, optional
+        Write the forward barrier in the corner of the axes.
 
     Returns
     -------
@@ -261,6 +235,12 @@ def _plot_profile(images, calc, fig, ax, save, show, smooth, k, fig_size,
                 **color_kwargs)
     else:
         ax.plot(path, energies, 'o-', lw=2, label=label, **color_kwargs)
+    if annotate:
+        # Shift-invariant, so the barrier is the same whether it is measured
+        # off these meV values or the raw energies summarise_neb reports.
+        barrier = energies[np.argmax(energies)] - energies[0]
+        ax.text(0.02, 0.95, f"$E_\\mathrm{{a}}$ = {barrier:.0f} meV",
+                transform=ax.transAxes, va="top", ha="left", fontsize=12)
     ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
     _save_and_show(fig, save, show, filename)
     return fig, ax
@@ -276,7 +256,8 @@ def plot_neb(images,
              k=2,
              fig_size=(8, 3),
              filename="neb",
-             label=None):
+             label=None,
+             annotate=False):
     """Plot a nudged elastic band energy profile.
 
     Parameters
@@ -304,6 +285,12 @@ def plot_neb(images,
         Output filename stem for saved figures.
     label : str, optional
         Line label for the path curve.
+    annotate : bool, optional
+        Write the forward barrier in the top-left corner of the axes, in the
+        meV the y-axis is drawn in. Off by default so that existing figures
+        do not change. The value matches
+        :attr:`~reactiontools.NebSummary.barrier` from
+        :func:`~reactiontools.summarise_neb`, converted to meV.
 
     Returns
     -------
@@ -311,7 +298,7 @@ def plot_neb(images,
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
     return _plot_profile(images, calc, fig, ax, save, show, smooth, k,
-                         fig_size, filename, label)
+                         fig_size, filename, label, annotate=annotate)
 
 
 def plot_irc(images,

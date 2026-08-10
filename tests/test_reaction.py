@@ -8,8 +8,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from ase import Atoms
 from ase.build import add_adsorbate, fcc100, molecule
 from ase.calculators.emt import EMT
+from ase.calculators.singlepoint import SinglePointCalculator
 from ase.calculators.socketio import PySocketIOClient, SocketIOCalculator
 from ase.constraints import FixAtoms
 from ase.io import read
@@ -33,7 +35,8 @@ from reactiontools import (ConvergenceError,
                            restart_neb,
                            restart_parallel_neb,
                            socket_calculators,
-                           stitch_path)
+                           stitch_path,
+                           summarise_neb)
 from reactiontools import tools_reaction
 
 # Skip the saddle-point tests rather than the whole module: sella is the
@@ -1244,6 +1247,104 @@ class TestGetTsImage:
 
         assert all(atoms.calc is not original
                    for atoms, original in zip(chain, originals))
+
+
+class TestSummariseNeb:
+    @pytest.fixture
+    def band(self):
+        """A three-image band with a known profile, built by hand.
+
+        Energies are attached directly, so the arithmetic under test is
+        checked against numbers chosen rather than whatever EMT happens to
+        give: reactant 1.0 eV, top 3.5 eV, product 2.0 eV.
+        """
+        images = []
+        for energy in (1.0, 3.5, 2.0):
+            atoms = Atoms("H", positions=[[0.0, 0.0, len(images) * 0.5]])
+            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+            images.append(atoms)
+        return images
+
+    def test_computes_the_forward_barrier(self, band):
+        assert summarise_neb(band).barrier == pytest.approx(2.5)
+
+    def test_computes_the_reverse_barrier(self, band):
+        assert summarise_neb(band).reverse_barrier == pytest.approx(1.5)
+
+    def test_computes_the_reaction_energy(self, band):
+        assert summarise_neb(band).reaction_energy == pytest.approx(1.0)
+
+    def test_finds_the_top_image(self, band):
+        assert summarise_neb(band).ts_index == 1
+
+    def test_reports_absolute_energies(self, band):
+        """Not shifted, so the caller can reference them where they like."""
+        assert summarise_neb(band).energies == pytest.approx([1.0, 3.5, 2.0])
+
+    def test_agrees_with_get_ts_image(self, calc, endpoints):
+        """The barrier must be the one the TS image actually sits at."""
+        reactant, product = endpoints
+        neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
+        with pytest.warns(ConvergenceWarning):
+            images = optimise_neb(neb, fmax=0.05, steps=5, logfile=None)
+
+        summary = summarise_neb(images)
+
+        expected = (get_ts_image(images).get_potential_energy()
+                    - images[0].get_potential_energy())
+        assert summary.barrier == pytest.approx(expected)
+        assert images[summary.ts_index] is get_ts_image(images)
+
+    def test_flags_a_downhill_band_as_barrierless(self):
+        """The top image is then an endpoint, and no saddle is there to refine."""
+        images = []
+        for energy in (3.0, 2.0, 1.0):
+            atoms = Atoms("H", positions=[[0.0, 0.0, len(images) * 0.5]])
+            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+            images.append(atoms)
+
+        summary = summarise_neb(images)
+
+        assert summary.is_barrierless is True
+        assert summary.ts_index == 0
+        assert summary.barrier == pytest.approx(0.0)
+
+    def test_a_real_barrier_is_not_flagged(self, band):
+        assert summarise_neb(band).is_barrierless is False
+
+    def test_rejects_an_empty_band(self):
+        with pytest.raises(ValueError, match="empty band"):
+            summarise_neb([])
+
+    def test_uses_the_energies_the_images_carry(self, band):
+        """No calculator needed for a band that has already been relaxed."""
+        summary = summarise_neb(band, calc=None)
+
+        assert summary.barrier == pytest.approx(2.5)
+
+    def test_falls_back_to_the_calculator_for_bare_images(self, calc, chain):
+        summary = summarise_neb(chain, calc)
+
+        assert len(summary.energies) == len(chain)
+        assert np.all(np.isfinite(summary.energies))
+
+    def test_prints_a_readable_summary(self, band):
+        text = str(summarise_neb(band))
+
+        assert "Barrier:         2.500 eV" in text
+        assert "Reverse barrier: 1.500 eV" in text
+        assert "Reaction energy: 1.000 eV" in text
+        assert "TS image:        1 of 2" in text
+
+    def test_a_thermoneutral_reaction_prints_without_a_sign(self):
+        """-0.000 eV reads as a finding rather than as the rounding it is."""
+        images = []
+        for energy in (0.0, 1.0, -1e-9):
+            atoms = Atoms("H", positions=[[0.0, 0.0, len(images) * 0.5]])
+            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+            images.append(atoms)
+
+        assert "Reaction energy: 0.000 eV" in str(summarise_neb(images))
 
 
 class TestGetFmax:

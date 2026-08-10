@@ -2,6 +2,7 @@ import copy
 import os
 import warnings
 from contextlib import ExitStack, contextmanager, nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 
 import geodesic_interpolate as gi
@@ -1165,6 +1166,151 @@ def restart_parallel_neb(images, make_calc,
 
     with _parallel_band(neb, energies, make_calc, socket_kwargs) as band:
         yield band
+
+
+def _get_energy(image, calc):
+    """Return the energy an image already carries, else evaluate with ``calc``.
+
+    Images read back from a trajectory hold their energies, and re-running the
+    calculator would recompute the band's most expensive quantity. An image
+    without one gets its own deepcopy of ``calc``, so images never share
+    calculator state.
+
+    Parameters
+    ----------
+    image : ase.Atoms
+        Image whose energy is wanted.
+    calc : ase.calculators.Calculator or None
+        Fallback calculator for images that carry no energy.
+
+    Returns
+    -------
+    float
+        Potential energy in eV.
+    """
+    if image.calc is not None:
+        try:
+            return image.calc.results['energy']
+        except (AttributeError, KeyError):
+            pass
+    image.calc = copy.deepcopy(calc)
+    return image.get_potential_energy()
+
+
+@dataclass
+class NebSummary:
+    """The numbers a relaxed band is run for.
+
+    Attributes
+    ----------
+    energies : numpy.ndarray
+        Potential energy of each image in eV, as the calculator reported it.
+        Absolute, not shifted: subtract ``energies[0]`` for a profile
+        referenced to the reactant, as the barriers below are.
+    ts_index : int
+        Index of the highest-energy image, the one :func:`get_ts_image`
+        returns.
+    barrier : float
+        Forward barrier in eV, from the first image up to the highest.
+    reverse_barrier : float
+        Reverse barrier in eV, from the last image up to the highest.
+    reaction_energy : float
+        Energy of the last image relative to the first, in eV. Negative for
+        an exothermic reaction.
+    """
+
+    energies: np.ndarray
+    ts_index: int
+    barrier: float
+    reverse_barrier: float
+    reaction_energy: float
+
+    def __post_init__(self):
+        self.energies = np.asarray(self.energies, dtype=float)
+
+    @property
+    def is_barrierless(self):
+        """bool: True when the highest image is one of the endpoints.
+
+        The band then has no maximum in between: it runs downhill throughout,
+        and what :func:`get_ts_image` returns is an endpoint rather than a
+        transition state. Worth checking before paying for
+        :func:`optimise_ts`, which would otherwise be started from a
+        structure that is not a saddle at all.
+        """
+        return self.ts_index in (0, len(self.energies) - 1)
+
+    @staticmethod
+    def _ev(value):
+        """Format an energy, without a sign on a value that rounds to zero.
+
+        A thermoneutral reaction comes out a hair either side of zero, and
+        "-0.000 eV" reads as a finding rather than as the rounding it is.
+        """
+        text = f"{value:.3f}"
+        return "0.000" if text == "-0.000" else text
+
+    def __str__(self):
+        return (f"Barrier:         {self._ev(self.barrier)} eV\n"
+                f"Reverse barrier: {self._ev(self.reverse_barrier)} eV\n"
+                f"Reaction energy: {self._ev(self.reaction_energy)} eV\n"
+                f"TS image:        {self.ts_index} of "
+                f"{len(self.energies) - 1}")
+
+
+def summarise_neb(images, calc=None):
+    """Reduce a relaxed band to the numbers it was run for.
+
+    The barrier is measured from the highest image, so it agrees with
+    :func:`get_ts_image` and with the profile :func:`plot_neb` draws. It is
+    not spline-fitted, unlike ASE's ``NEBTools.get_barrier``, whose default
+    interpolates between images and so can report a maximum that sits at no
+    image at all.
+
+    A band only resolves a barrier as well as its images allow: the true
+    saddle lies between them, so this underestimates. Refining the top image
+    with :func:`optimise_ts` is what turns it into a number worth quoting.
+
+    Parameters
+    ----------
+    images : sequence of ase.Atoms
+        Images along the band, reactant first.
+    calc : ase.calculators.Calculator or None, optional
+        Fallback for images carrying no energy. Not needed for a band from
+        :func:`optimise_neb`, whose images already have theirs. Unlike
+        :func:`get_ts_image`, a calculator given here does not replace the
+        energies the images already hold.
+
+    Returns
+    -------
+    NebSummary
+        Barriers, reaction energy and the position of the top image.
+
+    Raises
+    ------
+    ValueError
+        If ``images`` is empty.
+
+    Examples
+    --------
+    >>> summary = summarise_neb(images)
+    >>> print(summary)                                  # doctest: +SKIP
+    Barrier:         0.374 eV
+    Reverse barrier: 0.374 eV
+    Reaction energy: 0.000 eV
+    TS image:        3 of 6
+    """
+    images = list(images)
+    if not images:
+        raise ValueError("Cannot summarise an empty band")
+
+    energies = np.array([_get_energy(image, calc) for image in images])
+    ts_index = int(np.argmax(energies))
+    return NebSummary(energies=energies,
+                      ts_index=ts_index,
+                      barrier=float(energies[ts_index] - energies[0]),
+                      reverse_barrier=float(energies[ts_index] - energies[-1]),
+                      reaction_energy=float(energies[-1] - energies[0]))
 
 
 def get_ts_image(neb_images, calc=None):

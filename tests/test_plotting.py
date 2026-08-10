@@ -16,7 +16,8 @@ from reactiontools import (ax_plot,
                            plot_temperature,
                            plot_total_energy,
                            prepare_neb,
-                           show_atoms)
+                           show_atoms,
+                           summarise_neb)
 from reactiontools.tools_plotting import (_expand_fes_files,
                                           _fes_labels,
                                           _get_energy)
@@ -165,6 +166,26 @@ class TestPlotNeb:
         fig, ax = plot_neb(band, calc, smooth=True, save=False, show=False)
 
         assert len(ax.lines[0].get_xdata()) > len(band)
+
+    def test_does_not_annotate_by_default(self, band, calc):
+        """Existing figures must not gain text they did not have."""
+        fig, ax = plot_neb(band, calc, save=False, show=False)
+
+        assert len(ax.texts) == 0
+
+    def test_annotates_the_barrier_when_asked(self, band, calc):
+        fig, ax = plot_neb(band, calc, save=False, show=False, annotate=True)
+
+        assert len(ax.texts) == 1
+        assert "meV" in ax.texts[0].get_text()
+
+    def test_the_annotated_barrier_matches_summarise_neb(self, band, calc):
+        """The figure and the numbers must not disagree."""
+        fig, ax = plot_neb(band, calc, save=False, show=False, annotate=True)
+
+        expected = summarise_neb(band, calc).barrier * 1000.0
+        drawn = float(ax.texts[0].get_text().split("=")[1].replace("meV", ""))
+        assert drawn == pytest.approx(expected, abs=0.5)
 
     def test_draws_on_a_supplied_axes(self, band, calc):
         fig, ax = plt.subplots()

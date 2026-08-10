@@ -80,6 +80,8 @@ from .tools_plumed import (plumed_selection,
                            run_sum_hills)
 from .tools_reaction import (ConvergenceError,
                              ConvergenceWarning,
+                             NebSummary,
+                             summarise_neb,
                              get_neb_path,
                              get_fmax,
                              stitch_path,
@@ -106,6 +108,8 @@ __all__ = [
     # tools_reaction
     "ConvergenceError",
     "ConvergenceWarning",
+    "NebSummary",
+    "summarise_neb",
     "get_neb_path",
     "get_fmax",
     "stitch_path",
