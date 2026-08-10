@@ -570,6 +570,44 @@ from reactiontools import plot_plumed_multi
 plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 ```
 
+#### Reading the numbers off a surface
+
+`summarise_fes` measures a 1-D profile: the barrier each way, and the free
+energy of one basin relative to the other. Give it the two basins as windows on
+the collective variable — reading them off the plot is the point:
+
+```python
+from reactiontools import summarise_fes
+
+print(summarise_fes("fes.dat", basin_a=(1.0, 2.0), basin_b=(3.0, 4.5),
+                    source_unit="eV"))
+```
+
+```
+Barrier A->B:  0.352 eV
+Barrier B->A:  0.418 eV
+Delta F (B-A): -0.066 eV
+Minima at:     1.5, 3.75
+Barrier at:    2.6
+```
+
+Windows rather than automatic minimum-finding, because a noisy surface has
+local minima everywhere, and because a convergence series only means anything
+if every surface is measured the same way.
+
+By default `delta_f` is the difference between the two minima. Pass a
+`temperature` and it comes instead from integrating the Boltzmann weight across
+each basin, which counts a wide basin as more probable than a narrow one of the
+same depth:
+
+```python
+summarise_fes("fes.dat", basin_a=(1.0, 2.0), basin_b=(3.0, 4.5),
+              source_unit="eV", temperature=300)
+```
+
+The barriers are measured out of the bottom of each well either way, since that
+is what a barrier is.
+
 #### Has it converged?
 
 `stride` sums the hills every so often instead of once at the end, giving a
@@ -591,6 +629,22 @@ plot_fes_1d(surfaces, source_unit="eV", max_datasets=5,
 Set the grid explicitly for a series. Without it PLUMED picks bounds per
 surface from the hills it has so far, and the surfaces come back on grids that
 do not line up.
+
+Surfaces lying on top of each other is the loose version of the test. The one
+that matters is whether the numbers have stopped moving, which
+`plot_fes_convergence` draws directly — the barrier and the basin difference
+against time:
+
+```python
+from reactiontools import fes_convergence, plot_fes_convergence
+
+hills = [(i + 1) * 100 for i in range(len(surfaces))]
+plot_fes_convergence(surfaces, basin_a=(1.0, 2.0), basin_b=(3.0, 4.5),
+                     times=hills, source_unit="eV", filename="convergence")
+```
+
+`fes_convergence` returns the underlying `FESSummary` per surface if you want
+the numbers rather than the picture.
 
 `sum_hills_files` exists because the naming is a trap. `--stride` does not
 number the file it was given — it writes `f"{outfile}{n}.dat"`, so the default
@@ -704,6 +758,10 @@ call.
 | `read_plumed_file(path, drop_der=True)` | Parse a PLUMED file into a `PlumedData` of columns, `#! FIELDS` names and `#! SET` metadata. |
 | `as_fes(source, ...)` | Normalise any supported source into an `FES`. |
 | `convert_energy(values, source, target)` | Convert between the units in `ENERGY_UNITS` (kJ/mol, kcal/mol, eV, meV, hartree, kT300). |
+| `summarise_fes(source, basin_a, basin_b, temperature=None, ...)` | Barriers each way and the basin free-energy difference, as a `FESSummary`. |
+| `FESSummary` | What `summarise_fes` returns: `forward_barrier`, `reverse_barrier`, `delta_f`, `minimum_a`/`minimum_b`, `depth_a`/`depth_b`, `barrier_position`. Prints as a short report. |
+| `fes_convergence(sources, basin_a, basin_b, ...)` | One `FESSummary` per surface of a series. |
+| `plot_fes_convergence(sources, basin_a, basin_b, times=None, ...)` | The barrier and the basin difference against time. |
 | `plot_fes(sources, **kwargs)` | Plot, dispatching on dimensionality. |
 | `plot_fes_1d(sources, labels=None, energy_unit=None, ...)` | One or many 1-D profiles on one axes. |
 | `plot_fes_2d(sources, levels=30, cmap=None, ...)` | Filled contours, one panel per surface. |

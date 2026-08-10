@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from ase.units import kB
 
 from .tools_style import _finalise, _style_axes, ax_plot
 
@@ -49,17 +50,21 @@ __all__ = [
     "DEFAULT_ENERGY_UNIT",
     "ENERGY_UNITS",
     "FES",
+    "FESSummary",
     "PlumedData",
     "as_fes",
     "convert_energy",
+    "fes_convergence",
     "plot_fes",
     "plot_fes_1d",
     "plot_fes_2d",
     "plot_fes_2d_overlay",
+    "plot_fes_convergence",
     "plot_fes_slices",
     "plot_plumed_colvar",
     "plot_plumed_fes",
     "read_plumed_file",
+    "summarise_fes",
     "unit_label",
 ]
 
@@ -918,6 +923,260 @@ def _default_grid_size(n_panels, fig_size):
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
+def _format_energy(value):
+    """Format an energy, without a sign on a value that rounds to zero."""
+    text = f"{value:.3f}"
+    return "0.000" if text == "-0.000" else text
+
+
+def _basin_mask(fes, basin, name):
+    """Select the sampled grid points of a 1-D surface inside a CV window.
+
+    Parameters
+    ----------
+    fes : FES
+        One-dimensional surface.
+    basin : sequence of float
+        ``(low, high)`` bounds on the collective variable, in either order.
+    name : str
+        Argument name, quoted in the error message.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask over the grid.
+
+    Raises
+    ------
+    ValueError
+        If the window holds no sampled point.
+    """
+    cv = fes.cvs[0]
+    low, high = sorted(float(bound) for bound in basin)
+    inside = (cv >= low) & (cv <= high) & np.isfinite(fes.energy)
+    if not inside.any():
+        raise ValueError(
+            f"{name}=({low:g}, {high:g}) holds no sampled grid point. The "
+            f"collective variable runs from {np.min(cv):g} to {np.max(cv):g}, "
+            f"and unsampled bins do not count.")
+    return inside
+
+
+def _basin_free_energy(fes, mask, kt, reference):
+    """Free energy of a basin: its minimum, or the Boltzmann integral over it.
+
+    Parameters
+    ----------
+    fes : FES
+        One-dimensional surface.
+    mask : numpy.ndarray
+        Grid points making up the basin.
+    kt : float or None
+        Thermal energy in the surface's own units. ``None`` returns the
+        minimum instead of integrating.
+    reference : float
+        Energy the exponent is measured from, shared by every basin so that
+        it cancels in a difference.
+
+    Returns
+    -------
+    float
+        The basin's free energy.
+    """
+    energy = fes.energy[mask]
+    if kt is None:
+        return float(np.min(energy))
+    weights = np.exp(-(energy - reference) / kt)
+    return float(reference - kt * np.log(np.trapezoid(weights, fes.cvs[0][mask])))
+
+
+@dataclass
+class FESSummary:
+    """The numbers read off a free-energy profile.
+
+    Attributes
+    ----------
+    minimum_a, minimum_b : float
+        Where each basin bottoms out, in collective-variable units.
+    depth_a, depth_b : float
+        The free energy there. The barriers are measured from these, since a
+        barrier is a barrier out of the bottom of a well.
+    delta_f : float
+        Free energy of basin B relative to basin A. The difference of the two
+        depths, or of the two Boltzmann-integrated basin free energies when
+        :func:`summarise_fes` was given a temperature — which is the one that
+        accounts for a wide basin being more probable than a narrow one of
+        equal depth.
+    barrier_position : float
+        Where the profile peaks between the basins.
+    forward_barrier, reverse_barrier : float
+        Height of that peak above basin A and above basin B.
+    energy_unit : str or None
+        Unit the energies are in, for reporting.
+    """
+
+    minimum_a: float
+    minimum_b: float
+    depth_a: float
+    depth_b: float
+    delta_f: float
+    barrier_position: float
+    forward_barrier: float
+    reverse_barrier: float
+    energy_unit: str | None = None
+
+    def __str__(self):
+        unit = f" {self.energy_unit}" if self.energy_unit else ""
+        return (f"Barrier A->B:  {_format_energy(self.forward_barrier)}{unit}\n"
+                f"Barrier B->A:  {_format_energy(self.reverse_barrier)}{unit}\n"
+                f"Delta F (B-A): {_format_energy(self.delta_f)}{unit}\n"
+                f"Minima at:     {self.minimum_a:g}, {self.minimum_b:g}\n"
+                f"Barrier at:    {self.barrier_position:g}")
+
+
+def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
+    """Measure the barrier and basin free-energy difference off a 1-D surface.
+
+    The two basins are given as windows on the collective variable rather
+    than found automatically, which keeps the answer predictable on a noisy
+    surface and, more to the point, keeps it comparable across the surfaces
+    of a convergence series.
+
+    Parameters
+    ----------
+    source : FES source
+        A PLUMED file, an array or an :class:`FES`; see :func:`as_fes`. Must
+        be one-dimensional.
+    basin_a, basin_b : sequence of float
+        ``(low, high)`` bounds of each basin. They may be given in either
+        order but must not overlap, and there must be grid points between
+        them for the barrier to sit on.
+    temperature : float or None, optional
+        Temperature in kelvin. Given one, ``delta_f`` comes from integrating
+        the Boltzmann weight across each basin, so that a wide basin counts
+        for more than a narrow one of the same depth. ``None``, the default,
+        just compares the two minima. The barriers are measured from the
+        minima either way.
+    **kwargs
+        Forwarded to :func:`as_fes`: ``energy_unit``, ``source_unit``,
+        ``shift_min_to_zero``, ``max_energy``, ``columns`` and the label
+        overrides.
+
+    Returns
+    -------
+    FESSummary
+        Barriers, basin minima and their free-energy difference.
+
+    Raises
+    ------
+    ValueError
+        If the surface is not one-dimensional, if either basin holds no
+        sampled point, if the basins overlap, if nothing lies between them,
+        or if a temperature is given for a surface whose energy unit is
+        unknown.
+
+    Examples
+    --------
+    >>> summary = summarise_fes("fes.dat", basin_a=(1.0, 2.0),
+    ...                         basin_b=(3.0, 4.5), source_unit="eV")
+    >>> print(summary)                                       # doctest: +SKIP
+    Barrier A->B:  0.352 eV
+    Barrier B->A:  0.418 eV
+    Delta F (B-A): -0.066 eV
+    Minima at:     1.5, 3.75
+    Barrier at:    2.6
+    """
+    fes = as_fes(source, **kwargs)
+    if fes.ndim != 1:
+        raise ValueError(
+            f"summarise_fes reads a barrier off a 1-D profile, but this "
+            f"surface has {fes.ndim} collective variables. Project it first "
+            f"with run_sum_hills(idw=...), or cut it with FES.slice_at.")
+
+    kt = None
+    if temperature is not None:
+        if fes.energy_unit is None:
+            raise ValueError(
+                "Cannot use temperature without knowing the surface's energy "
+                "unit; pass source_unit or energy_unit.")
+        kt = float(convert_energy(kB * temperature, source="eV",
+                                  target=fes.energy_unit))
+
+    cv = fes.cvs[0]
+    mask_a = _basin_mask(fes, basin_a, "basin_a")
+    mask_b = _basin_mask(fes, basin_b, "basin_b")
+
+    low_a, high_a = sorted(float(bound) for bound in basin_a)
+    low_b, high_b = sorted(float(bound) for bound in basin_b)
+    if low_a <= high_b and low_b <= high_a:
+        raise ValueError(
+            f"basin_a=({low_a:g}, {high_a:g}) and basin_b=({low_b:g}, "
+            f"{high_b:g}) overlap, so there is no barrier between them.")
+
+    inner_low, inner_high = (high_a, low_b) if high_a < low_b else (high_b, low_a)
+    between = (cv > inner_low) & (cv < inner_high) & np.isfinite(fes.energy)
+    if not between.any():
+        raise ValueError(
+            f"No sampled grid point lies between the basins, over "
+            f"({inner_low:g}, {inner_high:g}), so there is no barrier to "
+            f"measure. Widen the gap between them, or check the surface is "
+            f"sampled there.")
+
+    index_a = np.flatnonzero(mask_a)[np.argmin(fes.energy[mask_a])]
+    index_b = np.flatnonzero(mask_b)[np.argmin(fes.energy[mask_b])]
+    top = np.flatnonzero(between)[np.argmax(fes.energy[between])]
+
+    reference = float(np.nanmin(fes.energy))
+    energy_a = _basin_free_energy(fes, mask_a, kt, reference)
+    energy_b = _basin_free_energy(fes, mask_b, kt, reference)
+
+    return FESSummary(
+        minimum_a=float(cv[index_a]),
+        minimum_b=float(cv[index_b]),
+        depth_a=float(fes.energy[index_a]),
+        depth_b=float(fes.energy[index_b]),
+        delta_f=energy_b - energy_a,
+        barrier_position=float(cv[top]),
+        forward_barrier=float(fes.energy[top] - fes.energy[index_a]),
+        reverse_barrier=float(fes.energy[top] - fes.energy[index_b]),
+        energy_unit=fes.energy_unit)
+
+
+def fes_convergence(sources, basin_a, basin_b, temperature=None, **kwargs):
+    """Summarise each surface of a series, to see whether the numbers settle.
+
+    A metadynamics run is converged when the barrier and the basin difference
+    stop moving, not when the surface stops looking different. Feed it the
+    series :func:`~reactiontools.sum_hills_files` collects from a strided
+    ``sum_hills``.
+
+    Parameters
+    ----------
+    sources : sequence of FES source
+        The surfaces, in order.
+    basin_a, basin_b : sequence of float
+        Basin windows, the same for every surface — that is the point of
+        fixing them rather than finding them per surface.
+    temperature : float or None, optional
+        See :func:`summarise_fes`.
+    **kwargs
+        Forwarded to :func:`as_fes`.
+
+    Returns
+    -------
+    list of FESSummary
+        One per surface, in the order given.
+    """
+    # Pass the sources through untouched rather than preparing them here:
+    # summarise_fes calls as_fes itself, and doing it twice would apply
+    # max_energy and the unit conversion on top of themselves.
+    if _is_single_source(sources):
+        sources = [sources]
+    return [summarise_fes(source, basin_a, basin_b, temperature=temperature,
+                          **kwargs)
+            for source in sources]
+
+
 def plot_fes_1d(sources,
                 fig=None,
                 ax=None,
@@ -1560,3 +1819,82 @@ def plot_plumed_colvar(path,
     axes[len(plot_cols) - 1].set_xlabel(x_label)
     _finalise(fig, filename=filename, show=show)
     return fig, axes[:len(plot_cols)]
+
+
+def plot_fes_convergence(sources,
+                         basin_a,
+                         basin_b,
+                         times=None,
+                         temperature=None,
+                         fig=None,
+                         ax=None,
+                         x_lab=None,
+                         y_lab=None,
+                         filename=None,
+                         show=False,
+                         fig_size=(8, 3),
+                         **kwargs):
+    """Plot how the barrier and the basin difference settle over a series.
+
+    The convergence test that matters: a run is done when these two numbers
+    stop moving, which a series of surfaces plotted on top of each other
+    shows only loosely.
+
+    Parameters
+    ----------
+    sources : sequence of FES source
+        The surfaces, in order; see :func:`fes_convergence`.
+    basin_a, basin_b : sequence of float
+        Basin windows, held fixed across the series.
+    times : sequence of float or None, optional
+        X values — simulated time, or hills deposited. ``None`` numbers the
+        surfaces from one.
+    temperature : float or None, optional
+        See :func:`summarise_fes`.
+    fig, ax : matplotlib objects, optional
+        Draw on these instead of making a new figure.
+    x_lab, y_lab : str or None, optional
+        Axis labels. Defaults are ``"Surface"`` (or ``"Time"`` when *times*
+        is given) and the energy unit of the first surface.
+    filename : str or None, optional
+        Write the figure here; ``None`` writes nothing.
+    show : bool, optional
+        Call ``plt.show()`` afterwards.
+    fig_size : tuple, optional
+        Size of a newly created figure.
+    **kwargs
+        Forwarded to :func:`as_fes`.
+
+    Returns
+    -------
+    tuple
+        ``(fig, ax)``.
+
+    Raises
+    ------
+    ValueError
+        If *times* does not have one value per surface.
+    """
+    summaries = fes_convergence(sources, basin_a, basin_b,
+                                temperature=temperature, **kwargs)
+    if times is None:
+        times = np.arange(1, len(summaries) + 1)
+    elif len(times) != len(summaries):
+        raise ValueError(
+            f"Got {len(times)} times for {len(summaries)} surfaces.")
+
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+
+    ax.plot(times, [s.forward_barrier for s in summaries], "o-",
+            label="Barrier A→B")
+    ax.plot(times, [s.delta_f for s in summaries], "s-", label="ΔF (B−A)")
+    ax.legend(loc="best")
+
+    unit = summaries[0].energy_unit
+    _style_axes(fig, ax,
+                x_lab if x_lab is not None else
+                ("Surface" if times is None else "Time"),
+                y_lab if y_lab is not None else unit_label(unit))
+    _finalise(fig, filename=filename, show=show)
+    return fig, ax

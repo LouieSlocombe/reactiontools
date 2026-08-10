@@ -10,8 +10,12 @@ import numpy as np
 import pytest
 
 from reactiontools.tools_fes import (FES,
+                                     FESSummary,
                                      as_fes,
                                      convert_energy,
+                                     fes_convergence,
+                                     plot_fes_convergence,
+                                     summarise_fes,
                                      plot_fes,
                                      plot_fes_1d,
                                      plot_fes_2d,
@@ -439,3 +443,235 @@ def test_fes_defaults_and_range():
     assert fes.cv_labels == ["CV1"]  # generated when nothing better is known
     assert fes.label == r"$F$"
     assert fes.finite_range() == (0.0, 2.0)
+
+
+# ---------------------------------------------------------------------------
+# Barrier and basin analysis
+# ---------------------------------------------------------------------------
+def double_well(n_bins=601):
+    """A profile whose numbers are known exactly, in eV.
+
+    Two parabolas meeting at their tops: basin A bottoms out at 0.000 eV at
+    x = 1, basin B at 0.200 eV at x = 5, and the join at x = 3 sits at 0.500
+    eV from both sides.  Basin B is the wider of the two, so it is the one
+    Boltzmann weighting favours.
+    """
+    x = np.linspace(0.0, 6.0, n_bins)
+    energy = np.where(x < 3.0,
+                      0.5 * ((x - 1.0) / 2.0) ** 2,
+                      0.2 + 0.3 * ((x - 5.0) / 2.0) ** 2)
+    return np.column_stack([x, energy])
+
+
+@pytest.fixture
+def well():
+    return double_well()
+
+
+class TestSummariseFes:
+    def test_finds_both_minima(self, well):
+        summary = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+
+        assert summary.minimum_a == pytest.approx(1.0, abs=0.01)
+        assert summary.minimum_b == pytest.approx(5.0, abs=0.01)
+
+    def test_reports_the_depth_of_each_basin(self, well):
+        summary = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+
+        assert summary.depth_a == pytest.approx(0.0, abs=1e-4)
+        assert summary.depth_b == pytest.approx(0.2, abs=1e-4)
+
+    def test_finds_the_barrier_between_them(self, well):
+        summary = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+
+        assert summary.barrier_position == pytest.approx(3.0, abs=0.01)
+        assert summary.forward_barrier == pytest.approx(0.5, abs=1e-3)
+        assert summary.reverse_barrier == pytest.approx(0.3, abs=1e-3)
+
+    def test_reports_the_basin_difference(self, well):
+        summary = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+
+        assert summary.delta_f == pytest.approx(0.2, abs=1e-4)
+
+    def test_swapping_the_basins_flips_the_sign(self, well):
+        forward = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+        backward = summarise_fes(well, (4.0, 6.0), (0.0, 2.0), source_unit="eV")
+
+        assert backward.delta_f == pytest.approx(-forward.delta_f)
+        assert backward.forward_barrier == pytest.approx(forward.reverse_barrier)
+        assert backward.reverse_barrier == pytest.approx(forward.forward_barrier)
+
+    def test_a_basin_may_be_given_either_way_round(self, well):
+        one = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+        other = summarise_fes(well, (2.0, 0.0), (6.0, 4.0), source_unit="eV")
+
+        assert other.delta_f == pytest.approx(one.delta_f)
+
+    def test_boltzmann_weighting_favours_the_wider_basin(self, well):
+        """Basin B is the flatter one, so entropy pulls its free energy down."""
+        depths = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+        weighted = summarise_fes(well, (0.0, 2.0), (4.0, 6.0),
+                                 source_unit="eV", temperature=300)
+
+        assert weighted.delta_f < depths.delta_f
+
+    def test_temperature_leaves_the_barriers_alone(self, well):
+        """A barrier is measured out of the bottom of a well either way."""
+        plain = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+        weighted = summarise_fes(well, (0.0, 2.0), (4.0, 6.0),
+                                 source_unit="eV", temperature=300)
+
+        assert weighted.forward_barrier == pytest.approx(plain.forward_barrier)
+        assert weighted.reverse_barrier == pytest.approx(plain.reverse_barrier)
+
+    def test_converts_units_on_the_way_in(self, well):
+        in_ev = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+        in_kj = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV",
+                              energy_unit="kJ/mol")
+
+        assert in_kj.forward_barrier == pytest.approx(
+            in_ev.forward_barrier * EV_IN_KJ_PER_MOL)
+        assert in_kj.energy_unit == "kJ/mol"
+
+    def test_reads_a_file(self, tmp_path, well):
+        path = tmp_path / "profile.dat"
+        np.savetxt(path, well, header="! FIELDS cv file.free", comments="#")
+
+        summary = summarise_fes(str(path), (0.0, 2.0), (4.0, 6.0),
+                                source_unit="eV")
+
+        assert summary.forward_barrier == pytest.approx(0.5, abs=1e-3)
+
+    def test_ignores_unsampled_bins(self, well):
+        """NaNs are holes in the surface, not zero-energy points."""
+        holed = well.copy()
+        holed[well[:, 0] > 5.5, 1] = np.nan
+
+        summary = summarise_fes(holed, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+
+        assert summary.depth_b == pytest.approx(0.2, abs=1e-4)
+
+    def test_prints_a_readable_summary(self, well):
+        text = str(summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV"))
+
+        assert "Barrier A->B:  0.500 eV" in text
+        assert "Barrier B->A:  0.300 eV" in text
+        assert "Delta F (B-A): 0.200 eV" in text
+
+    def test_rejects_overlapping_basins(self, well):
+        with pytest.raises(ValueError, match="overlap"):
+            summarise_fes(well, (0.0, 2.0), (1.0, 3.0), source_unit="eV")
+
+    def test_rejects_basins_with_nothing_between_them(self, well):
+        with pytest.raises(ValueError, match="between the basins"):
+            summarise_fes(well, (0.0, 2.9), (2.91, 6.0), source_unit="eV")
+
+    def test_rejects_a_basin_off_the_grid(self, well):
+        with pytest.raises(ValueError, match="no sampled grid point"):
+            summarise_fes(well, (20.0, 30.0), (4.0, 6.0), source_unit="eV")
+
+    def test_rejects_a_basin_of_only_unsampled_bins(self, well):
+        holed = well.copy()
+        holed[well[:, 0] <= 2.0, 1] = np.nan  # the window is inclusive
+
+        with pytest.raises(ValueError, match="no sampled grid point"):
+            summarise_fes(holed, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
+
+    def test_rejects_a_two_dimensional_surface(self, fes_2d_file):
+        with pytest.raises(ValueError, match="1-D profile"):
+            summarise_fes(str(fes_2d_file), (0.0, 1.0), (2.0, 3.0))
+
+    def test_temperature_needs_a_known_energy_unit(self, well):
+        with pytest.raises(ValueError, match="without knowing"):
+            summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit=None,
+                          temperature=300)
+
+
+class TestFesConvergence:
+    @pytest.fixture
+    def series(self, well):
+        """A barrier growing towards its final height, as hills fill a well."""
+        return [np.column_stack([well[:, 0], well[:, 1] * scale])
+                for scale in (0.3, 0.6, 0.85, 1.0)]
+
+    def test_summarises_every_surface(self, series):
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                    source_unit="eV")
+
+        assert len(summaries) == len(series)
+        assert all(isinstance(s, FESSummary) for s in summaries)
+
+    def test_keeps_the_order_it_was_given(self, series):
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                    source_unit="eV")
+
+        barriers = [s.forward_barrier for s in summaries]
+        assert barriers == sorted(barriers)
+        assert barriers[-1] == pytest.approx(0.5, abs=1e-3)
+
+    def test_uses_the_same_basins_throughout(self, series):
+        """Fixed windows are what make the numbers comparable across a run."""
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                    source_unit="eV")
+
+        assert len({s.minimum_a for s in summaries}) == 1
+
+    def test_accepts_a_single_surface(self, well):
+        assert len(fes_convergence(well, (0.0, 2.0), (4.0, 6.0),
+                                   source_unit="eV")) == 1
+
+
+class TestPlotFesConvergence:
+    @pytest.fixture
+    def series(self, well):
+        return [np.column_stack([well[:, 0], well[:, 1] * scale])
+                for scale in (0.3, 0.6, 0.85, 1.0)]
+
+    def test_draws_the_barrier_and_the_difference(self, series):
+        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                       source_unit="eV")
+
+        assert len(ax.lines) == 2
+        assert len(ax.get_legend().get_texts()) == 2
+
+    def test_numbers_the_surfaces_when_given_no_times(self, series):
+        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                       source_unit="eV")
+
+        assert list(ax.lines[0].get_xdata()) == [1, 2, 3, 4]
+
+    def test_uses_the_times_it_is_given(self, series):
+        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                       source_unit="eV", times=[25, 50, 75, 100])
+
+        assert list(ax.lines[0].get_xdata()) == [25, 50, 75, 100]
+
+    def test_the_barrier_curve_matches_the_summaries(self, series):
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                    source_unit="eV")
+
+        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                       source_unit="eV")
+
+        assert list(ax.lines[0].get_ydata()) == pytest.approx(
+            [s.forward_barrier for s in summaries])
+
+    def test_checks_the_number_of_times(self, series):
+        with pytest.raises(ValueError, match="2 times for 4 surfaces"):
+            plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
+                                 source_unit="eV", times=[1, 2])
+
+    def test_draws_on_a_supplied_axes(self, series):
+        fig, ax = plt.subplots()
+
+        returned_fig, returned_ax = plot_fes_convergence(
+            series, (0.0, 2.0), (4.0, 6.0), source_unit="eV", fig=fig, ax=ax)
+
+        assert returned_fig is fig
+        assert returned_ax is ax
+
+    def test_saves_when_given_a_filename(self, tmp_path, series):
+        plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV",
+                             filename=str(tmp_path / "conv.png"))
+
+        assert (tmp_path / "conv.png").exists()
