@@ -39,13 +39,14 @@ Runtime requirements are `numpy`, `scipy`, `matplotlib`, `pandas`, `ase>=3.23`
 (installed from git, used by `prepare_neb`, `quick_guess_path` and
 `quick_guess_ts`).
 
-Three dependencies are external — none is pulled in by `pip install`, and each
+Four dependencies are external — none is pulled in by `pip install`, and each
 is only needed by the functions named:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |
 | [`sella`](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` | Install with `pip install "reactiontools[ts]"`. Imported on first use, so the rest of the package works without it. |
 | `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. |
+| `py-plumed` | `plumed_calculator` | The Python bindings, `conda install -c conda-forge py-plumed`. Imported on first use; the input builder works without it. |
 | [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` | Licensed separately and installed by hand; point `ORCA_PATH` at the binary. See [build_tools/README.md](build_tools/README.md#orca). |
 
 ## Quickstart
@@ -475,7 +476,76 @@ neb = prepare_neb(atoms, product, calc, n_images=7)
 Pass `optimise_after=False` to skip the relaxation and get the rigid swap
 alone, in which case no calculator is needed.
 
-### PLUMED
+### Running metadynamics
+
+The three stages of a metadynamics run, in order: pick the atoms, build the
+input, bias the dynamics with it, sum the hills.
+
+```python
+from ase import units
+from ase.md.langevin import Langevin
+from reactiontools import (find_molecules, plot_plumed, plumed_calculator,
+                           plumed_metad_input, plumed_selection, run_sum_hills)
+
+solute, solvent = find_molecules(atoms)[:2]
+
+lines = plumed_metad_input(
+    cvs=[f"c1: COORDINATION GROUPA={plumed_selection(solute)} "
+         f"GROUPB={plumed_selection(solvent)} R_0=3.0"],
+    sigma=0.05, height=0.02, pace=100,
+    biasfactor=10, temperature=300)
+
+with plumed_calculator(atoms, calc, lines, timestep=0.5 * units.fs,
+                       temperature=300):
+    Langevin(atoms, 0.5 * units.fs, temperature_K=300, friction=0.01).run(100000)
+
+run_sum_hills()
+plot_plumed("fes.dat", x_label="Coordination")
+```
+
+`plumed_calculator` wraps your calculator so the integrator asks for forces as
+usual and PLUMED adds the bias on top. It is a context manager because PLUMED
+buffers what it writes and only flushes when finalised: run the dynamics inside
+the block, or `HILLS` ends short of the hills actually deposited and the surface
+summed from it is quietly wrong rather than obviously missing. The block puts
+your original calculator back on the way out, exceptions included.
+
+Three things to keep in step, none of which is checked for you:
+
+- **The timestep** must be the one the integrator uses, since PLUMED counts its
+  own steps from it.
+- **The temperature** goes to `plumed_metad_input` as `TEMP`, to
+  `plumed_calculator` as the thermal energy, and to the thermostat. All three
+  should agree.
+- **`biasfactor`** makes it well-tempered. Without one the Gaussians never stop
+  piling up and there is no converged surface to read off.
+
+`plumed_metad_input` writes `UNITS ENERGY=eV LENGTH=A TIME=fs` first, so
+`sigma`, `height` and everything PLUMED writes back are in Å and eV rather than
+PLUMED's own nm and kJ/mol. That is what makes `plot_plumed` right about the
+file it reads. `PLUMED_ASE_UNITS` is the same line, for hand-written input.
+
+`METAD` settings without their own argument go through `metad_extra` — the grid
+ones matter for a long run — and further actions through `extra`:
+
+```python
+lines = plumed_metad_input(
+    cvs=["d1: DISTANCE ATOMS=1,2"], sigma=0.05, height=0.02, pace=100,
+    biasfactor=10, temperature=300,
+    metad_extra="GRID_MIN=1.0 GRID_MAX=6.0 GRID_BIN=500",
+    extra=["UPPER_WALLS ARG=d1 AT=6.0 KAPPA=100.0"])
+```
+
+CV lines go through untouched, so any PLUMED action works — and any mistake in
+one is PLUMED's to report. It checks them as the calculator is built, before
+the block is entered and so before anything is written, which is why a missing
+`R_0` above comes back as `keyword R_0 is compulsory for this action` rather
+than as a run that goes nowhere.
+
+Only `plumed_calculator` needs the plumed Python module, and only
+`run_sum_hills` needs the `plumed` executable. The rest is string handling.
+
+### PLUMED post-processing
 
 Build a selection string, sum the hills, and plot the free-energy surface:
 
@@ -565,6 +635,9 @@ halves and swap them over; for a proton transfer, move the hydrogen across.
 | Function | Description |
 | --- | --- |
 | `plumed_selection(indices)` | Format zero-based atom indices as a one-based PLUMED selection with compact ranges. |
+| `plumed_metad_input(cvs, sigma, height, pace, biasfactor=None, temperature=None, ...)` | Build the PLUMED input for a metadynamics run, in ASE's units. |
+| `plumed_calculator(atoms, calc, input_lines, timestep, temperature=None, ...)` | Context manager wrapping `calc` in a PLUMED bias, so an ASE dynamics run becomes a biased one. Needs the plumed Python module. |
+| `PLUMED_ASE_UNITS` | `"UNITS ENERGY=eV LENGTH=A TIME=fs"`, for hand-written input. |
 | `find_molecules(atoms)` | Split a structure into connected components using an ASE neighbour list. |
 | `run_sum_hills(hills='HILLS', outfile='fes.dat', mintozero=True)` | Run `plumed sum_hills` to build a free-energy surface. |
 
@@ -610,9 +683,12 @@ sampled regions rather than letting them dominate the colour scale, and
 | `plot_plumed_multi(files, mintozero=False, ...)` | Several surfaces overlaid; directories expand to the `fes.dat` files beneath them. |
 
 `plot_plumed` and `plot_plumed_multi` are ASE-flavoured wrappers over
-`tools_fes`: they assume `fes.dat` is in eV, as `plumed sum_hills` writes it
-for an ASE-driven run, and plot meV. For a run driven from OpenMM the file is
-in kJ/mol — use `tools_fes` directly and set `source_unit`.
+`tools_fes`: they assume `fes.dat` is in eV and plot meV. That holds when the
+run declared `UNITS ENERGY=eV`, as `plumed_metad_input` does by default. It is
+**not** what PLUMED does otherwise: left to itself it reads and writes its own
+units, kJ/mol and nm, whatever drove it. For a file in kJ/mol — from OpenMM, or
+from an ASE run whose input had no `UNITS` line — use `tools_fes` directly and
+set `source_unit`.
 
 Plotting functions return `(fig, ax)` so you can keep customising, and accept an
 existing `fig`/`ax` to compose subplots. `plot_images` returns `(fig, axes)`
@@ -629,9 +705,12 @@ plotting layer converts to meV for readability: `plot_neb` shifts energies so
 the lowest image sits at zero, and `plot_plumed`/`plot_plumed_multi` scale
 `fes.dat` by 1000.
 
-`tools_fes` is the exception, because PLUMED's units depend on what drove it:
-it defaults to kJ/mol, and any of the units in `ENERGY_UNITS` can be selected
-per call with `source_unit` and `energy_unit`.
+`tools_fes` is the exception, because PLUMED's units depend on what the input
+asked for rather than on what drove it: it defaults to kJ/mol, and any of the
+units in `ENERGY_UNITS` can be selected per call with `source_unit` and
+`energy_unit`. `plumed_metad_input` puts `UNITS ENERGY=eV LENGTH=A TIME=fs` at
+the top of the input it builds, which is what keeps a run driven from here in
+the same eV and Å as everything else.
 
 ## Testing
 
@@ -654,7 +733,9 @@ the codes it wraps you actually exercised — all in
 | `larsen2017atomic` | [ASE](https://wiki.fysik.dtu.dk/ase/) | NEB, optimisation and I/O throughout |
 | `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts` |
 | `hermes2022sella` | [Sella](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` |
-| `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills` |
+| `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills`, `plumed_calculator` |
+| `laio2002escaping` | The metadynamics method | `plumed_metad_input` |
+| `barducci2008well` | Well-tempered metadynamics | `plumed_metad_input(biasfactor=...)` |
 | `jonsson1998nudged`, `henkelman2000improved`, `henkelman2000climbing` | The NEB method, the improved tangent and the climbing image | `prepare_neb`, `optimise_neb` |
 | `smidstrup2014improved` | IDPP interpolation | `prepare_neb(geo_int=False)` |
 | `nocedal2006numerical` | BFGS | every `optimise_*` that is not Sella |

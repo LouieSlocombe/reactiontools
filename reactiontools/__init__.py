@@ -17,8 +17,8 @@ The package is organised into six modules, all of which are re-exported here:
     halves over, or move a hydrogen across a hydrogen bond, to build a product
     end state for a band.
 ``tools_plumed``
-    Prepare PLUMED input and turn metadynamics hills into a free-energy
-    surface.
+    Prepare PLUMED input, bias an ASE dynamics run with it, and turn the
+    metadynamics hills that come out into a free-energy surface.
 ``tools_fes``
     Read PLUMED output -- ``COLVAR``, ``fes.dat``, ``HILLS`` -- and plot free
     energy in one or two dimensions, in whichever energy unit you want.
@@ -75,7 +75,10 @@ from .tools_plotting import (show_atoms,
                              plot_total_energy,
                              plot_plumed,
                              plot_plumed_multi)
-from .tools_plumed import (plumed_selection,
+from .tools_plumed import (PLUMED_ASE_UNITS,
+                           plumed_selection,
+                           plumed_metad_input,
+                           plumed_calculator,
                            find_molecules,
                            run_sum_hills)
 from .tools_reaction import (ConvergenceError,
@@ -140,7 +143,10 @@ __all__ = [
     "get_best_flip_and_face_bases",
     "swap_bonding_configuration",
     # tools_plumed
+    "PLUMED_ASE_UNITS",
     "plumed_selection",
+    "plumed_metad_input",
+    "plumed_calculator",
     "find_molecules",
     "run_sum_hills",
     # tools_fes
