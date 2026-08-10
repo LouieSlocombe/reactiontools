@@ -80,7 +80,8 @@ from .tools_plumed import (PLUMED_ASE_UNITS,
                            plumed_metad_input,
                            plumed_calculator,
                            find_molecules,
-                           run_sum_hills)
+                           run_sum_hills,
+                           sum_hills_files)
 from .tools_reaction import (ConvergenceError,
                              ConvergenceWarning,
                              NebSummary,
@@ -149,6 +150,7 @@ __all__ = [
     "plumed_calculator",
     "find_molecules",
     "run_sum_hills",
+    "sum_hills_files",
     # tools_fes
     "DEFAULT_ENERGY_UNIT",
     "ENERGY_UNITS",

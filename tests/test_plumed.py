@@ -15,7 +15,8 @@ from reactiontools import (PLUMED_ASE_UNITS,
                            plumed_calculator,
                            plumed_metad_input,
                            plumed_selection,
-                           run_sum_hills)
+                           run_sum_hills,
+                           sum_hills_files)
 
 # Skip only the biased runs: the input builder is string handling and works
 # without PLUMED, as does everything else in the module.
@@ -401,3 +402,142 @@ class TestPlumedCalculator:
             biased_forces = dimer.get_forces().copy()
 
         assert not np.allclose(plain, biased_forces)
+
+
+class TestRunSumHillsOptions:
+    @pytest.fixture
+    def recorded(self, monkeypatch):
+        """Capture the argv that would have been handed to plumed."""
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        return calls
+
+    def test_stride_asks_for_a_series(self, recorded):
+        run_sum_hills(stride=100, verbose=False)
+
+        cmd, _ = recorded[0]
+        assert "--stride" in cmd
+        assert cmd[cmd.index("--stride") + 1] == "100"
+
+    def test_nohistory_is_optional(self, recorded):
+        run_sum_hills(stride=100, nohistory=True, verbose=False)
+
+        assert "--nohistory" in recorded[0][0]
+
+    def test_grid_bounds_are_passed_through(self, recorded):
+        run_sum_hills(grid_min=1.5, grid_max=6.0, grid_bin=500, verbose=False)
+
+        cmd, _ = recorded[0]
+        assert cmd[cmd.index("--min") + 1] == "1.5"
+        assert cmd[cmd.index("--max") + 1] == "6.0"
+        assert cmd[cmd.index("--bin") + 1] == "500"
+
+    def test_grid_bounds_take_one_value_per_variable(self, recorded):
+        """A two-dimensional surface needs a bound for each variable."""
+        run_sum_hills(grid_min=[1.0, -3.14], grid_max=[6.0, 3.14],
+                      grid_bin=[200, 100], verbose=False)
+
+        cmd, _ = recorded[0]
+        assert cmd[cmd.index("--min") + 1] == "1.0,-3.14"
+        assert cmd[cmd.index("--max") + 1] == "6.0,3.14"
+        assert cmd[cmd.index("--bin") + 1] == "200,100"
+
+    def test_idw_selects_the_variables_to_keep(self, recorded):
+        run_sum_hills(idw="d1", kt=0.0259, verbose=False)
+
+        cmd, _ = recorded[0]
+        assert cmd[cmd.index("--idw") + 1] == "d1"
+        assert cmd[cmd.index("--kt") + 1] == "0.0259"
+
+    def test_idw_accepts_several_labels(self, recorded):
+        run_sum_hills(idw=["d1", "t1"], kt=0.0259, verbose=False)
+
+        cmd, _ = recorded[0]
+        assert cmd[cmd.index("--idw") + 1] == "d1,t1"
+
+    def test_kt_without_idw_is_refused(self, recorded):
+        """It is the temperature the *other* variables are integrated out at,
+        so on its own it would quietly do nothing."""
+        with pytest.raises(ValueError, match="only applies when idw"):
+            run_sum_hills(kt=0.0259, verbose=False)
+
+        assert recorded == []
+
+    def test_negbias_is_optional(self, recorded):
+        run_sum_hills(negbias=True, verbose=False)
+
+        assert "--negbias" in recorded[0][0]
+
+    def test_extra_arguments_are_appended(self, recorded):
+        run_sum_hills(extra=["--fmt", "%14.9f"], verbose=False)
+
+        assert recorded[0][0][-2:] == ["--fmt", "%14.9f"]
+
+    def test_the_plain_command_is_unchanged(self, recorded):
+        """None of the new options may appear unless they were asked for."""
+        run_sum_hills(verbose=False)
+
+        cmd, _ = recorded[0]
+        assert cmd == ["plumed", "sum_hills",
+                       "--hills", "HILLS",
+                       "--outfile", "fes.dat",
+                       "--mintozero"]
+
+
+class TestSumHillsFiles:
+    def _touch(self, tmp_path, names):
+        for name in names:
+            (tmp_path / name).write_text("#! FIELDS d1 file.free\n")
+
+    def test_collects_a_strided_series(self, tmp_path):
+        self._touch(tmp_path, [f"fes.dat{i}.dat" for i in range(4)])
+
+        found = sum_hills_files(tmp_path / "fes.dat")
+
+        assert [path.name for path in found] == [
+            "fes.dat0.dat", "fes.dat1.dat", "fes.dat2.dat", "fes.dat3.dat"]
+
+    def test_orders_numerically_not_lexicographically(self, tmp_path):
+        """Regression: sorted() puts fes.dat10.dat before fes.dat2.dat.
+
+        For a convergence series the order is the entire point, so getting it
+        wrong scrambles the answer without ever looking wrong.
+        """
+        self._touch(tmp_path, [f"fes.dat{i}.dat" for i in range(12)])
+
+        found = sum_hills_files(tmp_path / "fes.dat")
+
+        indices = [int(p.name[len("fes.dat"):-len(".dat")]) for p in found]
+        assert indices == list(range(12))
+
+    def test_a_stem_outfile_gives_tidier_names(self, tmp_path):
+        self._touch(tmp_path, [f"fes{i}.dat" for i in range(3)])
+
+        found = sum_hills_files(tmp_path / "fes")
+
+        assert [path.name for path in found] == ["fes0.dat", "fes1.dat",
+                                                 "fes2.dat"]
+
+    def test_an_unstrided_run_has_no_series(self, tmp_path):
+        self._touch(tmp_path, ["fes.dat"])
+
+        assert sum_hills_files(tmp_path / "fes.dat") == []
+
+    def test_ignores_unrelated_files(self, tmp_path):
+        self._touch(tmp_path, ["fes.dat0.dat", "fes.dat1.dat", "HILLS",
+                               "COLVAR", "other0.dat", "fes.datX.dat"])
+
+        found = sum_hills_files(tmp_path / "fes.dat")
+
+        assert [path.name for path in found] == ["fes.dat0.dat", "fes.dat1.dat"]
+
+    def test_looks_in_the_working_directory_by_default(self, tmp_path):
+        """The autouse fixture puts us in tmp_path, as run_sum_hills assumes."""
+        self._touch(tmp_path, ["fes.dat0.dat", "fes.dat1.dat"])
+
+        assert len(sum_hills_files()) == 2

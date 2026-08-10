@@ -16,6 +16,7 @@ handling and works without either.
 import re
 import subprocess
 from contextlib import contextmanager
+from pathlib import Path
 
 import numpy as np
 from ase.calculators.plumed import Plumed
@@ -353,9 +354,79 @@ def plumed_calculator(atoms, calc, input_lines, timestep,
             atoms.calc = previous
 
 
+def _grid_bound(value):
+    """Format a per-variable grid bound, which PLUMED takes comma-separated.
+
+    Parameters
+    ----------
+    value : float or sequence of float
+        One bound, or one per collective variable.
+
+    Returns
+    -------
+    str
+        The value, or the sequence joined with commas.
+    """
+    if np.isscalar(value) or isinstance(value, str):
+        return str(value)
+    return ",".join(str(item) for item in value)
+
+
+def sum_hills_files(outfile="fes.dat"):
+    """List the surfaces a strided :func:`run_sum_hills` wrote, in order.
+
+    ``--stride`` does not number the file it was given: it writes
+    ``f"{outfile}{n}.dat"``, so the default ``outfile`` yields
+    ``fes.dat0.dat``, ``fes.dat1.dat`` and so on. Two things follow, and this
+    exists because both are easy to get wrong. The obvious glob, ``fes*.dat``,
+    is right only by accident; and sorting the names puts ``fes.dat10.dat``
+    before ``fes.dat2.dat``, which for a convergence series — where the order
+    is the entire point — silently scrambles the answer.
+
+    Parameters
+    ----------
+    outfile : str or path-like, optional
+        The ``outfile`` given to :func:`run_sum_hills`.
+
+    Returns
+    -------
+    list of pathlib.Path
+        The surfaces, ordered by the index PLUMED gave them, ready to hand to
+        :func:`~reactiontools.plot_fes_1d`. Empty if the run was not strided.
+
+    Examples
+    --------
+    A convergence series, labelled by the simulated time each surface covers::
+
+        run_sum_hills(stride=100, outfile="fes")
+        surfaces = sum_hills_files("fes")
+        plot_fes_1d(surfaces,
+                    labels=[(i + 1) * 100 for i in range(len(surfaces))],
+                    label_template="{:g} hills")
+    """
+    outfile = Path(outfile)
+    pattern = re.compile(rf"^{re.escape(outfile.name)}(\d+)\.dat$")
+
+    numbered = []
+    for path in (outfile.parent or Path(".")).iterdir():
+        match = pattern.match(path.name)
+        if match is not None:
+            numbered.append((int(match.group(1)), path))
+    return [path for _, path in sorted(numbered)]
+
+
 def run_sum_hills(hills="HILLS",
                   outfile="fes.dat",
                   mintozero=True,
+                  stride=None,
+                  nohistory=False,
+                  grid_min=None,
+                  grid_max=None,
+                  grid_bin=None,
+                  idw=None,
+                  kt=None,
+                  negbias=False,
+                  extra=None,
                   verbose=True):
     """Run ``plumed sum_hills`` to build a free-energy surface from the hills.
 
@@ -368,25 +439,85 @@ def run_sum_hills(hills="HILLS",
         Hills file written by the ``METAD`` action.
     outfile : str or path-like, optional
         Free-energy surface file to write, as read by
-        :func:`~reactiontools.tools_plotting.plot_plumed`.
+        :func:`~reactiontools.tools_plotting.plot_plumed`. With ``stride`` it
+        is a stem rather than a filename; see there.
     mintozero : bool, optional
         Pass ``--mintozero`` so the surface minimum sits at zero.
+    stride : int or None, optional
+        Write a surface every ``stride`` hills instead of one at the end,
+        which is how a convergence series is made: a run is converged when
+        the last few surfaces lie on top of each other. The files are named
+        ``f"{outfile}{n}.dat"``, so the default ``outfile`` gives the
+        unlovely ``fes.dat0.dat`` — pass ``outfile="fes"`` for ``fes0.dat``.
+        :func:`sum_hills_files` collects them in the right order either way.
+    nohistory : bool, optional
+        With ``stride``, make each surface from only the hills in its own
+        interval rather than from everything up to it. Useful to watch where
+        the bias is being deposited; not what a convergence series wants.
+    grid_min, grid_max : float or sequence of float, optional
+        Bounds of the output grid, one per collective variable. Worth setting
+        for a series, since PLUMED otherwise picks bounds per surface from
+        the hills it has so far and the surfaces come back on grids that do
+        not line up.
+    grid_bin : int or sequence of int, optional
+        Number of bins per collective variable.
+    idw : str or sequence of str, optional
+        Collective variables to keep, by label; the rest are integrated out,
+        which needs ``kt``. This is how a two-dimensional surface is
+        projected onto one of its variables.
+    kt : float or None, optional
+        Thermal energy for that integration, in the energy units of the hills
+        file — eV for a run built by :func:`plumed_metad_input`, where
+        ``ase.units.kB * 300`` is 300 K. Only used with ``idw``.
+    negbias : bool, optional
+        Print the negative bias rather than the free energy.
+    extra : sequence of str, optional
+        Further arguments appended to the command line, for the options
+        without their own keyword here — ``--spacing``, ``--fmt``,
+        ``--histo`` and the rest.
     verbose : bool, optional
         Print the command being run.
 
     Returns
     -------
     str
-        The command line that was run.
+        The command line that was run. With ``stride``, the surfaces
+        themselves are gathered by :func:`sum_hills_files`.
 
     Raises
     ------
+    ValueError
+        If ``kt`` is given without ``idw``, which would silently do nothing.
     subprocess.CalledProcessError
         If plumed exits non-zero.
     """
+    if kt is not None and idw is None:
+        raise ValueError(
+            "kt only applies when idw names the variables to keep, since it "
+            "is the temperature the others are integrated out at. Pass idw, "
+            "or leave kt out.")
+
     cmd = ["plumed", "sum_hills", "--hills", str(hills), "--outfile", str(outfile)]
     if mintozero:
         cmd.append("--mintozero")
+    if stride is not None:
+        cmd += ["--stride", str(stride)]
+    if nohistory:
+        cmd.append("--nohistory")
+    if grid_min is not None:
+        cmd += ["--min", _grid_bound(grid_min)]
+    if grid_max is not None:
+        cmd += ["--max", _grid_bound(grid_max)]
+    if grid_bin is not None:
+        cmd += ["--bin", _grid_bound(grid_bin)]
+    if idw is not None:
+        cmd += ["--idw", idw if isinstance(idw, str) else ",".join(idw)]
+    if kt is not None:
+        cmd += ["--kt", str(kt)]
+    if negbias:
+        cmd.append("--negbias")
+    if extra:
+        cmd += [str(item) for item in extra]
     cmd_str = " ".join(cmd)
 
     if verbose:

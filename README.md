@@ -570,6 +570,55 @@ from reactiontools import plot_plumed_multi
 plot_plumed_multi("runs/", mintozero=True, x_label="CV (Å)")
 ```
 
+#### Has it converged?
+
+`stride` sums the hills every so often instead of once at the end, giving a
+series of surfaces. The run has converged when the last few lie on top of each
+other:
+
+```python
+from reactiontools import plot_fes_1d, run_sum_hills, sum_hills_files
+
+run_sum_hills(stride=100, outfile="fes", grid_min=1.0, grid_max=6.0,
+              grid_bin=500)
+
+surfaces = sum_hills_files("fes")
+plot_fes_1d(surfaces, source_unit="eV", max_datasets=5,
+            labels=[(i + 1) * 100 for i in range(len(surfaces))],
+            label_template="{:g} hills")
+```
+
+Set the grid explicitly for a series. Without it PLUMED picks bounds per
+surface from the hills it has so far, and the surfaces come back on grids that
+do not line up.
+
+`sum_hills_files` exists because the naming is a trap. `--stride` does not
+number the file it was given — it writes `f"{outfile}{n}.dat"`, so the default
+`outfile="fes.dat"` yields `fes.dat0.dat`, and the obvious glob `fes*.dat` is
+right only by accident. Worse, sorting those names puts `fes.dat10.dat` before
+`fes.dat2.dat`, which for a convergence series silently scrambles the very
+thing being plotted. `sum_hills_files` orders them by the index PLUMED gave
+them. Passing `outfile="fes"` at least gets you `fes0.dat`.
+
+To project a surface onto some of its variables, name the ones to keep and give
+the temperature the rest are integrated out at, in the energy units of the
+hills — eV for a run built by `plumed_metad_input`:
+
+```python
+from ase.units import kB
+
+run_sum_hills(idw="d1", kt=kB * 300, outfile="fes_d1.dat")
+```
+
+There has to be something left to integrate out, so this needs a run biased on
+two variables or more. On a one-variable `HILLS` PLUMED does not report a
+usable error — it aborts the process on a failed internal assertion,
+`proj.size()<getNumberOfArguments()`, which surfaces here as a
+`CalledProcessError` with a signal rather than an exit code.
+
+Anything without its own keyword goes through `extra`, for example
+`extra=["--fmt", "%14.9f"]`.
+
 ## API reference
 
 ### `tools_reaction` — building and analysing paths
@@ -639,7 +688,8 @@ halves and swap them over; for a proton transfer, move the hydrogen across.
 | `plumed_calculator(atoms, calc, input_lines, timestep, temperature=None, ...)` | Context manager wrapping `calc` in a PLUMED bias, so an ASE dynamics run becomes a biased one. Needs the plumed Python module. |
 | `PLUMED_ASE_UNITS` | `"UNITS ENERGY=eV LENGTH=A TIME=fs"`, for hand-written input. |
 | `find_molecules(atoms)` | Split a structure into connected components using an ASE neighbour list. |
-| `run_sum_hills(hills='HILLS', outfile='fes.dat', mintozero=True)` | Run `plumed sum_hills` to build a free-energy surface. |
+| `run_sum_hills(hills='HILLS', outfile='fes.dat', mintozero=True, stride=None, grid_min=None, grid_max=None, grid_bin=None, idw=None, kt=None, ...)` | Run `plumed sum_hills` to build a free-energy surface, or a `stride`d series of them. |
+| `sum_hills_files(outfile='fes.dat')` | The surfaces a strided run wrote, ordered by index rather than by name. |
 
 ### `tools_fes` — free-energy surfaces
 
