@@ -1,5 +1,4 @@
-"""
-Plotting helpers for free-energy surfaces (FES) and other PLUMED output.
+"""Plotting helpers for free-energy surfaces (FES) and other PLUMED output.
 
 The module is organised in three layers so that anything that can be turned
 into a free-energy surface can be plotted by the same handful of functions:
@@ -9,14 +8,14 @@ into a free-energy surface can be plotted by the same handful of functions:
    :class:`PlumedData` container of numeric columns, field names and
    ``#! SET`` metadata.
 2. **Container** -- :class:`FES` normalises 1-D and 2-D free-energy data into
-   a common form (collective-variable grids, energies, labels).  Anything a
+   a common form (collective-variable grids, energies, labels). Anything a
    user is likely to have -- a file path, a ``(2, N)``/``(N, 2)`` array, a
    stacked ``(3, ny, nx)`` array, a ``(x, y, Z)`` tuple or scattered
    ``(N, 3)`` columns -- is accepted by :func:`as_fes`.
 3. **Plotters** -- :func:`plot_fes_1d`, :func:`plot_fes_2d`,
    :func:`plot_fes_2d_overlay` and :func:`plot_fes_slices` each take *one or
    many* FES sources, so a single surface, a convergence series and a
-   MD/PIMD comparison are all the same call.  :func:`plot_fes` dispatches on
+   MD/PIMD comparison are all the same call. :func:`plot_fes` dispatches on
    dimensionality when the caller does not care.
 
 Every plotting function shares the same conventions:
@@ -30,7 +29,7 @@ Every plotting function shares the same conventions:
 * the return value is always ``(fig, ax)``.
 
 Energies are assumed to be in kJ/mol unless told otherwise, because that is
-what PLUMED writes when it is driven from OpenMM.  Runs driven from ASE are in
+what PLUMED writes when it is driven from OpenMM. Runs driven from ASE are in
 eV instead, so pass ``source_unit="eV"`` -- which is what the thin wrappers
 :func:`~reactiontools.tools_plotting.plot_plumed` and
 :func:`~reactiontools.tools_plotting.plot_plumed_multi` do.
@@ -68,7 +67,7 @@ __all__ = [
     "unit_label",
 ]
 
-#: Size of one energy unit expressed in kJ/mol.  PLUMED writes kJ/mol by
+#: Size of one energy unit expressed in kJ/mol. PLUMED writes kJ/mol by
 #: default when driven from OpenMM, which is why it is the reference.
 ENERGY_UNITS = {
     "kj/mol": 1.0,
@@ -97,8 +96,7 @@ _UNIT_LABELS = {
 # Energy units
 # ---------------------------------------------------------------------------
 def _normalise_unit(unit):
-    """
-    Normalise an energy-unit name and validate it.
+    """Normalise an energy-unit name and validate it.
 
     Parameters
     ----------
@@ -125,8 +123,7 @@ def _normalise_unit(unit):
 
 
 def unit_label(unit):
-    """
-    Return the axis label for an energy unit.
+    """Return the axis label for an energy unit.
 
     Parameters
     ----------
@@ -146,17 +143,16 @@ def unit_label(unit):
 
 
 def convert_energy(values, source=DEFAULT_ENERGY_UNIT, target=None):
-    """
-    Convert energies between the units listed in :data:`ENERGY_UNITS`.
+    """Convert energies between the units listed in :data:`ENERGY_UNITS`.
 
     Parameters
     ----------
     values : array_like
         Energies expressed in *source* units.
     source : str, optional
-        Unit of *values* (default is ``"kJ/mol"``).
+        Unit of *values*.
     target : str or None, optional
-        Unit to convert to.  ``None`` (default) returns *values* unchanged.
+        Unit to convert to. ``None``, the default, returns *values* unchanged.
 
     Returns
     -------
@@ -176,15 +172,14 @@ def convert_energy(values, source=DEFAULT_ENERGY_UNIT, target=None):
 # ---------------------------------------------------------------------------
 @dataclass
 class PlumedData:
-    """
-    Container for the contents of a PLUMED-style data file.
+    """Container for the contents of a PLUMED-style data file.
 
     Attributes
     ----------
     data : numpy.ndarray
         Numeric columns with shape ``(n_rows, n_fields)``.
     fields : list of str
-        Column names taken from the ``#! FIELDS`` header.  Empty when the
+        Column names taken from the ``#! FIELDS`` header. Empty when the
         file carries no header.
     metadata : dict
         Key/value pairs collected from ``#! SET key value`` lines.
@@ -195,8 +190,7 @@ class PlumedData:
     metadata: dict[str, str] = field(default_factory=dict)
 
     def index(self, name):
-        """
-        Return the column index of a field.
+        """Return the column index of a field.
 
         Parameters
         ----------
@@ -226,8 +220,7 @@ class PlumedData:
         return self.fields.index(name)
 
     def column(self, name):
-        """
-        Return a single column by field name or index.
+        """Return a single column by field name or index.
 
         Parameters
         ----------
@@ -242,8 +235,7 @@ class PlumedData:
         return self.data[:, self.index(name)]
 
     def label(self, index, default=""):
-        """
-        Return the field name of a column, falling back to *default*.
+        """Return the field name of a column, falling back to *default*.
 
         Parameters
         ----------
@@ -260,8 +252,7 @@ class PlumedData:
         return self.fields[index] if index < len(self.fields) else default
 
     def to_dataframe(self):
-        """
-        Return the data as a :class:`pandas.DataFrame`.
+        """Return the data as a :class:`pandas.DataFrame`.
 
         Returns
         -------
@@ -274,8 +265,7 @@ class PlumedData:
 
 
 def read_plumed_file(path, drop_der=True):
-    """
-    Read a PLUMED-style data file.
+    """Read a PLUMED-style data file.
 
     Handles the files produced by ``plumed sum_hills``, ``PRINT``/``COLVAR``
     output and the bundled OPES ``FES_from_*`` scripts: the ``#! FIELDS``
@@ -289,8 +279,8 @@ def read_plumed_file(path, drop_der=True):
         Path to the PLUMED data file.
     drop_der : bool, optional
         Whether to discard derivative columns whose field name starts with
-        ``der_`` (default is True).  Ignored when the header and the data do
-        not agree on the number of columns.
+        ``der_``. Ignored when the header and the data do not agree on the
+        number of columns.
 
     Returns
     -------
@@ -347,13 +337,12 @@ def read_plumed_file(path, drop_der=True):
 # ---------------------------------------------------------------------------
 @dataclass
 class FES:
-    """
-    A free-energy surface in a form the plotting functions understand.
+    """A free-energy surface in a form the plotting functions understand.
 
     Attributes
     ----------
     cvs : list of numpy.ndarray
-        One entry per collective variable.  For a 1-D surface this is a
+        One entry per collective variable. For a 1-D surface this is a
         single 1-D array; for a 2-D surface on a regular grid the two arrays
         have the same shape as *energy*; for scattered 2-D data they are
         flat coordinate arrays.
@@ -364,7 +353,7 @@ class FES:
     energy_unit : str or None
         Unit *energy* is expressed in, or None when unknown.
     energy_label : str or None
-        Explicit colour-bar/y-axis label.  Derived from *energy_unit* when
+        Explicit colour-bar/y-axis label. Derived from *energy_unit* when
         left as None.
     regular : bool
         True when the data lies on a regular grid and can be drawn with
@@ -379,6 +368,7 @@ class FES:
     regular: bool = True
 
     def __post_init__(self):
+        """Coerce the arrays to floats and name any unlabelled variables."""
         self.cvs = [np.asarray(cv, dtype=float) for cv in self.cvs]
         self.energy = np.asarray(self.energy, dtype=float)
         if not self.cv_labels:
@@ -395,8 +385,7 @@ class FES:
         return self.energy_label or unit_label(self.energy_unit)
 
     def finite_range(self):
-        """
-        Return the range spanned by the finite energies.
+        """Return the range spanned by the finite energies.
 
         Returns
         -------
@@ -409,16 +398,15 @@ class FES:
         return float(np.min(self.energy[finite])), float(np.max(self.energy[finite]))
 
     def slice_at(self, value, axis=0):
-        """
-        Take a 1-D cut through a 2-D surface at a fixed value of one CV.
+        """Take a 1-D cut through a 2-D surface at a fixed value of one CV.
 
         Parameters
         ----------
         value : float
-            Value of the collective variable held fixed.  The nearest grid
+            Value of the collective variable held fixed. The nearest grid
             point is used.
         axis : int, optional
-            Index of the collective variable held fixed (default is 0).
+            Index of the collective variable held fixed.
 
         Returns
         -------
@@ -445,8 +433,7 @@ class FES:
 
 
 def _grid_from_columns(x, y, z):
-    """
-    Reshape scattered column data onto a regular grid when possible.
+    """Reshape scattered column data onto a regular grid when possible.
 
     Parameters
     ----------
@@ -456,7 +443,7 @@ def _grid_from_columns(x, y, z):
     Returns
     -------
     tuple
-        ``(X, Y, Z, regular)``.  When the points form a complete rectangular
+        ``(X, Y, Z, regular)``. When the points form a complete rectangular
         grid the arrays are 2-D and *regular* is True, otherwise the inputs
         are returned unchanged with *regular* set to False.
     """
@@ -473,8 +460,7 @@ def _grid_from_columns(x, y, z):
 
 
 def _fes_from_plumed(path, columns=None, cv_labels=None, energy_label=None):
-    """
-    Build an :class:`FES` from a PLUMED FES file.
+    """Build an :class:`FES` from a PLUMED FES file.
 
     Parameters
     ----------
@@ -536,8 +522,7 @@ def _fes_from_plumed(path, columns=None, cv_labels=None, energy_label=None):
 
 
 def _fes_from_array(source, cv_labels=None, energy_label=None):
-    """
-    Build an :class:`FES` from in-memory arrays.
+    """Build an :class:`FES` from in-memory arrays.
 
     The following layouts are recognised:
 
@@ -625,8 +610,7 @@ def as_fes(source,
            columns=None,
            cv_labels=None,
            energy_label=None):
-    """
-    Coerce anything FES-shaped into a prepared :class:`FES`.
+    """Coerce anything FES-shaped into a prepared :class:`FES`.
 
     This is the single entry point used by every plotting function, so all
     of them accept file paths, raw arrays and :class:`FES` objects
@@ -638,22 +622,23 @@ def as_fes(source,
         A PLUMED FES file, an array in one of the layouts documented in
         :func:`_fes_from_array`, or an already-built surface.
     energy_unit : str or None, optional
-        Unit to convert the energies to, e.g. ``"eV"``.  ``None`` (default)
-        leaves them untouched.  Surfaces that already carry this unit are
+        Unit to convert the energies to, e.g. ``"eV"``. ``None``, the default,
+        leaves them untouched. Surfaces that already carry this unit are
         not converted twice.
     source_unit : str, optional
-        Unit the incoming energies are expressed in (default ``"kJ/mol"``,
-        which is what PLUMED writes when driven from OpenMM).
+        Unit the incoming energies are expressed in. Left at kJ/mol, which is
+        what PLUMED writes when driven from OpenMM; an ASE-driven run needs
+        ``"eV"``.
     shift_min_to_zero : bool, optional
-        Whether to subtract the global minimum so the surface starts at zero
-        (default is True).  The operation is idempotent.
+        Whether to subtract the global minimum so the surface starts at
+        zero. The operation is idempotent.
     max_energy : float or None, optional
         Energies above this value (in the *output* unit, after shifting) are
         replaced by NaN so that poorly sampled regions do not dominate the
-        colour scale.  ``None`` (default) keeps everything.
+        colour scale. ``None``, the default, keeps everything.
     columns : sequence of (str or int) or None, optional
         Which file columns to use, ordered ``(cv1, energy)`` or
-        ``(cv1, cv2, energy)``.  Only meaningful for file sources.
+        ``(cv1, cv2, energy)``. Only meaningful for file sources.
     cv_labels : sequence of str or None, optional
         Override the collective-variable labels.
     energy_label : str or None, optional
@@ -662,7 +647,15 @@ def as_fes(source,
     Returns
     -------
     FES
-        A new, prepared surface.  The input is never modified in place.
+        A new, prepared surface. The input is never modified in place.
+
+    Raises
+    ------
+    ValueError
+        If the source cannot be read as a surface, or if *energy_unit* is
+        asked for without a *source_unit* to convert from.
+    KeyError
+        If either unit is not one of :data:`ENERGY_UNITS`.
     """
     if isinstance(source, FES):
         fes = FES(cvs=list(source.cvs),
@@ -700,8 +693,7 @@ def as_fes(source,
 
 
 def _as_fes_list(sources, **kwargs):
-    """
-    Coerce one source or a collection of sources into a list of surfaces.
+    """Coerce one source or a collection of sources into a list of surfaces.
 
     Parameters
     ----------
@@ -721,8 +713,7 @@ def _as_fes_list(sources, **kwargs):
 
 
 def _looks_like_fes_array(array):
-    """
-    Return True when an array can stand on its own as a free-energy surface.
+    """Return True when an array can stand on its own as a free-energy surface.
 
     Used to tell ``[fes_a, fes_b]`` (a collection) apart from
     ``(X, Y, Z)`` (one surface), since both are sequences of arrays.
@@ -747,14 +738,13 @@ def _looks_like_fes_array(array):
 
 
 def _is_single_source(source):
-    """
-    Return True when *source* is one FES rather than a collection of them.
+    """Return True when *source* is one FES rather than a collection of them.
 
     A list or tuple is read as a single surface only when its elements are
     plain coordinate/value arrays -- ``(x, F)``, ``(x, y, z)`` columns or
-    ``(X, Y, Z)`` grids.  As soon as an element could itself be a complete
+    ``(X, Y, Z)`` grids. As soon as an element could itself be a complete
     free-energy surface the sequence is treated as a collection, so
-    ``[fes_a, fes_b]`` behaves as expected.  Stack genuinely ambiguous
+    ``[fes_a, fes_b]`` behaves as expected. Stack genuinely ambiguous
     grids with :func:`numpy.stack` to force the single-surface reading.
 
     Parameters
@@ -782,8 +772,7 @@ def _is_single_source(source):
 
 
 def _resolve_labels(labels, count, template=None):
-    """
-    Build one label per dataset.
+    """Build one label per dataset.
 
     Parameters
     ----------
@@ -825,8 +814,7 @@ def _resolve_labels(labels, count, template=None):
 
 
 def _keep_last(fes_list, label_list, max_datasets):
-    """
-    Keep only the last *max_datasets* surfaces and their labels.
+    """Keep only the last *max_datasets* surfaces and their labels.
 
     Trimming happens after label resolution, so a convergence series
     labelled by time keeps the labels of the *latest* surfaces.
@@ -838,7 +826,7 @@ def _keep_last(fes_list, label_list, max_datasets):
     label_list : list
         One label per surface.
     max_datasets : int or None
-        Number of surfaces to keep.  ``None`` keeps everything.
+        Number of surfaces to keep. ``None`` keeps everything.
 
     Returns
     -------
@@ -851,8 +839,7 @@ def _keep_last(fes_list, label_list, max_datasets):
 
 
 def _default_colors(count):
-    """
-    Pick one colour per surface from the active colour cycle, repeating.
+    """Pick one colour per surface from the active colour cycle, repeating.
 
     Parameters
     ----------
@@ -869,8 +856,7 @@ def _default_colors(count):
 
 
 def _shared_levels(fes_list, levels):
-    """
-    Build contour levels spanning every surface in *fes_list*.
+    """Build contour levels spanning every surface in *fes_list*.
 
     Sharing the levels is what makes a single colour bar meaningful across
     panels.
@@ -900,8 +886,7 @@ def _shared_levels(fes_list, levels):
 
 
 def _default_grid_size(n_panels, fig_size):
-    """
-    Pick a figure size that grows with the number of panels.
+    """Pick a figure size that grows with the number of panels.
 
     Parameters
     ----------
@@ -1026,6 +1011,7 @@ class FESSummary:
     energy_unit: str | None = None
 
     def __str__(self):
+        """Report the barriers, the basin difference and where they sit."""
         unit = f" {self.energy_unit}" if self.energy_unit else ""
         return (f"Barrier A->B:  {_format_energy(self.forward_barrier)}{unit}\n"
                 f"Barrier B->A:  {_format_energy(self.reverse_barrier)}{unit}\n"
@@ -1194,8 +1180,7 @@ def plot_fes_1d(sources,
                 show=False,
                 fig_size=(8, 3),
                 **plot_kwargs):
-    """
-    Plot one or more 1-D free-energy profiles on a single axes.
+    """Plot one or more 1-D free-energy profiles on a single axes.
 
     This covers a single profile, a convergence series over time and a
     method-to-method comparison, since they differ only in their labels.
@@ -1205,45 +1190,45 @@ def plot_fes_1d(sources,
     sources : FES source or sequence of FES sources
         Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on.  A new one is created when either *fig* or *ax*
+        Figure to draw on. A new one is created when either *fig* or *ax*
         is None.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on.
     labels : sequence, optional
-        Legend entries, one per dataset.  Non-string values are formatted
+        Legend entries, one per dataset. Non-string values are formatted
         with *label_template*, which makes ``labels=times`` with
         ``label_template=r"$t={:g}$ ps"`` a convenient time series.
     label_template : str, optional
         ``str.format`` template applied to non-string *labels*.
     max_datasets : int, optional
-        Keep only the last *max_datasets* surfaces.  ``None`` (default)
+        Keep only the last *max_datasets* surfaces. ``None``, the default,
         plots all of them.
     energy_unit : str, optional
         Unit to convert energies to, e.g. ``"eV"``.
     source_unit : str, optional
-        Unit the input energies are in (default ``"kJ/mol"``).
+        Unit the input energies are in.
     shift_min_to_zero : bool, optional
-        Whether to shift each surface so its minimum is zero (default True).
+        Whether to shift each surface so its minimum is zero.
     max_energy : float, optional
         Mask energies above this value.
-    columns : sequence, optional
+    columns : sequence of (str or int), optional
         Columns to use for file sources, ordered ``(cv, energy)``.
     x_lab, y_lab : str, optional
-        Axis labels.  Taken from the data when not given.
+        Axis labels. Taken from the data when not given.
     filename : str, optional
-        Output path; ``None`` (default) writes nothing.  A bare stem writes
+        Output path; ``None``, the default, writes nothing. A bare stem writes
         both PNG and PDF.
     show : bool, optional
-        Whether to display the figure (default is False).
+        Whether to display the figure.
     fig_size : tuple, optional
-        Figure size in inches (default ``(8, 3)``).
+        Figure size in inches.
     **plot_kwargs
         Extra keyword arguments forwarded to ``Axes.plot``.
 
     Returns
     -------
     tuple
-        The matplotlib figure and axes.
+        ``(fig, ax)`` containing the matplotlib figure and axes.
 
     Raises
     ------
@@ -1299,8 +1284,7 @@ def plot_fes_2d(sources,
                 show=False,
                 fig_size=None,
                 **contour_kwargs):
-    """
-    Plot one or more 2-D free-energy surfaces as filled contours.
+    """Plot one or more 2-D free-energy surfaces as filled contours.
 
     A single surface gives one panel; several surfaces are drawn side by
     side with shared axes, shared contour levels and one colour bar, which
@@ -1311,52 +1295,52 @@ def plot_fes_2d(sources,
     sources : FES source or sequence of FES sources
         Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on.  A new one is created when either *fig* or *ax*
+        Figure to draw on. A new one is created when either *fig* or *ax*
         is None.
     ax : matplotlib.axes.Axes or sequence of Axes, optional
         Axes to draw on; must provide one per surface.
     labels : sequence, optional
-        Panel titles, one per dataset.  Non-string values are formatted with
+        Panel titles, one per dataset. Non-string values are formatted with
         *label_template*.
     label_template : str, optional
         ``str.format`` template applied to non-string *labels*, e.g.
         ``r"$t={:g}$ ps"``.
     max_datasets : int, optional
-        Keep only the last *max_datasets* surfaces.  ``None`` (default)
+        Keep only the last *max_datasets* surfaces. ``None``, the default,
         plots all of them.
     energy_unit : str, optional
         Unit to convert energies to, e.g. ``"eV"``.
     source_unit : str, optional
-        Unit the input energies are in (default ``"kJ/mol"``).
+        Unit the input energies are in.
     shift_min_to_zero : bool, optional
-        Whether to shift each surface so its minimum is zero (default True).
+        Whether to shift each surface so its minimum is zero.
     max_energy : float, optional
         Mask energies above this value, leaving unsampled regions blank.
-    columns : sequence, optional
+    columns : sequence of (str or int), optional
         Columns to use for file sources, ordered ``(cv1, cv2, energy)``.
     levels : int or array_like, optional
-        Number of contour levels, or explicit level values (default 30).
-        An integer is expanded to levels spanning every panel.
+        Number of contour levels, or explicit level values. An integer is
+        expanded to levels spanning every panel.
     cmap : str or matplotlib.colors.Colormap, optional
         Colour map passed to ``contourf``.
     x_lab, y_lab : str, optional
-        Axis labels.  Taken from the data when not given.
+        Axis labels. Taken from the data when not given.
     colorbar : bool, optional
-        Whether to draw the shared colour bar (default is True).
+        Whether to draw the shared colour bar.
     filename : str, optional
-        Output path; ``None`` (default) writes nothing.
+        Output path; ``None``, the default, writes nothing.
     show : bool, optional
-        Whether to display the figure (default is False).
+        Whether to display the figure.
     fig_size : tuple, optional
-        Figure size in inches.  Scales with the number of panels by default.
+        Figure size in inches. Scales with the number of panels by default.
     **contour_kwargs
         Extra keyword arguments forwarded to ``contourf``/``tricontourf``.
 
     Returns
     -------
     tuple
-        The matplotlib figure and the array of axes (always 1-D, even for a
-        single panel).
+        ``(fig, axes)`` with *axes* always a 1-D array, even for a single
+        panel.
 
     Raises
     ------
@@ -1435,8 +1419,7 @@ def plot_fes_2d_overlay(sources,
                         show=False,
                         fig_size=(5, 4),
                         **contour_kwargs):
-    """
-    Overlay the contour lines of several 2-D free-energy surfaces.
+    """Overlay the contour lines of several 2-D free-energy surfaces.
 
     Drawing the surfaces on the same axes in different colours makes small
     shifts between them, such as the effect of nuclear quantum effects on a
@@ -1457,33 +1440,33 @@ def plot_fes_2d_overlay(sources,
     energy_unit : str, optional
         Unit to convert energies to, e.g. ``"eV"``.
     source_unit : str, optional
-        Unit the input energies are in (default ``"kJ/mol"``).
+        Unit the input energies are in.
     shift_min_to_zero : bool, optional
-        Whether to shift each surface so its minimum is zero (default True).
+        Whether to shift each surface so its minimum is zero.
     max_energy : float, optional
         Mask energies above this value.
-    columns : sequence, optional
+    columns : sequence of (str or int), optional
         Columns to use for file sources, ordered ``(cv1, cv2, energy)``.
     levels : int or array_like, optional
-        Number of contour lines, or explicit level values (default 6).  The
-        levels are shared by every surface so the comparison is fair.
+        Number of contour lines, or explicit level values. The levels are
+        shared by every surface so the comparison is fair.
     colors : sequence, optional
-        One colour per surface.  Defaults to the active colour cycle.
+        One colour per surface. Defaults to the active colour cycle.
     x_lab, y_lab : str, optional
-        Axis labels.  Taken from the data when not given.
+        Axis labels. Taken from the data when not given.
     filename : str, optional
-        Output path; ``None`` (default) writes nothing.
+        Output path; ``None``, the default, writes nothing.
     show : bool, optional
-        Whether to display the figure (default is False).
+        Whether to display the figure.
     fig_size : tuple, optional
-        Figure size in inches (default ``(5, 4)``).
+        Figure size in inches.
     **contour_kwargs
         Extra keyword arguments forwarded to ``contour``/``tricontour``.
 
     Returns
     -------
     tuple
-        The matplotlib figure and axes.
+        ``(fig, ax)`` containing the matplotlib figure and axes.
 
     Raises
     ------
@@ -1549,8 +1532,7 @@ def plot_fes_slices(sources,
                     show=False,
                     fig_size=(8, 3),
                     **plot_kwargs):
-    """
-    Plot 1-D cuts through 2-D free-energy surfaces at fixed CV values.
+    """Plot 1-D cuts through 2-D free-energy surfaces at fixed CV values.
 
     Each surface gets its own colour and each requested cut its own line
     style, so several surfaces can be compared at several slices at once.
@@ -1564,8 +1546,8 @@ def plot_fes_slices(sources,
     at : float or sequence of float
         Value(s) of the held collective variable at which to cut.
     axis : int, optional
-        Index of the collective variable held fixed (default is 0, i.e.
-        slices run along CV2).
+        Index of the collective variable held fixed, so the default cuts
+        along CV2.
     fig : matplotlib.figure.Figure, optional
         Figure to draw on.
     ax : matplotlib.axes.Axes, optional
@@ -1575,35 +1557,35 @@ def plot_fes_slices(sources,
     energy_unit : str, optional
         Unit to convert energies to, e.g. ``"eV"``.
     source_unit : str, optional
-        Unit the input energies are in (default ``"kJ/mol"``).
+        Unit the input energies are in.
     shift_min_to_zero : bool, optional
-        Whether to shift each surface so its minimum is zero (default True).
+        Whether to shift each surface so its minimum is zero.
     max_energy : float, optional
         Mask energies above this value.
-    columns : sequence, optional
+    columns : sequence of (str or int), optional
         Columns to use for file sources, ordered ``(cv1, cv2, energy)``.
     slice_format : str, optional
         ``str.format`` template for the legend entries, receiving ``label``,
         ``cv`` and ``value``.
     colors : sequence, optional
-        One colour per surface.  Defaults to the active colour cycle.
+        One colour per surface. Defaults to the active colour cycle.
     linestyles : sequence, optional
         One line style per slice value.
     x_lab, y_lab : str, optional
-        Axis labels.  Taken from the data when not given.
+        Axis labels. Taken from the data when not given.
     filename : str, optional
-        Output path; ``None`` (default) writes nothing.
+        Output path; ``None``, the default, writes nothing.
     show : bool, optional
-        Whether to display the figure (default is False).
+        Whether to display the figure.
     fig_size : tuple, optional
-        Figure size in inches (default ``(8, 3)``).
+        Figure size in inches.
     **plot_kwargs
         Extra keyword arguments forwarded to ``Axes.plot``.
 
     Returns
     -------
     tuple
-        The matplotlib figure and axes.
+        ``(fig, ax)`` containing the matplotlib figure and axes.
 
     Raises
     ------
@@ -1657,13 +1639,12 @@ _PREPARE_KWARGS = ("energy_unit", "source_unit", "shift_min_to_zero", "max_energ
 
 
 def plot_fes(sources, **kwargs):
-    """
-    Plot a free-energy surface, dispatching on its dimensionality.
+    """Plot a free-energy surface, dispatching on its dimensionality.
 
     Sends 1-D data to :func:`plot_fes_1d` and 2-D data to
     :func:`plot_fes_2d`, which is convenient when the dimensionality is
-    decided by the PLUMED input rather than by the caller.  Sources are read
-    once here and handed on as :class:`FES` objects.  Options that only make
+    decided by the PLUMED input rather than by the caller. Sources are read
+    once here and handed on as :class:`FES` objects. Options that only make
     sense for contour plots (``levels``, ``cmap``, ``colorbar``) are ignored
     for 1-D data instead of raising.
 
@@ -1677,7 +1658,7 @@ def plot_fes(sources, **kwargs):
     Returns
     -------
     tuple
-        The matplotlib figure and axes.
+        ``(fig, ax)`` containing the matplotlib figure and axes.
     """
     prepare = {key: kwargs.pop(key) for key in _PREPARE_KWARGS if key in kwargs}
     fes_list = _as_fes_list(sources, **prepare)
@@ -1694,11 +1675,10 @@ def plot_plumed_fes(path,
                     shift_min_to_zero=True,
                     levels=30,
                     **kwargs):
-    """
-    Plot a PLUMED free-energy surface from a data file.
+    """Plot a PLUMED free-energy surface from a data file.
 
     Thin wrapper around :func:`plot_fes` kept for the example and test
-    workflows.  Whether the surface is 1-D or 2-D is determined from the
+    workflows. Whether the surface is 1-D or 2-D is determined from the
     file; a 1-D FES is drawn as a line, a 2-D FES as filled contours with a
     colour bar.
 
@@ -1706,12 +1686,12 @@ def plot_plumed_fes(path,
     ----------
     path : str
         Path to the PLUMED FES data file.
-    ax : matplotlib.axes.Axes or None, optional
-        Axes on which to draw.  A new figure is created when None.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on. A new figure is created when ``None``.
     shift_min_to_zero : bool, optional
-        Whether to shift the surface so its minimum is zero (default True).
+        Whether to shift the surface so its minimum is zero.
     levels : int, optional
-        Number of contour levels for 2-D plots (default is 30).
+        Number of contour levels for 2-D plots.
     **kwargs
         Further options forwarded to :func:`plot_fes_1d` /
         :func:`plot_fes_2d`, such as ``energy_unit``, ``max_energy``,
@@ -1719,10 +1699,8 @@ def plot_plumed_fes(path,
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The matplotlib figure.
-    ax : matplotlib.axes.Axes
-        The matplotlib axes, or an array of axes if several were drawn.
+    tuple
+        ``(fig, ax)``, with *ax* an array of axes when several were drawn.
     """
     fig, axes = plot_fes(path,
                          fig=ax.figure if ax is not None else None,
@@ -1742,8 +1720,7 @@ def plot_plumed_colvar(path,
                        filename=None,
                        show=False,
                        figsize=(10, 8)):
-    """
-    Plot collective variables from a PLUMED COLVAR file.
+    """Plot collective variables from a PLUMED COLVAR file.
 
     Reads the ``#! FIELDS`` header to determine the column names and creates
     a vertically stacked subplot for each variable.
@@ -1753,30 +1730,28 @@ def plot_plumed_colvar(path,
     path : str
         Path to the PLUMED COLVAR file.
     x_axis : str, optional
-        Column name to use as the x-axis.  If the column is not found, the
-        row index is used instead.  Default is ``'time'``.
+        Column name to use as the x-axis. If the column is not found, the
+        row index is used instead.
     columns : sequence of str, optional
-        Restrict the plot to these columns.  By default every column other
+        Restrict the plot to these columns. By default every column other
         than *x_axis* is plotted.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on.  A new one is created when either *fig* or
+        Figure to draw on. A new one is created when either *fig* or
         *axes* is None.
     axes : sequence of matplotlib.axes.Axes, optional
         Axes to draw on; must provide one per plotted column.
     filename : str, optional
-        Output path; ``None`` (default) writes nothing.  A bare stem writes
+        Output path; ``None``, the default, writes nothing. A bare stem writes
         both PNG and PDF.
     show : bool, optional
-        Whether to display the figure (default is False).
+        Whether to display the figure.
     figsize : tuple of float, optional
-        Figure size in inches ``(width, height)``.  Default is ``(10, 8)``.
+        Figure size in inches ``(width, height)``.
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The matplotlib figure.
-    axes : numpy.ndarray of matplotlib.axes.Axes
-        One axes per plotted variable.
+    tuple
+        ``(fig, axes)``, with one axes per plotted variable.
 
     Raises
     ------
@@ -1846,29 +1821,33 @@ def plot_fes_convergence(sources,
         The surfaces, in order; see :func:`fes_convergence`.
     basin_a, basin_b : sequence of float
         Basin windows, held fixed across the series.
-    times : sequence of float or None, optional
-        X values — simulated time, or hills deposited. ``None`` numbers the
-        surfaces from one.
+    times : sequence of float, optional
+        X values — simulated time, or hills deposited. ``None``, the default,
+        numbers the surfaces from one.
     temperature : float or None, optional
         See :func:`summarise_fes`.
-    fig, ax : matplotlib objects, optional
-        Draw on these instead of making a new figure.
-    x_lab, y_lab : str or None, optional
-        Axis labels. Defaults are ``"Surface"`` (or ``"Time"`` when *times*
-        is given) and the energy unit of the first surface.
-    filename : str or None, optional
-        Write the figure here; ``None`` writes nothing.
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on. A new one is created when either *fig* or *ax*
+        is None.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on.
+    x_lab, y_lab : str, optional
+        Axis labels. Taken from the data when not given: ``"Surface"``, or
+        ``"Time"`` when *times* is given, and the energy unit of the first
+        surface.
+    filename : str, optional
+        Output path; ``None``, the default, writes nothing.
     show : bool, optional
-        Call ``plt.show()`` afterwards.
+        Whether to display the figure.
     fig_size : tuple, optional
-        Size of a newly created figure.
+        Figure size in inches.
     **kwargs
         Forwarded to :func:`as_fes`.
 
     Returns
     -------
     tuple
-        ``(fig, ax)``.
+        ``(fig, ax)`` containing the matplotlib figure and axes.
 
     Raises
     ------

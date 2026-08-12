@@ -38,8 +38,7 @@ def orca_calc_preset(orca_path=None,
                      calc_extra=None,
                      blocks_extra=None,
                      scf_option=None):
-    """
-    Build an ASE ORCA calculator from a small set of common presets.
+    """Build an ASE ORCA calculator from a small set of common presets.
 
     Assembles the ORCA "simple input" line and block section for one of a
     few common calculation types, so callers do not have to hand-write ORCA
@@ -49,51 +48,45 @@ def orca_calc_preset(orca_path=None,
     ----------
     orca_path : str or None, optional
         Path to the ORCA executable. If None, read from the ``ORCA_PATH``
-        environment variable. Default is None.
+        environment variable.
     directory : str or None, optional
         Working directory for ORCA's input/output files. If None, a new
-        temporary directory is created. Default is None.
+        temporary directory is created.
     calc_type : str, optional
         One of ``'DFT'``, ``'MP2'``, ``'CCSD'`` or ``'QM/XTB2'``, each
         building the corresponding ORCA method keyword(s). Any other value
-        is passed straight through as the ORCA method keyword. Default is
-        ``'DFT'``.
+        is passed straight through as the ORCA method keyword.
     xc : str, optional
         Exchange-correlation functional, used for ``'DFT'`` and as the QM
-        region's method for ``'QM/XTB2'``. Default is ``'r2SCAN-3c'``.
+        region's method for ``'QM/XTB2'``.
     charge : int, optional
-        Total charge. Default is 0.
+        Total charge.
     multiplicity : int, optional
         Spin multiplicity. Values above 1 switch ``'DFT'``/``'QM/XTB2'`` to
         a ``UKS`` reference and ``'MP2'``/``'CCSD'`` to a ``UKS`` reference
-        as well. Default is 1.
+        as well.
     basis_set : str, optional
         Basis set keyword, appended to the simple input line (and, for
         ``'MP2'``/``'CCSD'``, also used as the auxiliary ``/C`` basis).
-        Default is ``''``.
     n_procs : int, optional
-        Number of MPI processes requested via ``%pal``. Default is 1.
+        Number of MPI processes requested via ``%pal``.
     f_solv : bool or str, optional
-        Implicit solvation via CPCM/SMD. ``True`` uses water; a string
-        names an explicit SMD solvent; ``False``/``None`` disables
-        solvation. Default is False.
+        Implicit solvation via CPCM/SMD. ``True`` uses water; a string names
+        an explicit SMD solvent; ``False``/``None`` disables solvation.
     f_disp : bool or str, optional
-        Dispersion correction. ``True`` uses ``D4``; a string is used as
-        the dispersion keyword directly; ``False``/``None`` disables it.
-        Default is False.
+        Dispersion correction. ``True`` uses ``D4``; a string is used as the
+        dispersion keyword directly; ``False``/``None`` disables it.
     atom_list : str or None, optional
-        ORCA atom-selection string for the QM region (without braces),
-        used only when *calc_type* is ``'QM/XTB2'``. Default is None.
+        ORCA atom-selection string for the QM region (without braces), used
+        only when *calc_type* is ``'QM/XTB2'``.
     calc_extra : str or None, optional
         Extra text appended to the simple input line, e.g. ``'TIGHTOPT'``.
-        Default is None.
     blocks_extra : str or None, optional
         Extra ORCA block text appended after ``%pal``/``%CPCM``. Ignored
         when *calc_type* is ``'QM/XTB2'``, which builds its own blocks
-        instead. Default is None.
+        instead.
     scf_option : str or None, optional
         Extra SCF-related keyword appended to the simple input line.
-        Default is None.
 
     Returns
     -------
@@ -179,8 +172,7 @@ def orca_optimise_atoms(atoms,
                         f_solv=False,
                         f_disp=False,
                         n_procs=1):
-    """
-    Optimise a geometry at the DFT level with ORCA.
+    """Optimise a geometry at the DFT level with ORCA.
 
     Builds a DFT calculator via :func:`orca_calc_preset` with an
     ``OPT``/``TIGHTOPT`` keyword, runs it in a scratch directory, and reads
@@ -197,28 +189,26 @@ def orca_optimise_atoms(atoms,
         Starting geometry. Its ``calc`` is set to the ORCA calculator as a
         side effect.
     charge : int, optional
-        Total charge. Default is 0.
+        Total charge.
     multiplicity : int, optional
-        Spin multiplicity. Default is 1.
+        Spin multiplicity.
     orca_path : str or None, optional
         Path to the ORCA executable. If None, read from the ``ORCA_PATH``
-        environment variable. Default is None.
+        environment variable.
     xc : str, optional
-        Exchange-correlation functional. Default is ``'r2SCAN-3c'``.
+        Exchange-correlation functional.
     basis_set : str, optional
-        Basis set keyword. Default is ``''``.
+        Basis set keyword.
     tight_opt : bool, optional
-        If True, use ``TIGHTOPT`` instead of ``OPT``. Default is True.
+        If True, use ``TIGHTOPT`` instead of ``OPT``.
     tight_scf : bool, optional
-        If True, add ``TIGHTSCF`` to the optimisation keywords. Default is
-        False.
+        If True, add ``TIGHTSCF`` to the optimisation keywords.
     f_solv : bool or str, optional
-        Implicit solvation; see :func:`orca_calc_preset`. Default is False.
+        Implicit solvation; see :func:`orca_calc_preset`.
     f_disp : bool or str, optional
-        Dispersion correction; see :func:`orca_calc_preset`. Default is
-        False.
+        Dispersion correction; see :func:`orca_calc_preset`.
     n_procs : int, optional
-        Number of MPI processes requested via ``%pal``. Default is 1.
+        Number of MPI processes requested via ``%pal``.
 
     Returns
     -------
@@ -251,8 +241,7 @@ def orca_optimise_atoms(atoms,
 
 
 def _extract_conformer_info(filepath: str | Path):
-    """
-    Parse the conformer ensemble table from an ORCA GOAT output file.
+    """Parse the conformer ensemble table from an ORCA GOAT output file.
 
     Parameters
     ----------
@@ -316,8 +305,7 @@ def orca_calculate_goat(atoms,
                         multiplicity=1,
                         orca_path=None,
                         n_procs=1):
-    """
-    Run ORCA's GOAT conformer search and collect the resulting ensemble.
+    """Run ORCA's GOAT conformer search and collect the resulting ensemble.
 
     Worth running before a band is built: a NEB between two arbitrary
     conformers explores the conformational change as well as the reaction,
@@ -328,22 +316,20 @@ def orca_calculate_goat(atoms,
     atoms : ase.Atoms
         Starting geometry for the conformer search.
     charge : int, optional
-        Total charge. Default is 0.
+        Total charge.
     multiplicity : int, optional
-        Spin multiplicity. Default is 1.
+        Spin multiplicity.
     orca_path : str or None, optional
         Path to the ORCA executable. If None, read from the ``ORCA_PATH``
-        environment variable. Default is None.
+        environment variable.
     n_procs : int, optional
-        Number of MPI processes requested via ``%pal``. Default is 1.
+        Number of MPI processes requested via ``%pal``.
 
     Returns
     -------
-    atoms : list of ase.Atoms
-        Every conformer in the final ensemble, in the order ORCA wrote
-        them.
-    df : pandas.DataFrame
-        Conformer energies and populations; see
+    tuple
+        ``(atoms, df)``: every conformer in the final ensemble, in the order
+        ORCA wrote them, and their energies and populations as parsed by
         :func:`_extract_conformer_info`.
     """
     if orca_path is None:

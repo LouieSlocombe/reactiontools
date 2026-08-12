@@ -930,8 +930,7 @@ class TestPrepareParallelNeb:
             assert len(neb.images) == 5
 
     def test_asks_ase_to_spread_the_images(self, evaluated_endpoints):
-        """Without this ASE walks the band one image at a time, and the
-        sockets would sit idle in turn rather than working together."""
+        """Without this, ASE would walk the band one image at a time."""
         reactant, product = evaluated_endpoints
 
         with prepare_parallel_neb(reactant, product, None,
@@ -950,8 +949,7 @@ class TestPrepareParallelNeb:
         assert len({id(c) for c in interior}) == 4
 
     def test_does_not_give_the_endpoints_sockets(self, evaluated_endpoints):
-        """Two more clients would idle through the whole run for energies
-        that are already known."""
+        """Two more clients would idle through a run for known energies."""
         reactant, product = evaluated_endpoints
 
         with prepare_parallel_neb(reactant, product, None,
@@ -1025,8 +1023,7 @@ class TestPrepareParallelNeb:
 
     def test_prices_endpoints_that_arrive_without_an_energy(self,
                                                             slab_endpoints):
-        """Endpoints read back from a file have no calculator, so the first
-        socket has to evaluate them once before the band starts."""
+        """Endpoints from a file have no calculator, so a socket prices them."""
         reactant, product = slab_endpoints
         expected = [reactant.get_potential_energy(),
                     product.get_potential_energy()]
@@ -1044,10 +1041,11 @@ class TestPrepareParallelNeb:
 
     def test_ignores_an_energy_left_over_from_the_other_endpoint(self,
                                                                  slab_endpoints):
-        """Regression: optimise_reactant_product sends both endpoints through
-        one calculator, so its cached result belongs to whichever went last.
+        """Regression: a cached energy may belong to the other endpoint.
 
-        Trusting it blind handed the reactant the product's energy. Asking the
+        optimise_reactant_product sends both endpoints through one calculator,
+        so its cached result belongs to whichever of them went last, and
+        trusting it blind handed the reactant the product's energy. Asking the
         calculator for a fresh one was no better: after the ``with`` block that
         opened it, the socket behind an endpoint is shut, and re-evaluating
         through it died on a closed log file rather than on anything legible.
@@ -1224,8 +1222,7 @@ class TestGetTsImage:
         assert ts.calc is not None
 
     def test_uses_the_energies_the_images_carry(self, slab_endpoints):
-        """A band from prepare_parallel_neb comes back after its sockets have
-        closed, so there is no calculator left to hand over."""
+        """A parallel band comes back with its sockets already closed."""
         reactant, product = slab_endpoints
         neb = prepare_neb(reactant, product, EMT(), n_images=5,
                           rm_ro_trans=False, geo_int=False)

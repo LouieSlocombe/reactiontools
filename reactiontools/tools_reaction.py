@@ -1,3 +1,32 @@
+"""Reaction paths: build a band, relax it, refine the top of it.
+
+The workflow the package is built around, in the order it runs.
+:func:`optimise_reactant_product` relaxes the two end states,
+:func:`prepare_neb` interpolates a band between them, :func:`optimise_neb`
+relaxes that, :func:`summarise_neb` reduces it to the barriers it was run for
+and :func:`get_ts_image` picks off the highest image. From there
+:func:`optimise_ts` refines that image onto a true saddle point,
+:func:`optimise_irc` follows the reaction coordinate down either side of it to
+show which states it actually connects, and :func:`get_vibrations` confirms it
+is a first-order saddle rather than something else that stopped moving.
+
+:func:`restart_neb` picks a band back up instead of interpolating a fresh one,
+which is how a run that stopped early is continued, or a converged one
+tightened. The parallel variants, :func:`prepare_parallel_neb` and
+:func:`restart_parallel_neb`, do the same jobs with one socket calculator per
+image, so a band whose images are expensive evaluates them concurrently rather
+than one after another.
+
+Every ``optimise_*`` function records whether it reached its force criterion in
+``info["converged"]`` on the structures it returns, and warns
+:class:`ConvergenceWarning` when it did not; pass ``raise_on_unconverged=True``
+for a :class:`ConvergenceError` instead.
+
+Sella is an optional dependency needed only by the saddle-point searches,
+:func:`optimise_ts` and :func:`optimise_irc`. Install it with
+``pip install 'reactiontools[ts]'``; everything else here works without it.
+"""
+
 import copy
 import os
 import warnings
@@ -837,12 +866,13 @@ def socket_calculators(n_calculators, make_calc=None,
                        port=None,
                        timeout=None,
                        log=None):
-    """Open one :class:`~ase.calculators.socketio.SocketIOCalculator` per image.
+    """Open a pool of socket calculators, one per image.
 
-    Each calculator gets its own socket, so the external codes behind them
-    run as independent processes and can compute at the same time. The
-    calculators are closed — and their clients shut down — when the block
-    exits, including when it exits by exception.
+    Each :class:`~ase.calculators.socketio.SocketIOCalculator` gets its own
+    socket, so the external codes behind them run as independent processes and
+    can compute at the same time. The calculators are closed — and their
+    clients shut down — when the block exits, including when it exits by
+    exception.
 
     Parameters
     ----------
@@ -1226,6 +1256,7 @@ class NebSummary:
     reaction_energy: float
 
     def __post_init__(self):
+        """Coerce *energies* to a float array, whatever it was built from."""
         self.energies = np.asarray(self.energies, dtype=float)
 
     @property
@@ -1251,6 +1282,7 @@ class NebSummary:
         return "0.000" if text == "-0.000" else text
 
     def __str__(self):
+        """Report the barriers and the reaction energy, one per line."""
         return (f"Barrier:         {self._ev(self.barrier)} eV\n"
                 f"Reverse barrier: {self._ev(self.reverse_barrier)} eV\n"
                 f"Reaction energy: {self._ev(self.reaction_energy)} eV\n"
@@ -1555,7 +1587,6 @@ def get_vibrations(atoms, calc):
     atoms = atoms.copy()
     atoms.calc = calc
     vib = Vibrations(atoms)
-    # Make sure the folder is clean
     vib.clean()
     vib.run()
     vib.summary()

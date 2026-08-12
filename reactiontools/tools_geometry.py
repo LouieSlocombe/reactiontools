@@ -74,23 +74,22 @@ def bonded_cluster_indices_no_anchor_hub(atoms: Atoms,
     nl = NeighborList(cutoffs, skin=0.0, self_interaction=False, bothways=True)
     nl.update(atoms)
 
-    # First step: collect immediate neighbors of the anchor
     first_neighbors, _ = nl.get_neighbors(anchor)
     # NOTE: depends on atom ordering, dropping whichever atom sits two indices
     # before the anchor. Carried over from the original implementation.
     first_neighbors = [i for i in first_neighbors if i != anchor - 2]
 
-    # Seed traversal with first-shell neighbors; mark anchor as visited so we never traverse through it
+    # The anchor counts as visited before the walk starts, so the search
+    # spreads outwards from its neighbours and never back through it.
     visited = {anchor} | set(first_neighbors)
     stack = list(first_neighbors)
 
-    # Explore without ever stepping onto the anchor again
     while stack:
         i = stack.pop()
         nbrs, _ = nl.get_neighbors(i)
         for j in nbrs:
             if j == anchor:
-                continue  # do not traverse through anchor beyond the first step
+                continue
             if j not in visited:
                 visited.add(j)
                 stack.append(j)
@@ -164,13 +163,14 @@ def _pca_frame(positions):
     pts = np.asarray(positions)
     origin = pts.mean(axis=0)
     X = pts - origin
-    # PCA via SVD
+    # PCA by SVD: the principal axes are the rows of Vt, in descending order
+    # of variance, so the last of them is the plane normal.
     _U, _S, Vt = np.linalg.svd(X, full_matrices=False)
-    # Principal axes are rows of Vt; use columns as unit vectors
-    x = Vt[0]  # largest variance axis
+    x = Vt[0]
     y = Vt[1]
-    z = Vt[2]  # normal to the base plane (smallest variance)
-    # Re-orthonormalize into RH frame (numerical safety)
+    z = Vt[2]
+    # Rebuild y and z from cross products rather than trusting SVD's output to
+    # be exactly orthonormal and right-handed.
     x = x / np.linalg.norm(x)
     z = z / np.linalg.norm(z)
     y = np.cross(z, x)
@@ -206,7 +206,6 @@ def _orient_normal_toward(R, origin, target_point):
     z = R[:, 2]
     d = np.asarray(target_point) - np.asarray(origin)
     if np.dot(z, d) < 0.0:
-        # flip both y and z to keep RH: x stays, y->-y, z->-z
         R = np.column_stack((R[:, 0], -R[:, 1], -R[:, 2]))
     return R
 
@@ -280,38 +279,31 @@ def flip_and_face_bases(
     baseA = np.array(baseA_idxs, dtype=int)
     baseB = np.array(baseB_idxs, dtype=int)
 
-    # Anchors and base centroids
     anchorA = pos[anchorA_idx].copy()
     anchorB = pos[anchorB_idx].copy()
 
-    # Local frames via PCA
     originA, RA = _pca_frame(pos[baseA])
     originB, RB = _pca_frame(pos[baseB])
 
-    # Make each normal point toward the other base (for a consistent 'face')
+    # Point both normals at the other fragment, so that "facing" means the
+    # same thing for each of them.
     RB = _orient_normal_toward(RB, originB, originA)
     RA = _orient_normal_toward(RA, originA, originB)
 
-    # Reflection matrix that flips the normal and y while keeping x,
-    # so after swap the bases "face" each other with aligned x-axes.
+    # The reflection flips the normal while keeping x, so the fragments end up
+    # facing each other rather than back to back.
     if rot_matrix is None:
         rot_matrix = [-1.0, 1.0, -1.0]
-    M = np.diag(rot_matrix)  # x, -y, -z (right-handed overall mapping)
+    M = np.diag(rot_matrix)
 
-    # World-space rotations to map frames
-    # For A -> B: R_target_A satisfies: R_target_A * RA ≈ RB * M
-    # => R_target_A = RB * M * RA^T
+    # Mapping A's frame onto B's: R_target_A @ RA == RB @ M, and RA is
+    # orthonormal, so R_target_A = RB @ M @ RA.T. B onto A is the mirror image.
     R_target_A = RB @ M @ RA.T
-
-    # For B -> A: symmetric
     R_target_B = RA @ M @ RB.T
 
-    # Apply rigid transforms about anchors, translated onto the opposite anchor
-    # A goes to anchorB; B goes to anchorA
     newA = _rigid_transform(pos[baseA], anchorA, R_target_A, anchorB)
     newB = _rigid_transform(pos[baseB], anchorB, R_target_B, anchorA)
 
-    # Write back
     new_pos = pos.copy()
     new_pos[baseA] = newA
     new_pos[baseB] = newB
@@ -383,12 +375,10 @@ def optimize_with_fixed_anchors(atoms: Atoms,
         If the relaxation did not converge and ``raise_on_unconverged`` is
         True.
     """
-    # Create a copy to avoid modifying the original
     atoms_opt = atoms.copy()
     constraint = FixAtoms(indices=anchor_indices)
     atoms_opt.set_constraint(constraint)
 
-    # Select only the atoms in baseA and baseB for optimization
     selection = list(baseA_idxs) + list(baseB_idxs)
     atoms_opt = atoms_opt[selection]
 
@@ -477,7 +467,6 @@ def get_best_flip_and_face_bases(
                                      | set(permutations((-1.0, -1.0, 1.0))))
     print(f"All permutations of rot_matrix: {rot_matrix_permutations}", flush=True)
 
-    # loop over permutations to see which gives the least COM movement
     best_rot_matrix = None
     best_dist_after = float('inf')
     for rot_matrix in rot_matrix_permutations:
@@ -532,8 +521,7 @@ def get_best_flip_and_face_bases(
 
 
 def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index):
-    """
-    Swap the bonding configuration from O-H...O to O...H-O in an Atoms object.
+    """Swap an O-H...O hydrogen bond over to O...H-O.
 
     Builds the product end state of a proton transfer: the hydrogen is moved
     to the acceptor side of the hydrogen bond, keeping the same bond length it
@@ -543,18 +531,18 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
     Parameters
     ----------
     atoms : ase.Atoms
-        The ASE Atoms object.  Not modified; a copy is returned.
+        Structure holding the hydrogen bond. Not modified; a copy is returned.
     donor_index : int
-        The index of the donor oxygen atom.
+        Index of the donor oxygen.
     hydrogen_index : int
-        The index of the hydrogen atom.
+        Index of the hydrogen being moved.
     acceptor_index : int
-        The index of the acceptor oxygen atom.
+        Index of the acceptor oxygen.
 
     Returns
     -------
     ase.Atoms
-        The updated Atoms object with the swapped bonding configuration.
+        Copy of ``atoms`` with the hydrogen on the acceptor side.
     """
     atoms = atoms.copy()
     donor_pos = atoms.positions[donor_index]

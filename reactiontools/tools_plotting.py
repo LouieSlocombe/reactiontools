@@ -1,3 +1,24 @@
+"""Ready-made figures for the reaction and metadynamics workflows.
+
+One call per thing worth looking at, each returning ``(fig, ax)`` so it can be
+dropped into a larger figure: :func:`plot_images` and :func:`show_atoms` draw
+structures, :func:`plot_neb` and :func:`plot_irc` draw an energy profile
+against path distance, :func:`plot_temperature` and :func:`plot_total_energy`
+follow an MD run frame by frame, and :func:`plot_plumed` and
+:func:`plot_plumed_multi` draw one-dimensional free-energy surfaces.
+
+Saving here is ``save=True`` plus a filename stem, and always writes both PNG
+and PDF; :mod:`reactiontools.tools_fes` keys off ``filename`` alone instead.
+
+The PLUMED wrappers are deliberately thin: they hand the work to
+:mod:`reactiontools.tools_fes` with the units fixed to the eV an ASE-driven run
+writes, plotted in meV. Go to that module directly for two-dimensional
+surfaces, other units, or anything else it does that is not wrapped here.
+
+Styling comes from :mod:`reactiontools.tools_style`, so these figures and the
+free-energy ones come out looking alike.
+"""
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -98,6 +119,11 @@ def plot_images(images,
     -------
     tuple
         ``(fig, axes)`` with ``axes`` as a flat array, one entry per panel.
+
+    Raises
+    ------
+    ValueError
+        If there are no images, or if *titles* has the wrong length.
     """
     if isinstance(images, Atoms):
         images = [images]
@@ -221,7 +247,6 @@ def _plot_profile(images, calc, fig, ax, save, show, smooth, k, fig_size,
     """
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-    # Use cached energies where available, fall back to calc otherwise
     energies = np.array([_get_energy(image, calc) for image in images])
     energies -= min(energies)
     energies *= 1000.0  # eV -> meV
@@ -407,7 +432,7 @@ def _plot_trajectory_series(trajectories, labels, timestep, ax, frame_value,
 
 
 def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
-    """Plot temperature versus frame number or time for one or more trajectories.
+    """Plot temperature against frame number or time for one or more runs.
 
     Parameters
     ----------
@@ -416,9 +441,9 @@ def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
     labels : sequence of str, optional
         Legend labels. Defaults to the filename for each trajectory.
     timestep : float, optional
-        Time spacing between frames. When provided, the x-axis is in fs.
+        Time spacing between frames. When given, the x-axis is in fs.
     ax : matplotlib.axes.Axes, optional
-        Existing axes to draw on. A new figure and axes are created if ``None``.
+        Axes to draw on. A new figure and axes are created if ``None``.
 
     Returns
     -------
@@ -431,7 +456,7 @@ def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
 
 
 def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
-    """Plot total energy versus frame number or time for one or more trajectories.
+    """Plot total energy against frame number or time for one or more runs.
 
     Parameters
     ----------
@@ -440,9 +465,9 @@ def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
     labels : sequence of str, optional
         Legend labels. Defaults to the filename for each trajectory.
     timestep : float, optional
-        Time spacing between frames. When provided, the x-axis is in fs.
+        Time spacing between frames. When given, the x-axis is in fs.
     ax : matplotlib.axes.Axes, optional
-        Existing axes to draw on. A new figure and axes are created if ``None``.
+        Axes to draw on. A new figure and axes are created if ``None``.
 
     Returns
     -------
@@ -454,9 +479,9 @@ def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
                                    "Total energy (eV)")
 
 
-#: Unit conversion applied to every ``fes.dat`` these wrappers read.  ASE works
+#: Unit conversion applied to every ``fes.dat`` these wrappers read. ASE works
 #: in eV and that is what ``plumed sum_hills`` writes for an ASE-driven run, so
-#: the surfaces are read as eV and plotted in meV.  A run driven from OpenMM
+#: the surfaces are read as eV and plotted in meV. A run driven from OpenMM
 #: writes kJ/mol instead -- reach for :mod:`reactiontools.tools_fes` directly
 #: for those, which is where these wrappers send the work anyway.
 _FES_UNITS = {"source_unit": "eV", "energy_unit": "meV"}
@@ -475,6 +500,11 @@ def _expand_fes_files(files):
     -------
     list of pathlib.Path
         Files to plot, in the order given.
+
+    Raises
+    ------
+    ValueError
+        If no ``fes.dat`` was found, as an empty directory gives.
     """
     if isinstance(files, (str, Path)):
         files = [files]

@@ -18,7 +18,8 @@ import numpy as np
 
 __all__ = ["ax_plot", "n_plot"]
 
-# Setting plot aesthetics for better visibility
+# Set on import, so it thickens the frame of every figure drawn in the
+# process, not only the ones passing through ax_plot.
 plt.rcParams['axes.linewidth'] = 2.0
 
 
@@ -26,12 +27,7 @@ def n_plot(xlab,
            ylab,
            xs=14,
            ys=14):
-    """
-    Configures the appearance of the current matplotlib plot.
-
-    This function sets up minor ticks, major ticks, and axis labels for the
-    active pyplot axes.  It adjusts the tick parameters and applies a tight
-    layout to ensure proper spacing.
+    """Style the current axes, as :func:`ax_plot` would.
 
     Parameters
     ----------
@@ -40,13 +36,9 @@ def n_plot(xlab,
     ylab : str
         Label for the y-axis.
     xs : int, optional
-        Font size for the x-axis label (default is 14).
+        Font size for the x-axis label.
     ys : int, optional
-        Font size for the y-axis label (default is 14).
-
-    Returns
-    -------
-    None
+        Font size for the y-axis label.
     """
     ax_plot(plt.gcf(), plt.gca(), xlab, ylab, xs=xs, ys=ys)
 
@@ -57,34 +49,26 @@ def ax_plot(fig,
             ylab,
             xs=14,
             ys=14):
-    """
-    Configures the appearance of a matplotlib plot using a given figure and axes.
+    """Style one axes: ticks inward on all four sides, minor ticks on, labels.
 
-    This function sets up minor ticks, major ticks, and axis labels for the provided
-    matplotlib axes. It adjusts the tick parameters and applies a tight layout to
-    ensure proper spacing.  The layout pass is skipped when the figure already
-    manages its own layout (for example ``constrained_layout=True``), which would
-    otherwise trigger a matplotlib warning.
+    The tight-layout pass is skipped when the figure manages its own layout
+    (``constrained_layout=True``, say), which would otherwise warn.
 
     Parameters
     ----------
     fig : matplotlib.figure.Figure
-        The matplotlib figure object.
+        Figure owning *ax*.
     ax : matplotlib.axes.Axes
-        The matplotlib axes object to configure.
+        Axes to style.
     xlab : str or None
-        Label for the x-axis.  ``None`` leaves the existing label untouched,
+        Label for the x-axis. ``None`` leaves the existing label untouched,
         which is what stacked panels sharing an x-axis want.
     ylab : str or None
-        Label for the y-axis.  ``None`` leaves the existing label untouched.
+        Label for the y-axis. ``None`` leaves the existing label untouched.
     xs : int, optional
-        Font size for the x-axis label (default is 14).
+        Font size for the x-axis label.
     ys : int, optional
-        Font size for the y-axis label (default is 14).
-
-    Returns
-    -------
-    None
+        Font size for the y-axis label.
     """
     ax.minorticks_on()
     ax.tick_params(axis='both', which='major', labelsize=ys - 2, direction='in', length=6, width=2)
@@ -99,8 +83,7 @@ def ax_plot(fig,
 
 
 def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
-    """
-    Apply :func:`ax_plot` styling to one or more axes.
+    """Apply :func:`ax_plot` styling to one or more axes.
 
     Only the left-most axes keeps the y-label so that shared-axis panels do
     not repeat it.
@@ -112,13 +95,9 @@ def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
     axes : matplotlib.axes.Axes or sequence of matplotlib.axes.Axes
         Axes to style.
     x_lab, y_lab : str or None, optional
-        Axis labels.  ``None`` leaves the existing label untouched.
+        Axis labels. ``None`` leaves the existing label untouched.
     xs, ys : int, optional
         Label font sizes.
-
-    Returns
-    -------
-    None
     """
     axes = np.atleast_1d(axes).ravel()
     for i, ax in enumerate(axes):
@@ -126,28 +105,23 @@ def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
 
 
 def _finalise(fig, filename=None, show=False, dpi=600, formats=("png", "pdf")):
-    """
-    Optionally save and/or display a figure.
+    """Optionally save and/or display a figure.
 
     Parameters
     ----------
     fig : matplotlib.figure.Figure
-        Figure to save.  Saving goes through the figure itself rather than
+        Figure to save. Saving goes through the figure itself rather than
         ``pyplot``, so the correct figure is written when several are open.
     filename : str or None, optional
-        Output path.  ``None`` (default) writes nothing.  A name carrying an
-        extension is written in that format only; a bare stem is written once
-        per entry in *formats*.
+        Output path. ``None`` writes nothing. A name carrying an extension is
+        written in that format only; a bare stem is written once per entry in
+        *formats*.
     show : bool, optional
-        Whether to call ``plt.show()`` afterwards (default is False).
+        Call ``plt.show()`` afterwards.
     dpi : int, optional
-        Resolution used for raster formats (default is 600).
+        Resolution used for raster formats.
     formats : sequence of str, optional
-        Extensions used when *filename* has none (default ``("png", "pdf")``).
-
-    Returns
-    -------
-    None
+        Extensions used when *filename* has none.
     """
     if filename:
         stem, ext = os.path.splitext(str(filename))

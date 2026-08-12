@@ -461,8 +461,7 @@ class TestRunSumHillsOptions:
         assert cmd[cmd.index("--idw") + 1] == "d1,t1"
 
     def test_kt_without_idw_is_refused(self, recorded):
-        """It is the temperature the *other* variables are integrated out at,
-        so on its own it would quietly do nothing."""
+        """Alone it would quietly do nothing; kt needs idw to mean anything."""
         with pytest.raises(ValueError, match="only applies when idw"):
             run_sum_hills(kt=0.0259, verbose=False)
 

@@ -1,8 +1,7 @@
-"""
-Tests for reactiontools.tools_fes.
+"""Tests for reactiontools.tools_fes.
 
 These only need numpy, pandas and matplotlib, so they run without ASE, a
-calculator or an MD engine.  conftest selects the Agg backend, so nothing tries
+calculator or an MD engine. conftest selects the Agg backend, so nothing tries
 to open a window on a headless machine.
 """
 import matplotlib.pyplot as plt
@@ -453,7 +452,7 @@ def double_well(n_bins=601):
 
     Two parabolas meeting at their tops: basin A bottoms out at 0.000 eV at
     x = 1, basin B at 0.200 eV at x = 5, and the join at x = 3 sits at 0.500
-    eV from both sides.  Basin B is the wider of the two, so it is the one
+    eV from both sides. Basin B is the wider of the two, so it is the one
     Boltzmann weighting favours.
     """
     x = np.linspace(0.0, 6.0, n_bins)

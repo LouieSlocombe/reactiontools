@@ -51,6 +51,11 @@ def plumed_selection(indices):
     str
         Comma-separated PLUMED selection using one-based indexing and compact
         ranges.
+
+    Raises
+    ------
+    ValueError
+        If no indices are given.
     """
     idx = sorted({int(i) + 1 for i in indices})
     if not idx:
