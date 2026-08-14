@@ -5,6 +5,7 @@ import pytest
 
 from reactiontools import (DEFAULT_ENERGY_UNIT,
                            ENERGY_UNITS,
+                           as_kelvin,
                            convert_energy,
                            thermal_energy,
                            unit_label)
@@ -60,6 +61,36 @@ class TestThermalEnergy:
     def test_an_unknown_unit_is_rejected(self):
         with pytest.raises(KeyError):
             thermal_energy(300.0, "furlongs")
+
+    def test_an_openmm_quantity_is_accepted(self):
+        # Callers driving OpenMM have a Quantity to hand; making them unwrap
+        # it at every call would be the only reason they ever touch
+        # openmm.unit here.
+        openmm_unit = pytest.importorskip("openmm.unit")
+
+        assert thermal_energy(300.0 * openmm_unit.kelvin) == pytest.approx(
+            thermal_energy(300.0))
+
+
+class TestAsKelvin:
+    def test_a_bare_number_is_already_kelvin(self):
+        assert as_kelvin(300.0) == 300.0
+
+    def test_it_returns_a_float(self):
+        assert isinstance(as_kelvin(300), float)
+
+    def test_an_openmm_quantity_is_unwrapped(self):
+        openmm_unit = pytest.importorskip("openmm.unit")
+
+        assert as_kelvin(300.0 * openmm_unit.kelvin) == pytest.approx(300.0)
+
+    def test_other_temperature_units_are_converted_not_stripped(self):
+        openmm_unit = pytest.importorskip("openmm.unit")
+
+        # OpenMM knows this is 300 K expressed differently; taking the bare
+        # number would give 26.85.
+        quantity = (300.0 * openmm_unit.kelvin).in_units_of(openmm_unit.kelvin)
+        assert as_kelvin(quantity) == pytest.approx(300.0)
 
 
 class TestUnitLabel:

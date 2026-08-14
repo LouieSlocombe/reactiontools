@@ -56,7 +56,7 @@ import numpy as np
 from ase.io import read
 
 from .tools_plumed import PLUMED_ASE_UNITS, _opes_fes_command
-from .tools_units import thermal_energy
+from .tools_units import as_kelvin, thermal_energy
 
 __all__ = [
     "as_positions",
@@ -124,25 +124,6 @@ def as_positions(source):
         raise ValueError(
             f"Expected coordinates of shape (n_atoms, 3), got {positions.shape}.")
     return positions
-
-
-def _kelvin(temperature):
-    """Temperature in kelvin, from a bare number or an OpenMM quantity.
-
-    Parameters
-    ----------
-    temperature : float or openmm.unit.Quantity
-        Temperature. A bare number is taken to be in kelvin.
-
-    Returns
-    -------
-    float
-        The temperature in kelvin.
-    """
-    if type(temperature).__module__.split(".")[0] == "openmm":
-        from openmm import unit as openmm_unit
-        return float(temperature.value_in_unit(openmm_unit.kelvin))
-    return float(temperature)
 
 
 def _check_units(units):
@@ -365,8 +346,8 @@ def _temperature_pair(temperature, units):
         For the ``--kt`` of the reconstruction command.
     """
     _check_units(units)
-    kelvin = _kelvin(temperature)
-    return kelvin, thermal_energy(kelvin, _ENERGY_UNIT[units])
+    kelvin_value = as_kelvin(temperature)
+    return kelvin_value, thermal_energy(kelvin_value, _ENERGY_UNIT[units])
 
 
 def _bias_and_fes_command(f_opes, arg, pace, height, sigma, bias, temperature,

@@ -159,11 +159,12 @@ from .tools_reaction import (ConvergenceError,
 from .tools_style import n_plot, ax_plot
 from .tools_units import (DEFAULT_ENERGY_UNIT,
                           ENERGY_UNITS,
+                          as_kelvin,
                           convert_energy,
                           thermal_energy,
                           unit_label)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # tools_reaction
@@ -264,6 +265,7 @@ __all__ = [
     # tools_units
     "DEFAULT_ENERGY_UNIT",
     "ENERGY_UNITS",
+    "as_kelvin",
     "convert_energy",
     "thermal_energy",
     "unit_label",

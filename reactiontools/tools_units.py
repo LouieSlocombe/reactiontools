@@ -22,6 +22,7 @@ from ase.units import kB
 __all__ = [
     "DEFAULT_ENERGY_UNIT",
     "ENERGY_UNITS",
+    "as_kelvin",
     "convert_energy",
     "thermal_energy",
     "unit_label",
@@ -124,6 +125,31 @@ def convert_energy(values, source=DEFAULT_ENERGY_UNIT, target=None):
     return values * (ENERGY_UNITS[source_key] / ENERGY_UNITS[target_key])
 
 
+def as_kelvin(temperature):
+    """Return a temperature in kelvin, from a bare number or an OpenMM quantity.
+
+    Everything in this package works in plain kelvin, but the callers driving
+    OpenMM have an ``openmm.unit.Quantity`` to hand and would otherwise have to
+    unwrap it at every call. The OpenMM branch is chosen by looking at which
+    package built the object, and imports lazily, so nothing here depends on
+    OpenMM being installed.
+
+    Parameters
+    ----------
+    temperature : float or openmm.unit.Quantity
+        Temperature. A bare number is taken to be in kelvin already.
+
+    Returns
+    -------
+    float
+        The temperature in kelvin.
+    """
+    if type(temperature).__module__.split(".")[0] == "openmm":
+        from openmm import unit as openmm_unit
+        return float(temperature.value_in_unit(openmm_unit.kelvin))
+    return float(temperature)
+
+
 def thermal_energy(temperature, energy_unit=DEFAULT_ENERGY_UNIT):
     """Return kBT at *temperature*, in *energy_unit*.
 
@@ -136,9 +162,8 @@ def thermal_energy(temperature, energy_unit=DEFAULT_ENERGY_UNIT):
 
     Parameters
     ----------
-    temperature : float
-        Temperature in kelvin. Anything that survives ``float()`` will do,
-        which includes a bare number and a zero-dimensional array.
+    temperature : float or openmm.unit.Quantity
+        Temperature in kelvin; see :func:`as_kelvin` for what is accepted.
     energy_unit : str, optional
         Unit to return the result in, from :data:`ENERGY_UNITS`.
 
@@ -152,4 +177,5 @@ def thermal_energy(temperature, energy_unit=DEFAULT_ENERGY_UNIT):
     >>> round(float(thermal_energy(300.0)), 4)
     2.4943
     """
-    return float(convert_energy(kB * float(temperature), source="eV", target=energy_unit))
+    return float(convert_energy(kB * as_kelvin(temperature),
+                                source="eV", target=energy_unit))

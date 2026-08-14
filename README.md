@@ -9,6 +9,14 @@ band, relaxing the endpoints, pulling the TS image out and refining it to a
 true saddle point, following the IRC away from it, driving PLUMED, and
 producing publication-ready figures with consistent styling.
 
+It also holds the collective variables an enhanced-sampling run is biased
+along — `tools_cv` for proton transfer and base-pair rearrangement, `tools_path`
+for turning a steered trajectory into a `PATHMSD` reference. Those are written
+as text for whatever runs PLUMED, so they are equally usable from an ASE run
+here or from an OpenMM one driven by
+[openmmnqe](https://github.com/LouieSlocombe/openmmnqe), which depends on this
+package for exactly that.
+
 It is calculator-agnostic — anything that behaves like an ASE calculator works,
 from EMT to a machine-learned potential to a DFT code.
 
@@ -39,12 +47,13 @@ Runtime requirements are `numpy`, `scipy`, `matplotlib`, `pandas`, `ase>=3.23`
 (installed from git, used by `prepare_neb`, `quick_guess_path` and
 `quick_guess_ts`).
 
-Four dependencies are external — none is pulled in by `pip install`, and each
-is only needed by the functions named:
+Five dependencies are external — none is pulled in by a plain `pip install`,
+and each is only needed by the functions named:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |
 | [`sella`](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` | Install with `pip install "reactiontools[ts]"`. Imported on first use, so the rest of the package works without it. |
+| `mdtraj` | `path_from_steered_md`, `estimate_path_lambda` | Install with `pip install "reactiontools[path]"`. Imported on first use; the frame-selection functions in `tools_path` are numpy only and work without it. |
 | `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. |
 | `py-plumed` | `plumed_calculator` | The Python bindings, `conda install -c conda-forge py-plumed`. Imported on first use; the input builder works without it. |
 | [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` | Licensed separately and installed by hand; point `ORCA_PATH` at the binary. See [build_tools/README.md](build_tools/README.md#orca). |
@@ -771,6 +780,88 @@ halves and swap them over; for a proton transfer, move the hydrogen across.
 | `find_molecules(atoms)` | Split a structure into connected components using an ASE neighbour list. |
 | `run_sum_hills(hills='HILLS', outfile='fes.dat', mintozero=True, stride=None, grid_min=None, grid_max=None, grid_bin=None, idw=None, kt=None, ...)` | Run `plumed sum_hills` to build a free-energy surface, or a `stride`d series of them. |
 | `sum_hills_files(outfile='fes.dat')` | The surfaces a strided run wrote, ordered by index rather than by name. |
+| `run_opes_fes(state='STATE', outfile='fes.dat', grid_min=None, grid_max=None, grid_bin=None, kt=None, ...)` | The `OPES_METAD` counterpart: rebuild the surface from a `STATE` file with the bundled `FES_from_State.py`. |
+
+`OPES_METAD` deposits no hills to add up, writing a running estimate of the
+bias to a `STATE` file instead, so `run_opes_fes` is what reads a surface back
+out of an OPES run. It runs the script under `sys.executable`, and through
+`subprocess.run(check=True)` so a failed reconstruction is not mistaken for a
+successful one.
+
+### `tools_cv` — collective variables for proton transfer
+
+Twelve builders that write the PLUMED input biasing a reaction, in three
+families: a coordination difference for one or two proton transfers, the
+hydrogen-bond network of a wobble base pair, and progress along a reference
+path. Each returns the script and the shell command that turns the resulting
+bias back into a free-energy surface.
+
+| Function | Description |
+| --- | --- |
+| `plumed_input_1pt(geometry, idx, temperature, r_0=1.1, wall=1.5, angle_lim=130.0, ...)` | Bias one proton transfer. The CV is the donor/acceptor coordination difference, running +1 to −1 as the proton crosses. |
+| `plumed_input_2pt_1d(geometry, idx1, idx2, temperature, ...)` | Two transfers averaged into one concerted coordinate. |
+| `plumed_input_2pt_2d(geometry, idx1, idx2, temperature, ...)` | The same two kept as separate axes, so the surface resolves concerted from stepwise. |
+| `plumed_input_wob_1(idx1, idx2, temperature, r_0=0.14, wall=0.4, ...)` | The *difference* of two transfer coordinates — near zero while they move together, growing when one leads. `r_0` and `wall` are absolute lengths here, not multipliers. |
+| `plumed_input_wob_2(geometry, idx, temperature, r_0=1.1, wall=4.0, ...)` | A wobble pair's five-term hydrogen-bond network, built from `COORDINATION`, with walls scaled off the starting geometry. |
+| `plumed_input_wob_3(geometry, idx_o4, idx_h3, idx_o2, idx_o6, idx_n2, idx_nr1, idx_nr2, temperature, ...)` | A transfer plus the angle the pair opens through, so a transfer that needs the bases to slide first is visible. |
+| `plumed_input_wob_4(idx, temperature, ...)` | The same five-term network from plain distances with fixed walls, plus a rise restraint keeping the bases stacked. Needs no geometry. |
+| `plumed_input_neb_path(temperature, wall=0.1, lambda_val=250.0, neigh_size=8, ...)` | Bias `path.sss` along a `PATHMSD` reference, walling `path.zzz`. For reactions no single geometric coordinate describes. |
+| `plumed_input_neb_path_wob(idx, temperature, ...)` | The same with a glycosidic-torsion wall holding a mispaired base together. |
+| `plumed_input_steered(cv_block, cv_start, cv_stop, steps, ...)` | Drag any CV with a `MOVINGRESTRAINT`, rather than biasing it. Returns the script and the total step count. |
+| `plumed_input_steered_pt(geometry, idx, steps, ...)` | The same for a proton transfer, reading the pull's start and end off the geometry. |
+| `switching_value(r, r_0, nn=6, mm=None)` | PLUMED's rational switching function in Python, for predicting what a coordination CV is worth without running it. |
+| `as_positions(source)` | Coordinates in ångström from an `Atoms`, an OpenMM `Modeller`, an array or a file. |
+
+`geometry` is whatever holds one — an `ase.Atoms`, an `openmm.app.Modeller`, a
+bare `(n, 3)` array or a path — and `temperature` is a number of kelvin or an
+`openmm.unit.Quantity`. Every builder takes `f_opes=True` to swap
+well-tempered `METAD` for `OPES_METAD`, which also swaps the returned command
+from `plumed sum_hills` to the OPES one.
+
+**Units.** These scripts are for an external PLUMED, so `units="plumed"` (the
+default) writes no `UNITS` line and works in nanometres and kJ/mol. Pass
+`units="ase"` for ångström and eV with `PLUMED_ASE_UNITS` prepended. Note this
+is the **opposite** default to `plumed_metad_input`, which only ever feeds
+ASE's own `Plumed` calculator: a script moved between the two without changing
+`units` is wrong by a factor of ten in every length. Lengths derived from the
+geometry are converted for you; ones you supply are not.
+
+### `tools_path` — reference paths from steered MD
+
+Turning a steered-MD trajectory into the reference a `PATHMSD` collective
+variable needs, which is the cheap alternative to relaxing a NEB and gives a
+path in the full solvated environment rather than one interpolated in vacuum.
+
+| Function | Description |
+| --- | --- |
+| `path_from_steered_md(traj_file, template_pdb='index_atoms.pdb', output_file='neb_path.pdb', colvar_file='COLVAR_SMD', n_images=15, smooth=0, ...)` | Pick frames evenly spaced along the CV, align and smooth them, write the multi-model PDB, and return the recommended `LAMBDA`. |
+| `estimate_path_lambda(pdb_path, length_unit='nm')` | Size the `LAMBDA` a path should be given, from the mean squared displacement between its frames. |
+| `select_frames_by_cv(cv, n_images, cv_start=None, cv_stop=None)` | Frame indices evenly spaced along a collective variable, never going backwards. |
+| `select_frames_by_msd(xyz, n_images)` | Frame indices evenly spaced along the trajectory's own arc length, for when there is no COLVAR. |
+| `cv_from_colvar(colvar_file, n_frames, cv_name=None)` | One CV value per trajectory frame, dropping the row PLUMED writes at step 0. |
+
+`LAMBDA` has units of inverse squared length, so `length_unit` matters: the
+answer for an ångström-based run is a hundred times smaller than for a
+nanometre-based one.
+
+Reading a trajectory needs mdtraj, the optional `[path]` extra. The three
+selection functions are numpy only and work without it.
+
+### `tools_io` — structure files
+
+| Function | Description |
+| --- | --- |
+| `convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HETATM')` | Splice a path's coordinates into a template's atom records to make the multi-model PDB `PATHMSD` reads. Renumbers both so their serials agree, which PLUMED insists on. |
+| `pdb_remove_ter_index(input_path, output_path)` | Renumber atom serials from 1 per model, keeping `TER` and `CONECT` in step. |
+| `strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None)` | Drop every hydrogen but the named ones, so a path CV measures the reaction rather than the thermal noise. |
+| `convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1)` | Perceive bonds by distance, assign chains and residues, write `CONECT` records. |
+| `convert_pdb_to_xyz(input_file, output_file, comment=None)` | One XYZ frame per PDB model. |
+| `element_from_pdb_line(line)` | The element of an `ATOM`/`HETATM` record, from the element column or the atom name's alignment. |
+| `format_pdb_atom_name(symbol, count)` | A unique four-character atom name, indented as the PDB convention requires. |
+| `write_xyz_frame(fh, symbols, positions, comment='')` | Write one XYZ frame to an open handle. |
+
+`atom_line` is `'HETATM'` by default, which is what OpenMM writes for
+ligand-like residues; ASE writes `'ATOM'`.
 
 ### `tools_fes` — free-energy surfaces
 
@@ -784,7 +875,8 @@ call.
 | --- | --- |
 | `read_plumed_file(path, drop_der=True)` | Parse a PLUMED file into a `PlumedData` of columns, `#! FIELDS` names and `#! SET` metadata. |
 | `as_fes(source, ...)` | Normalise any supported source into an `FES`. |
-| `convert_energy(values, source, target)` | Convert between the units in `ENERGY_UNITS` (kJ/mol, kcal/mol, eV, meV, hartree, kT300). |
+| `fes_series_files(directory='.', pattern=r'^fes_?(\d+)\.dat$')` | The numbered surfaces in a directory, ordered by index rather than by name — `fes_10` sorts before `fes_2`. |
+| `load_fes_series(directory='.', energy_unit='eV', source_unit='kJ/mol', ...)` | The same, loaded through `as_fes`, ready for `plot_fes_1d` or `fes_convergence`. |
 | `summarise_fes(source, basin_a, basin_b, temperature=None, ...)` | Barriers each way and the basin free-energy difference, as a `FESSummary`. |
 | `FESSummary` | What `summarise_fes` returns: `forward_barrier`, `reverse_barrier`, `delta_f`, `minimum_a`/`minimum_b`, `depth_a`/`depth_b`, `barrier_position`. Prints as a short report. |
 | `fes_convergence(sources, basin_a, basin_b, ...)` | One `FESSummary` per surface of a series. |
@@ -801,6 +893,19 @@ Energies are read as kJ/mol unless `source_unit` says otherwise, because that
 is what PLUMED writes when driven from OpenMM. `max_energy` masks poorly
 sampled regions rather than letting them dominate the colour scale, and
 `filename=None` means write nothing.
+
+### `tools_units` — energy units and kBT
+
+| Function | Description |
+| --- | --- |
+| `convert_energy(values, source, target)` | Convert between the units in `ENERGY_UNITS` (kJ/mol, kcal/mol, eV, meV, hartree, kT300). |
+| `thermal_energy(temperature, energy_unit='kJ/mol')` | kBT at a temperature — the `--kt` that `sum_hills` and the OPES scripts reweight with. |
+| `as_kelvin(temperature)` | A temperature in kelvin, from a number or an `openmm.unit.Quantity`. |
+| `unit_label(unit)` | The LaTeX axis label for an energy unit. |
+| `ENERGY_UNITS`, `DEFAULT_ENERGY_UNIT` | The units known, sized in kJ/mol, and the one assumed when nothing is said. |
+
+These live apart from `tools_fes`, which re-exports them, so that the script
+builders can convert energies without importing matplotlib.
 
 ### `tools_plotting` — figures
 
@@ -846,6 +951,16 @@ units in `ENERGY_UNITS` can be selected per call with `source_unit` and
 `energy_unit`. `plumed_metad_input` puts `UNITS ENERGY=eV LENGTH=A TIME=fs` at
 the top of the input it builds, which is what keeps a run driven from here in
 the same eV and Å as everything else.
+
+`tools_cv` defaults the other way, to PLUMED's own nm and kJ/mol, because the
+scripts it writes are for an external PLUMED driven from OpenMM rather than for
+ASE's `Plumed` calculator. **The two defaults are opposite, and nothing checks
+that a script matches the run it is given to**: taking one built by
+`plumed_input_1pt` into an ASE run, or the reverse, is wrong by a factor of ten
+in every length and by 96.5 in every energy. Pass `units="ase"` to `tools_cv`
+for the ASE convention, and remember that lengths you supply yourself — the
+absolute `r_0` and `wall` of `plumed_input_wob_1`, the fixed walls inside
+`plumed_input_wob_4` — are in whichever you chose.
 
 ## Testing
 

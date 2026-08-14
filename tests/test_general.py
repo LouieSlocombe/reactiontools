@@ -156,6 +156,20 @@ def test_public_api_is_complete():
     assert expected <= set(reactiontools.__all__)
 
 
+def test_every_public_name_is_documented():
+    """__all__ and the README API reference must not drift apart.
+
+    Every public name is meant to appear in four places: the module, the
+    grouped __all__, the README table and a test. The first three are easy to
+    keep in step by hand right up until they are not.
+    """
+    readme = (_PACKAGE.parent / "README.md").read_text()
+
+    missing = [name for name in reactiontools.__all__
+               if name != "__version__" and f"`{name}" not in readme]
+    assert not missing
+
+
 def test_quick_guess_path_returns_the_requested_images(water):
     product = water.copy()
     product.positions[1] += [0.4, 0.0, 0.0]
