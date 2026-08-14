@@ -26,9 +26,9 @@ The package is organised into ten modules, all of which are re-exported here:
     evenly spaced along a collective variable, and size the ``LAMBDA`` it
     should be biased with.
 ``tools_cv``
-    Collective variables for proton transfer -- one or two transfers, a wobble
-    base pair's hydrogen-bond network, or progress along a reference path --
-    and the PLUMED input that biases them.
+    Collective variables for proton transfer -- one or two transfers, or
+    progress along a reference path -- and the PLUMED input that biases them,
+    plus the public plumbing for writing a collective variable of your own.
 ``tools_plumed``
     Prepare PLUMED input, bias an ASE dynamics run with it, and turn the
     metadynamics hills that come out into a free-energy surface.
@@ -62,17 +62,17 @@ to ORCA, which is licensed separately and installed by hand; see
 """
 
 from .tools_cv import (as_positions,
+                       plumed_angle_radians,
+                       plumed_bias_and_fes,
                        plumed_input_1pt,
                        plumed_input_2pt_1d,
                        plumed_input_2pt_2d,
                        plumed_input_neb_path,
-                       plumed_input_neb_path_wob,
                        plumed_input_steered,
                        plumed_input_steered_pt,
-                       plumed_input_wob_1,
-                       plumed_input_wob_2,
-                       plumed_input_wob_3,
-                       plumed_input_wob_4,
+                       plumed_one_based,
+                       plumed_temperature_pair,
+                       plumed_units_header,
                        switching_value)
 from .tools_fes import (FES,
                         FESSummary,
@@ -232,17 +232,17 @@ __all__ = [
     "sum_hills_files",
     # tools_cv
     "as_positions",
+    "plumed_angle_radians",
+    "plumed_bias_and_fes",
     "plumed_input_1pt",
     "plumed_input_2pt_1d",
     "plumed_input_2pt_2d",
     "plumed_input_neb_path",
-    "plumed_input_neb_path_wob",
     "plumed_input_steered",
     "plumed_input_steered_pt",
-    "plumed_input_wob_1",
-    "plumed_input_wob_2",
-    "plumed_input_wob_3",
-    "plumed_input_wob_4",
+    "plumed_one_based",
+    "plumed_temperature_pair",
+    "plumed_units_header",
     "switching_value",
     # tools_fes
     "FES",

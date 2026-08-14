@@ -14,17 +14,17 @@ from ase import Atoms
 
 from reactiontools import (PLUMED_ASE_UNITS,
                            as_positions,
+                           plumed_angle_radians,
+                           plumed_bias_and_fes,
                            plumed_input_1pt,
                            plumed_input_2pt_1d,
                            plumed_input_2pt_2d,
                            plumed_input_neb_path,
-                           plumed_input_neb_path_wob,
                            plumed_input_steered,
                            plumed_input_steered_pt,
-                           plumed_input_wob_1,
-                           plumed_input_wob_2,
-                           plumed_input_wob_3,
-                           plumed_input_wob_4,
+                           plumed_one_based,
+                           plumed_temperature_pair,
+                           plumed_units_header,
                            switching_value)
 
 DONOR, HYDROGEN, ACCEPTOR = 0, 1, 2
@@ -36,12 +36,12 @@ PT_GEOMETRY = np.array([[0.00, 0.00, 0.00],
                         [1.02, 0.00, 0.00],
                         [2.71, 0.00, 0.00]])
 
-#: Ten atoms, enough for the widest of the wobble builders.
-WOB_GEOMETRY = np.array([[0.00, 0.00, 0.00], [1.02, 0.00, 0.00],
-                         [2.71, 0.00, 0.00], [0.13, 1.47, 0.00],
-                         [1.19, 2.05, 0.31], [2.83, 1.63, 0.22],
-                         [-1.21, 0.44, 0.77], [3.94, 0.62, -0.55],
-                         [0.61, -1.38, 1.02], [3.31, -1.11, 0.84]])
+#: Two donor/hydrogen/acceptor triples, with spare atoms around them.
+TWO_TRANSFER_GEOMETRY = np.array([[0.00, 0.00, 0.00], [1.02, 0.00, 0.00],
+                                  [2.71, 0.00, 0.00], [0.13, 1.47, 0.00],
+                                  [1.19, 2.05, 0.31], [2.83, 1.63, 0.22],
+                                  [-1.21, 0.44, 0.77], [3.94, 0.62, -0.55],
+                                  [0.61, -1.38, 1.02], [3.31, -1.11, 0.84]])
 
 TEMPERATURE = 300.0
 
@@ -49,15 +49,9 @@ TEMPERATURE = 300.0
 #: family at once for the mistakes that are easy to make in an f-string.
 ALL_BUILDERS = [
     ("1pt", plumed_input_1pt, (PT_GEOMETRY, [0, 1, 2], TEMPERATURE)),
-    ("2pt_1d", plumed_input_2pt_1d, (WOB_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE)),
-    ("2pt_2d", plumed_input_2pt_2d, (WOB_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE)),
-    ("wob_1", plumed_input_wob_1, ([0, 1, 2], [3, 4, 5], TEMPERATURE)),
-    ("wob_2", plumed_input_wob_2, (WOB_GEOMETRY, [0, 1, 2, 3, 4, 5, 6, 7], TEMPERATURE)),
-    ("wob_3", plumed_input_wob_3,
-     (WOB_GEOMETRY, [0], [1], [2], [3], [4], [5], [6], TEMPERATURE)),
-    ("wob_4", plumed_input_wob_4, ([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], TEMPERATURE)),
+    ("2pt_1d", plumed_input_2pt_1d, (TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE)),
+    ("2pt_2d", plumed_input_2pt_2d, (TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE)),
     ("neb_path", plumed_input_neb_path, (TEMPERATURE,)),
-    ("neb_path_wob", plumed_input_neb_path_wob, ([0, 1, 2, 3, 4, 5], TEMPERATURE)),
 ]
 
 #: The subset that biases with metadynamics, so returns a bias line and a
@@ -135,8 +129,9 @@ class TestEveryBuilder:
     @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
                              ids=[case[0] for case in ALL_BUILDERS])
     def test_opes_switches_both_the_bias_and_the_command(self, name, builder, args):
-        # The bug this catches: wob_1, wob_2 and wob_3 used to hand-roll their
-        # METAD line, so they accepted f_opes and silently ignored it.
+        # The bug this catches: builders that hand-rolled their own METAD line
+        # accepted f_opes and then silently ignored it. Everything goes through
+        # plumed_bias_and_fes now, so neither half can be switched alone.
         script, command = builder(*args, f_opes=True)
 
         assert "OPES_METAD" in script
@@ -375,23 +370,19 @@ class TestGrids:
         assert "GRID_MIN=-1.1 GRID_MAX=1.1 GRID_BIN=200" in script
         assert "--min -1.1 --max 1.1 --bin 200" in command
 
-    @pytest.mark.parametrize("name, builder, args",
-                             [case for case in ALL_BUILDERS
-                              if case[0] in {"wob_2", "wob_3", "wob_4"}],
-                             ids=["wob_2", "wob_3", "wob_4"])
-    def test_the_builders_without_bounds_omit_them_from_both_halves(
-            self, name, builder, args):
-        # These let PLUMED size its own grid. The bug this pins: when they
-        # hand-rolled the command it kept --bin while dropping --min/--max,
-        # so the two halves disagreed about the grid.
-        script, command = builder(*args)
+    def test_a_builder_without_bounds_omits_them_from_both_halves(self):
+        # Passing no bounds lets PLUMED size its own grid. The bug this pins:
+        # a hand-rolled command kept --bin while dropping --min/--max, so the
+        # two halves disagreed about the grid.
+        script, command = plumed_input_1pt(PT_GEOMETRY, [0, 1, 2], TEMPERATURE,
+                                           grid_min=None, grid_max=None)
 
         assert "GRID_MIN" not in script
         assert "--min" not in command and "--max" not in command
         assert "--bin 200" in command
 
     def test_the_two_dimensional_builder_doubles_every_grid_setting(self):
-        script, command = plumed_input_2pt_2d(WOB_GEOMETRY, [0, 1, 2], [3, 4, 5],
+        script, command = plumed_input_2pt_2d(TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5],
                                               TEMPERATURE)
 
         assert "ARG=cv_diff1,cv_diff2" in script
@@ -408,80 +399,82 @@ class TestWhatEachBuilderBiases:
         assert "pt_cv:      COMBINE ARG=c_d,c_a COEFFICIENTS=1,-1" in script
 
     def test_two_transfers_in_one_dimension_average_them(self):
-        script, _ = plumed_input_2pt_1d(WOB_GEOMETRY, [0, 1, 2], [3, 4, 5],
+        script, _ = plumed_input_2pt_1d(TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5],
                                         TEMPERATURE)
 
         assert "METAD ARG=pt_cv" in script
         assert "COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=0.5,0.5" in script
 
     def test_two_transfers_in_two_dimensions_keep_them_apart(self):
-        script, _ = plumed_input_2pt_2d(WOB_GEOMETRY, [0, 1, 2], [3, 4, 5],
+        script, _ = plumed_input_2pt_2d(TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5],
                                         TEMPERATURE)
 
         assert "METAD ARG=cv_diff1,cv_diff2" in script
         assert "COEFFICIENTS=0.5,0.5" not in script
 
-    def test_wob_1_biases_the_difference_not_the_sum(self):
-        # Near zero while the protons move together, growing when one leads.
-        script, _ = plumed_input_wob_1([0, 1, 2], [3, 4, 5], TEMPERATURE)
-
-        assert "pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=1.0,-1.0" in script
-        assert "METAD ARG=pt_cv" in script
-
-    def test_wob_1_places_its_walls_at_absolute_distances(self):
-        # Unlike its siblings, r_0 and wall are lengths, not multipliers.
-        script, _ = plumed_input_wob_1([0, 1, 2], [3, 4, 5], TEMPERATURE,
-                                       r_0=0.14, wall=0.4)
-
-        assert "R_0=0.14" in script
-        assert "UPPER_WALLS ARG=dist_da_1 AT=0.4" in script
-
-    @pytest.mark.parametrize("name, builder, args",
-                             [case for case in ALL_BUILDERS
-                              if case[0] in {"wob_2", "wob_3", "wob_4"}],
-                             ids=["wob_2", "wob_3", "wob_4"])
-    def test_the_network_builders_bias_the_summed_coordinate(self, name, builder, args):
-        script, _ = builder(*args)
-
-        assert "METAD ARG=z" in script
-        assert re.search(r"^z: COMBINE ARG=z1", script, re.MULTILINE)
-
-    def test_wob_2_sums_five_terms(self):
-        script, _ = plumed_input_wob_2(WOB_GEOMETRY, [0, 1, 2, 3, 4, 5, 6, 7],
-                                       TEMPERATURE)
-
-        assert "z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1" in script
-        assert script.count("COORDINATION") == 10
-
-    def test_wob_3_adds_a_transfer_to_an_opening_angle(self):
-        script, _ = plumed_input_wob_3(WOB_GEOMETRY, [0], [1], [2], [3], [4], [5], [6],
-                                       TEMPERATURE)
-
-        assert "z: COMBINE ARG=z1,z2 COEFFICIENTS=1,1" in script
-        assert "z2: ANGLE ATOMS=" in script
-
-    def test_wob_4_builds_the_network_from_plain_distances(self):
-        script, _ = plumed_input_wob_4([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], TEMPERATURE)
-
-        assert "COORDINATION" not in script
-        assert "z: COMBINE ARG=z1,z2,z3,z4,z5" in script
-        # The rise restraint that keeps the bases stacked
-        assert "RESTRAINT ARG=dist.z AT=0.0" in script
-
-    @pytest.mark.parametrize("builder, args",
-                             [(plumed_input_neb_path, (TEMPERATURE,)),
-                              (plumed_input_neb_path_wob, ([0, 1, 2, 3, 4, 5], TEMPERATURE))],
-                             ids=["neb_path", "neb_path_wob"])
-    def test_the_path_builders_bias_progress_and_wall_the_deviation(self, builder, args):
-        script, _ = builder(*args)
+    def test_the_path_builder_biases_progress_and_walls_the_deviation(self):
+        script, _ = plumed_input_neb_path(TEMPERATURE)
 
         assert "METAD ARG=path.sss" in script
         assert "UPPER_WALLS ARG=path.zzz" in script
         assert "PATHMSD REFERENCE=neb_path.pdb" in script
         assert "FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb" in script
 
-    def test_the_wobble_path_builder_walls_the_glycosidic_torsion(self):
-        script, _ = plumed_input_neb_path_wob([0, 1, 2, 3, 4, 5], TEMPERATURE)
 
-        # Indices 0, 2, 4, 5 are CA1, CB1, NR1, NR2; one-based in the output.
-        assert "dih: TORSION ATOMS=1,5,3,6" in script
+class TestTheBuildingBlocks:
+    """The plumbing a study builds its own collective variable on."""
+
+    def test_indices_become_one_based_in_the_order_given(self):
+        # Order matters: a CV reads its indices positionally, as donor,
+        # hydrogen, acceptor. Sorting them would silently rebuild the CV.
+        assert plumed_one_based([7, 2, 5]) == [8, 3, 6]
+
+    def test_the_units_header_is_only_written_for_ase(self):
+        assert plumed_units_header("plumed") == ""
+        assert plumed_units_header("ase").startswith(PLUMED_ASE_UNITS)
+
+    def test_the_temperature_pair_carries_the_energy_unit(self):
+        kelvin, kt = plumed_temperature_pair(TEMPERATURE, "plumed")
+        assert kelvin == TEMPERATURE
+        assert kt == pytest.approx(2.49434, abs=1e-5)
+
+        _, kt_ase = plumed_temperature_pair(TEMPERATURE, "ase")
+        assert kt_ase == pytest.approx(0.025852, abs=1e-6)
+
+    def test_angles_are_converted_to_radians(self):
+        assert plumed_angle_radians(180.0) == pytest.approx(3.14, abs=1e-2)
+
+    def test_the_bias_and_the_command_agree_about_the_grid(self):
+        line, command = plumed_bias_and_fes(
+            False, 'z', pace=500, height=15.0, sigma=0.05, bias=20.0,
+            temperature=TEMPERATURE, kt=2.49434, grid_bin=200,
+            grid_min=-0.3, grid_max=0.3)
+
+        assert "METAD ARG=z" in line
+        assert "GRID_MIN=-0.3 GRID_MAX=0.3 GRID_BIN=200" in line
+        assert "--min -0.3 --max 0.3 --bin 200" in command
+
+    def test_opes_switches_both_halves(self):
+        line, command = plumed_bias_and_fes(
+            True, 'z', pace=500, height=15.0, sigma=0.05, bias=20.0,
+            temperature=TEMPERATURE, kt=2.49434, grid_bin=200)
+
+        assert "OPES_METAD ARG=z" in line and "BARRIER=15.0" in line
+        assert "FES_from_State.py" in command
+
+    def test_a_study_can_build_a_script_from_them_alone(self):
+        # What a downstream collective variable looks like: its own CV lines,
+        # this module's plumbing for everything around them.
+        donor, hydrogen, acceptor = plumed_one_based([4, 5, 6])
+        kelvin, kt = plumed_temperature_pair(TEMPERATURE, "plumed")
+        line, command = plumed_bias_and_fes(
+            False, 'z', 500, 15.0, 0.05, 20.0, kelvin, kt, 200)
+        script = (f"{plumed_units_header('plumed')}"
+                  f"d1: DISTANCE ATOMS={donor},{hydrogen}\n"
+                  f"d2: DISTANCE ATOMS={acceptor},{hydrogen}\n"
+                  f"z: COMBINE ARG=d1,d2 COEFFICIENTS=1,-1 PERIODIC=NO\n"
+                  f"{line}\n")
+
+        assert "{" not in script and "}" not in script
+        assert set(labels_of(script)) == {"d1", "d2", "z", "metad"}
+        assert command.startswith("plumed sum_hills")

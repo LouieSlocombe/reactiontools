@@ -11,23 +11,33 @@ script to whatever drives PLUMED (``openmmnqe.run_openmm_prod`` for an OpenMM
 run, :func:`~reactiontools.tools_plumed.plumed_calculator` for an ASE one) and
 the surface it produces to :func:`~reactiontools.plot_plumed_fes`.
 
-The builders fall into three families:
+The builders fall into two families:
 
 * **Coordination difference** -- :func:`plumed_input_1pt`,
   :func:`plumed_input_2pt_1d` and :func:`plumed_input_2pt_2d` bias one or two
   proton transfers directly, the CV running from +1 at the donor to -1 at the
   acceptor.
-* **Wobble base pair** -- :func:`plumed_input_wob_1` through
-  :func:`plumed_input_wob_4` extend that to the hydrogen-bond network of a
-  mispaired base, where the transfer competes with the pair sliding open.
-* **Path** -- :func:`plumed_input_neb_path` and
-  :func:`plumed_input_neb_path_wob` bias progress along a reference path
-  instead, which is the option that copes when the reaction is not well
+* **Path** -- :func:`plumed_input_neb_path` biases progress along a reference
+  path instead, which is the option that copes when the reaction is not well
   described by any one geometric coordinate. Build the reference with
   :mod:`reactiontools.tools_path`.
 
 :func:`plumed_input_steered` stands apart: it drags a CV rather than biasing
 it, and exists to generate the reference path the last family needs.
+
+Building your own
+-----------------
+A CV that encodes one particular system belongs with that study rather than
+here -- the wobble base-pair builders that used to sit alongside these moved out
+to the study that uses them for exactly that reason. The plumbing under these
+builders is worth sharing though, so it is public:
+:func:`plumed_bias_and_fes` returns the bias line together with the command
+that reads the surface back, which is the pairing that goes wrong when the two
+are written separately; :func:`plumed_one_based`, :func:`plumed_units_header`,
+:func:`plumed_temperature_pair` and :func:`plumed_angle_radians` handle the
+conversions every script needs. Write the CV lines yourself, hand the label you
+biased to :func:`plumed_bias_and_fes`, and the result is a script indistinguishable
+from the ones here.
 
 Units
 -----
@@ -45,9 +55,8 @@ are not interchangeable: a script moved between them without changing ``units``
 is wrong by a factor of ten in every length.
 
 Lengths that come from the geometry are converted for you. Lengths you supply
-yourself -- ``wall`` in :func:`plumed_input_neb_path`, the absolute ``r_0``
-and ``wall`` of :func:`plumed_input_wob_1` -- are in whichever unit you asked
-for, and nothing checks that.
+yourself -- ``wall`` in :func:`plumed_input_neb_path` -- are in whichever unit
+you asked for, and nothing checks that.
 """
 
 from pathlib import Path
@@ -60,17 +69,17 @@ from .tools_units import as_kelvin, thermal_energy
 
 __all__ = [
     "as_positions",
+    "plumed_angle_radians",
+    "plumed_bias_and_fes",
     "plumed_input_1pt",
     "plumed_input_2pt_1d",
     "plumed_input_2pt_2d",
     "plumed_input_neb_path",
-    "plumed_input_neb_path_wob",
     "plumed_input_steered",
     "plumed_input_steered_pt",
-    "plumed_input_wob_1",
-    "plumed_input_wob_2",
-    "plumed_input_wob_3",
-    "plumed_input_wob_4",
+    "plumed_one_based",
+    "plumed_temperature_pair",
+    "plumed_units_header",
     "switching_value",
 ]
 
@@ -81,6 +90,11 @@ _LENGTH_SCALE = {"plumed": 0.1, "ase": 1.0}
 
 #: Energy unit each choice implies, for the ``--kt`` of the reconstruction.
 _ENERGY_UNIT = {"plumed": "kJ/mol", "ase": "eV"}
+
+#: Default Gaussian height, in the energy unit each choice implies. These are
+#: the same deposit: 15 kJ/mol is 0.155 eV. A kJ/mol default carried unchanged
+#: into an eV script would be a Gaussian 96.5 times too tall.
+_DEFAULT_HEIGHT = {"plumed": 15.0, "ase": 0.155}
 
 
 def as_positions(source):
@@ -170,7 +184,7 @@ def _geometry(source, units):
     return as_positions(source) * _check_units(units)
 
 
-def _units_header(units):
+def plumed_units_header(units):
     """The UNITS line the script needs, if any.
 
     Parameters
@@ -187,8 +201,34 @@ def _units_header(units):
     return f"{PLUMED_ASE_UNITS}\n" if units == "ase" else ""
 
 
-def _one_based(indices):
+def _default_height(height, units):
+    """The Gaussian height to deposit, defaulted in the script's energy unit.
+
+    Parameters
+    ----------
+    height : float or None
+        The height asked for, or None to take the default for *units*.
+    units : str
+        ``'plumed'`` or ``'ase'``.
+
+    Returns
+    -------
+    float
+        *height* if it was given, else 15 kJ/mol expressed in the right unit.
+    """
+    _check_units(units)
+    return _DEFAULT_HEIGHT[units] if height is None else height
+
+
+def plumed_one_based(indices):
     """Convert 0-based atom indices to PLUMED's 1-based convention.
+
+    Order is preserved, which is what a CV needs: the builders here read their
+    indices positionally, as donor, hydrogen, acceptor. This is not
+    interchangeable with
+    :func:`~reactiontools.tools_plumed.plumed_selection`, which sorts and
+    dedupes its indices to collapse them into ranges -- right for the atom
+    *group* of a ``COORDINATION``, wrong for anything positional.
 
     Parameters
     ----------
@@ -198,7 +238,7 @@ def _one_based(indices):
     Returns
     -------
     list of int
-        1-based indices, as PLUMED numbers them.
+        1-based indices, as PLUMED numbers them, in the order given.
     """
     return [int(index) + 1 for index in indices]
 
@@ -277,7 +317,7 @@ def _wall_value(distance, wall):
     return float(np.round(distance * wall, decimals=2))
 
 
-def _angle_radians(angle_lim):
+def plumed_angle_radians(angle_lim):
     """Convert a wall angle from degrees to the radians PLUMED wants.
 
     Parameters
@@ -328,7 +368,7 @@ def switching_value(r, r_0, nn=6, mm=None):
     return (1.0 - x) / (1.0 - y)
 
 
-def _temperature_pair(temperature, units):
+def plumed_temperature_pair(temperature, units):
     """Temperature in kelvin and kBT in the script's energy unit.
 
     Parameters
@@ -350,7 +390,7 @@ def _temperature_pair(temperature, units):
     return kelvin_value, thermal_energy(kelvin_value, _ENERGY_UNIT[units])
 
 
-def _bias_and_fes_command(f_opes, arg, pace, height, sigma, bias, temperature,
+def plumed_bias_and_fes(f_opes, arg, pace, height, sigma, bias, temperature,
                           kt, grid_bin, grid_min=None, grid_max=None,
                           label='metad:      '):
     """
@@ -564,7 +604,7 @@ def plumed_input_steered(cv_block,
                         for i, (at_step, at) in enumerate(milestones))
 
     plumed_input = f"""
-{_units_header(units)}# Collective variable
+{plumed_units_header(units)}# Collective variable
 {cv_block.strip()}
 {extra_lines.strip() if extra_lines else ''}
 # Steered MD: pull the CV from {cv_start:.4f} to {cv_stop:.4f}
@@ -654,10 +694,10 @@ def plumed_input_steered_pt(geometry,
     if cv_stop is None:
         cv_stop = -cv_start
 
-    cv_lines, wall_lines = _pt_cv_block(_one_based(idx),
+    cv_lines, wall_lines = _pt_cv_block(plumed_one_based(idx),
                                         r_0,
                                         _wall_value(r_da, wall),
-                                        _angle_radians(angle_lim),
+                                        plumed_angle_radians(angle_lim),
                                         wall_kappa)
 
     return plumed_input_steered(cv_lines,
@@ -681,7 +721,7 @@ def plumed_input_1pt(geometry,
                      wall=1.5,
                      angle_lim=130.0,
                      pace=500,
-                     height=15.0,
+                     height=None,
                      sigma=0.05,
                      bias=20.0,
                      grid_min=-1.1,
@@ -724,8 +764,9 @@ def plumed_input_1pt(geometry,
         ``PACE`` of the metadynamics bias, in steps. Default is 500.
     height : float, optional
         Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0,
-        which suits the kJ/mol of ``units='plumed'``.
+        for ``OPES_METAD``, in the script's energy unit. None, the default,
+        deposits 15 kJ/mol -- written as 15.0 for ``units='plumed'`` and as
+        its equivalent 0.155 for ``units='ase'``.
     sigma : float, optional
         Gaussian width of the bias, in CV units. Default is 0.05.
     bias : float, optional
@@ -756,19 +797,20 @@ def plumed_input_1pt(geometry,
     positions = _geometry(geometry, units)
     r_dh, r_ah, r_da = _pt_distances(positions, idx)
 
-    cv_lines, wall_lines = _pt_cv_block(_one_based(idx),
+    cv_lines, wall_lines = _pt_cv_block(plumed_one_based(idx),
                                         _size_r0(r_dh, r_ah, r_0),
                                         _wall_value(r_da, wall),
-                                        _angle_radians(angle_lim),
+                                        plumed_angle_radians(angle_lim),
                                         kappa)
 
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
+    height = _default_height(height, units)
+    kelvin, kt = plumed_temperature_pair(temperature, units)
+    metad_line, fes_command = plumed_bias_and_fes(
         f_opes, 'pt_cv', pace, height, sigma, bias, kelvin, kt,
         grid_bin, grid_min=grid_min, grid_max=grid_max)
 
     plumed_input = f"""
-{_units_header(units)}# Proton transfer
+{plumed_units_header(units)}# Proton transfer
 {cv_lines}
 
 # Limits
@@ -811,12 +853,12 @@ def _two_pt_body(geometry, idx1, idx2, r_0, wall, angle_lim, kappa, units):
     # One wall value for both pairs, taken from whichever is further apart, so
     # neither hydrogen bond is squeezed by the other's geometry.
     at = _wall_value(max(r1_da, r2_da), wall)
-    angle = _angle_radians(angle_lim)
+    angle = plumed_angle_radians(angle_lim)
 
     blocks = []
     for n, (idx, r_dh, r_ah) in enumerate(((idx1, r1_dh, r1_ah),
                                            (idx2, r2_dh, r2_ah)), start=1):
-        cv_lines, wall_lines = _pt_cv_block(_one_based(idx),
+        cv_lines, wall_lines = _pt_cv_block(plumed_one_based(idx),
                                             _size_r0(r_dh, r_ah, r_0),
                                             at, angle, kappa, suffix=str(n))
         blocks.append(f"# Proton transfer {n}\n{cv_lines}\n\n# Limits\n{wall_lines}")
@@ -831,7 +873,7 @@ def plumed_input_2pt_1d(geometry,
                         wall=1.5,
                         angle_lim=130.0,
                         pace=500,
-                        height=15.0,
+                        height=None,
                         sigma=0.05,
                         bias=20.0,
                         grid_min=-1.1,
@@ -874,7 +916,9 @@ def plumed_input_2pt_1d(geometry,
         ``PACE`` of the metadynamics bias, in steps. Default is 500.
     height : float, optional
         Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0.
+        for ``OPES_METAD``, in the script's energy unit. None, the default,
+        deposits 15 kJ/mol -- written as 15.0 for ``units='plumed'`` and as
+        its equivalent 0.155 for ``units='ase'``.
     sigma : float, optional
         Gaussian width of the bias, in CV units. Default is 0.05.
     bias : float, optional
@@ -903,13 +947,14 @@ def plumed_input_2pt_1d(geometry,
     """
     body = _two_pt_body(geometry, idx1, idx2, r_0, wall, angle_lim, kappa, units)
 
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
+    height = _default_height(height, units)
+    kelvin, kt = plumed_temperature_pair(temperature, units)
+    metad_line, fes_command = plumed_bias_and_fes(
         f_opes, 'pt_cv', pace, height, sigma, bias, kelvin, kt,
         grid_bin, grid_min=grid_min, grid_max=grid_max)
 
     plumed_input = f"""
-{_units_header(units)}{body}
+{plumed_units_header(units)}{body}
 
 # Combine the two proton transfers into a single CV
 pt_cv:      COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=0.5,0.5 PERIODIC=NO
@@ -929,7 +974,7 @@ def plumed_input_2pt_2d(geometry,
                         wall=1.5,
                         angle_lim=130.0,
                         pace=500,
-                        height=15.0,
+                        height=None,
                         sigma=0.05,
                         bias=20.0,
                         grid_min=-1.1,
@@ -973,7 +1018,9 @@ def plumed_input_2pt_2d(geometry,
         ``PACE`` of the metadynamics bias, in steps. Default is 500.
     height : float, optional
         Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0.
+        for ``OPES_METAD``, in the script's energy unit. None, the default,
+        deposits 15 kJ/mol -- written as 15.0 for ``units='plumed'`` and as
+        its equivalent 0.155 for ``units='ase'``.
     sigma : float, optional
         Gaussian width of the bias along each axis, in CV units. Default is
         0.05.
@@ -1004,14 +1051,15 @@ def plumed_input_2pt_2d(geometry,
     """
     body = _two_pt_body(geometry, idx1, idx2, r_0, wall, angle_lim, kappa, units)
 
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
+    height = _default_height(height, units)
+    kelvin, kt = plumed_temperature_pair(temperature, units)
+    metad_line, fes_command = plumed_bias_and_fes(
         f_opes, 'cv_diff1,cv_diff2', pace, height, f'{sigma},{sigma}', bias,
         kelvin, kt, f'{grid_bin},{grid_bin}',
         grid_min=f'{grid_min},{grid_min}', grid_max=f'{grid_max},{grid_max}')
 
     plumed_input = f"""
-{_units_header(units)}{body}
+{plumed_units_header(units)}{body}
 
 # Metadynamics
 {metad_line}
@@ -1020,517 +1068,10 @@ PRINT       ARG=cv_diff1,cv_diff2,metad.bias STRIDE={pace} FILE=COLVAR
     return plumed_input, fes_command
 
 
-def plumed_input_wob_1(idx1,
-                       idx2,
-                       temperature,
-                       r_0=0.14,
-                       wall=0.4,
-                       angle_lim=100.0,
-                       pace=500,
-                       height=15.0,
-                       sigma=0.05,
-                       bias=20.0,
-                       grid_min=-1.1,
-                       grid_max=1.1,
-                       grid_bin=200,
-                       f_opes=False,
-                       units="plumed"):
-    """
-    Build a PLUMED input that biases how asynchronous a double transfer is.
-
-    The CV is the *difference* between the two transfer coordinates rather
-    than their sum, so it sits near zero while the protons move together and
-    grows when one leads. Biasing it drives the pair away from the concerted
-    path, which is how a stepwise intermediate is found if there is one.
-
-    Unlike the other builders in this family, *r_0* and *wall* are absolute
-    lengths rather than multipliers on the present geometry, so no geometry is
-    needed -- and so they are in the length unit *units* selects.
-
-    Parameters
-    ----------
-    idx1, idx2 : list of int
-        Three 0-based atom indices each, ordered donor, hydrogen, acceptor,
-        for the first and second proton transfer.
-    temperature : float or openmm.unit.Quantity
-        Simulation temperature in kelvin.
-    r_0 : float, optional
-        ``R_0`` of both coordination switching functions, as an absolute
-        length. Default is 0.14, i.e. 1.4 angstrom in PLUMED's nanometres.
-    wall : float, optional
-        Upper wall on both donor-acceptor distances, as an absolute length.
-        Default is 0.4.
-    angle_lim : float, optional
-        Lower wall on each donor-hydrogen-acceptor angle, in degrees.
-        Default is 100.0.
-    pace : int, optional
-        ``PACE`` of the metadynamics bias, in steps. Default is 500.
-    height : float, optional
-        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0.
-    sigma : float, optional
-        Gaussian width of the bias, in CV units. Default is 0.05.
-    bias : float, optional
-        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
-        Default is 20.0.
-    grid_min, grid_max : float, optional
-        Bounds of the bias/FES grid. Default is -1.1 and 1.1.
-    grid_bin : int, optional
-        Number of grid bins. Default is 200.
-    f_opes : bool, optional
-        If True, bias with ``OPES_METAD`` instead of well-tempered
-        ``METAD``. Default is False.
-    units : str, optional
-        ``'plumed'`` (the default) for nanometres and kJ/mol, or ``'ase'`` for
-        angstrom and eV. See the module docstring.
-
-    Returns
-    -------
-    plumed_input : str
-        The PLUMED input script.
-    fes_command : str
-        Shell command that reconstructs the free-energy surface from the
-        bias written by *plumed_input*.
-    """
-    idx1 = _one_based(idx1)
-    idx2 = _one_based(idx2)
-    angle_lim = _angle_radians(angle_lim)
-
-    def transfer(idx, n):
-        """One transfer's CV and walls, in this builder's unpadded layout."""
-        return f"""c_d{n}: COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}
-c_a{n}: COORDINATION GROUPA={idx[2]} GROUPB={idx[1]} R_0={r_0}
-cv_diff{n}: COMBINE ARG=c_d{n},c_a{n} COEFFICIENTS=1.0,-1.0 PERIODIC=NO
-
-dist_da_{n}: DISTANCE ATOMS={idx[2]},{idx[0]}
-u_wall_{n}: UPPER_WALLS ARG=dist_da_{n} AT={wall} KAPPA=500
-
-ang_{n}: ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}
-w_{n}: LOWER_WALLS ARG=ang_{n} AT={angle_lim} KAPPA=500"""
-
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
-        f_opes, 'pt_cv', pace, height, sigma, bias, kelvin, kt,
-        grid_bin, grid_min=grid_min, grid_max=grid_max, label='metad: ')
-
-    plumed_input = f"""
-{_units_header(units)}{transfer(idx1, 1)}
-
-{transfer(idx2, 2)}
-
-pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
-
-{metad_line}
-PRINT ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
-        """
-    return plumed_input, fes_command
-
-
-def plumed_input_wob_2(geometry,
-                       idx,
-                       temperature,
-                       r_0=1.1,
-                       wall=4.0,
-                       pace=500,
-                       height=15.0,
-                       sigma=0.05,
-                       bias=20.0,
-                       grid_bin=200,
-                       f_opes=False,
-                       units="plumed"):
-    """
-    Build a PLUMED input biasing a wobble pair's whole hydrogen-bond network.
-
-    Five coordination differences are summed into one CV: two for the proton
-    that can sit on N3, O6 or O4, one for the proton shared between N1 and N3,
-    and two more tracking which heavy atoms the pair is hydrogen bonded
-    through. Summing them means the CV moves when the pair rearranges by any
-    route, rather than only the one route a single transfer coordinate can
-    see. Upper walls on the three heavy-atom separations stop the bases simply
-    coming apart.
-
-    See :func:`plumed_input_wob_4` for the same network built from plain
-    distances and fixed walls instead.
-
-    Parameters
-    ----------
-    geometry : ase.Atoms or openmm.app.Modeller or array_like or str
-        The reactant geometry, used to size the switching functions and the
-        walls. See :func:`as_positions`.
-    idx : list of int
-        Eight 0-based atom indices, ordered N3, H3, O6, O4, N1, H1, O2, N2.
-    temperature : float or openmm.unit.Quantity
-        Simulation temperature in kelvin.
-    r_0 : float, optional
-        Multiplier on each pair's present separation that sets the ``R_0`` of
-        its switching function. Default is 1.1.
-    wall : float, optional
-        Multiplier on each heavy-atom separation that sets its upper wall.
-        Default is 4.0.
-    pace : int, optional
-        ``PACE`` of the metadynamics bias, in steps. Default is 500.
-    height : float, optional
-        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0.
-    sigma : float, optional
-        Gaussian width of the bias, in CV units. Default is 0.05.
-    bias : float, optional
-        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
-        Default is 20.0.
-    grid_bin : int, optional
-        Number of grid bins. Default is 200. No bounds are set, so PLUMED
-        sizes the grid itself.
-    f_opes : bool, optional
-        If True, bias with ``OPES_METAD`` instead of well-tempered
-        ``METAD``. Default is False.
-    units : str, optional
-        ``'plumed'`` (the default) for nanometres and kJ/mol, or ``'ase'`` for
-        angstrom and eV. See the module docstring.
-
-    Returns
-    -------
-    plumed_input : str
-        The PLUMED input script.
-    fes_command : str
-        Shell command that reconstructs the free-energy surface from the
-        bias written by *plumed_input*.
-    """
-    positions = _geometry(geometry, units)
-    idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
-
-    def r(a, b):
-        """R_0 for a pair, from where it sits now."""
-        return float(np.round(_distance(positions, a, b) * r_0, decimals=2))
-
-    wall_1 = _wall_value(_distance(positions, idx_o6, idx_o4), wall)
-    wall_2 = _wall_value(_distance(positions, idx_n1, idx_n3), wall)
-    wall_3 = _wall_value(_distance(positions, idx_n2, idx_o2), wall)
-
-    r_1 = r(idx_n3, idx_h3)
-    r_2 = r(idx_o6, idx_h3)
-    r_4 = r(idx_o4, idx_h3)
-    r_5 = r(idx_n1, idx_h1)
-    r_6 = r(idx_n3, idx_h1)
-    r_7 = r(idx_n1, idx_o2)
-    r_8 = r(idx_n2, idx_o2)
-    r_10 = r(idx_n1, idx_n3)
-
-    (idx_n3, idx_h3, idx_o6, idx_o4,
-     idx_n1, idx_h1, idx_o2, idx_n2) = _one_based(
-        [idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2])
-
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
-        f_opes, 'z', pace, height, sigma, bias, kelvin, kt, grid_bin,
-        label='metad: ')
-
-    plumed_input = f"""
-{_units_header(units)}# z1: top PT reaction coordinate
-c_1: COORDINATION GROUPA={idx_n3} GROUPB={idx_h3} R_0={r_1}
-c_2: COORDINATION GROUPA={idx_o6} GROUPB={idx_h3} R_0={r_2}
-# c_1: DISTANCE ATOMS={idx_n3},{idx_h3}
-# c_2: DISTANCE ATOMS={idx_o6},{idx_h3}
-z1: COMBINE ARG=c_1,c_2 COEFFICIENTS=1,-1 PERIODIC=NO
-
-# z2: top PT reaction coordinate
-c_3: COORDINATION GROUPA={idx_o6} GROUPB={idx_h3} R_0={r_2}
-c_4: COORDINATION GROUPA={idx_o4} GROUPB={idx_h3} R_0={r_4}
-# c_3: DISTANCE ATOMS={idx_o6},{idx_h3}
-# c_4: DISTANCE ATOMS={idx_o4},{idx_h3}
-z2: COMBINE ARG=c_3,c_4 COEFFICIENTS=1,-1 PERIODIC=NO
-
-# z3: second PT reaction coordinate
-c_5: COORDINATION GROUPA={idx_n1} GROUPB={idx_h1} R_0={r_5}
-c_6: COORDINATION GROUPA={idx_n3} GROUPB={idx_h1} R_0={r_6}
-# c_5: DISTANCE ATOMS={idx_n1},{idx_h1}
-# c_6: DISTANCE ATOMS={idx_n3},{idx_h1}
-z3: COMBINE ARG=c_5,c_6 COEFFICIENTS=1,-1 PERIODIC=NO
-
-# z4
-c_7: COORDINATION GROUPA={idx_n1} GROUPB={idx_o2} R_0={r_7}
-c_8: COORDINATION GROUPA={idx_n2} GROUPB={idx_o2} R_0={r_8}
-# c_7: DISTANCE ATOMS={idx_n1},{idx_o2}
-# c_8: DISTANCE ATOMS={idx_n2},{idx_o2}
-z4: COMBINE ARG=c_7,c_8 COEFFICIENTS=1,-1 PERIODIC=NO
-
-# z5
-c_9: COORDINATION GROUPA={idx_n2} GROUPB={idx_o2} R_0={r_8}
-c_10: COORDINATION GROUPA={idx_n1} GROUPB={idx_n3} R_0={r_10}
-# c_9: DISTANCE ATOMS={idx_n2},{idx_o2}
-# c_10: DISTANCE ATOMS={idx_n1},{idx_n3}
-z5: COMBINE ARG=c_9,c_10 COEFFICIENTS=1,-1 PERIODIC=NO
-
-z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
-
-d1: DISTANCE ATOMS={idx_o6},{idx_o4}
-d2: DISTANCE ATOMS={idx_n1},{idx_n3}
-d3: DISTANCE ATOMS={idx_n2},{idx_o2}
-
-uw1: UPPER_WALLS ARG=d1 AT={wall_1} KAPPA=500
-uw2: UPPER_WALLS ARG=d2 AT={wall_2} KAPPA=500
-uw3: UPPER_WALLS ARG=d3 AT={wall_3} KAPPA=500
-
-{metad_line}
-PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
-        """
-    return plumed_input, fes_command
-
-
-def plumed_input_wob_3(geometry,
-                       idx_o4,
-                       idx_h3,
-                       idx_o2,
-                       idx_o6,
-                       idx_n2,
-                       idx_nr1,
-                       idx_nr2,
-                       temperature,
-                       wall=1.1,
-                       pace=500,
-                       height=15.0,
-                       sigma=0.05,
-                       bias=20.0,
-                       grid_bin=200,
-                       f_opes=False,
-                       units="plumed"):
-    """
-    Build a PLUMED input biasing a transfer and the pair opening together.
-
-    The CV adds two terms that measure different things: a distance difference
-    saying which oxygen the proton is on, and the N2-O6-O4 angle saying how far
-    the pair has swung open. A transfer that only happens once the bases have
-    slid apart shows up here and does not on a transfer coordinate alone.
-    Walls hold the opening angle, the R-group separation and the two
-    heavy-atom contacts inside sensible ranges.
-
-    Every index is given as a single-element list, which is what
-    ``openmmnqe.atom_indices_from_vmd_picks`` hands back.
-
-    Parameters
-    ----------
-    geometry : ase.Atoms or openmm.app.Modeller or array_like or str
-        The reactant geometry, used to size the walls. See
-        :func:`as_positions`.
-    idx_o4, idx_h3, idx_o2, idx_o6, idx_n2, idx_nr1, idx_nr2 : list of int
-        Single-element lists holding one 0-based atom index each.
-    temperature : float or openmm.unit.Quantity
-        Simulation temperature in kelvin.
-    wall : float, optional
-        Multiplier on each present separation that sets its wall; the lower
-        walls are placed at ``2 - wall`` times it, so the pair is held in a
-        band around where it started. Default is 1.1.
-    pace : int, optional
-        ``PACE`` of the metadynamics bias, in steps. Default is 500.
-    height : float, optional
-        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0.
-    sigma : float, optional
-        Gaussian width of the bias, in CV units. Default is 0.05.
-    bias : float, optional
-        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
-        Default is 20.0.
-    grid_bin : int, optional
-        Number of grid bins. Default is 200. No bounds are set, so PLUMED
-        sizes the grid itself.
-    f_opes : bool, optional
-        If True, bias with ``OPES_METAD`` instead of well-tempered
-        ``METAD``. Default is False.
-    units : str, optional
-        ``'plumed'`` (the default) for nanometres and kJ/mol, or ``'ase'`` for
-        angstrom and eV. See the module docstring.
-
-    Returns
-    -------
-    plumed_input : str
-        The PLUMED input script.
-    fes_command : str
-        Shell command that reconstructs the free-energy surface from the
-        bias written by *plumed_input*.
-    """
-    positions = _geometry(geometry, units)
-
-    d_nr = _distance(positions, idx_nr1[0], idx_nr2[0])
-    wall_u = _wall_value(d_nr, wall)
-    wall_l = _wall_value(d_nr, 2.0 - wall)
-
-    wall_1 = _wall_value(_distance(positions, idx_o6[0], idx_o4[0]), wall)
-    wall_2 = _wall_value(_distance(positions, idx_n2[0], idx_o2[0]), wall)
-
-    idx_o4 = _one_based(idx_o4)[0]
-    idx_h3 = _one_based(idx_h3)[0]
-    idx_o2 = _one_based(idx_o2)[0]
-    idx_o6 = _one_based(idx_o6)[0]
-    idx_n2 = _one_based(idx_n2)[0]
-    idx_nr1 = _one_based(idx_nr1)[0]
-    idx_nr2 = _one_based(idx_nr2)[0]
-
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
-        f_opes, 'z', pace, height, sigma, bias, kelvin, kt, grid_bin,
-        label='metad: ')
-
-    plumed_input = f"""
-{_units_header(units)}# z1: PT reaction coordinate
-c_1: DISTANCE ATOMS={idx_o4},{idx_h3}
-c_2: DISTANCE ATOMS={idx_o2},{idx_h3}
-z1: COMBINE ARG=c_1,c_2 COEFFICIENTS=1,-1 PERIODIC=NO
-
-# z2: base-pair wobble coordinate
-z2: ANGLE ATOMS={idx_n2},{idx_o6},{idx_o4}
-
-# Constraint to bound the sliding of the bases
-w_a1: LOWER_WALLS ARG=z2 AT={_angle_radians(80.0)} KAPPA=500
-w_a2: UPPER_WALLS ARG=z2 AT={_angle_radians(150.0)} KAPPA=500
-
-# Constraint to R-groups to keep bases together
-d_rr: DISTANCE ATOMS={idx_nr1},{idx_nr2}
-w_d1: UPPER_WALLS ARG=d_rr AT={wall_u} KAPPA=500
-w_d2: LOWER_WALLS ARG=d_rr AT={wall_l} KAPPA=500
-
-# Constraint to prevent excessive opening of the base pair
-d_oo: DISTANCE ATOMS={idx_o6},{idx_o4}
-w_oo: UPPER_WALLS ARG=d_oo AT={wall_1} KAPPA=500
-d_no: DISTANCE ATOMS={idx_n2},{idx_o2}
-w_no: UPPER_WALLS ARG=d_no AT={wall_2} KAPPA=500
-
-z: COMBINE ARG=z1,z2 COEFFICIENTS=1,1 PERIODIC=NO
-
-{metad_line}
-PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
-        """
-    return plumed_input, fes_command
-
-
-def plumed_input_wob_4(idx,
-                       temperature,
-                       pace=500,
-                       height=15.0,
-                       sigma=0.05,
-                       bias=20.0,
-                       grid_bin=200,
-                       kappa=2000.0,
-                       f_opes=False,
-                       units="plumed"):
-    """
-    Build a PLUMED input biasing a wobble pair's network, from plain distances.
-
-    The same five-term picture as :func:`plumed_input_wob_2`, but each term is
-    a difference of bare distances rather than of coordination numbers, and
-    the walls are at fixed absolute separations rather than multiples of the
-    starting geometry -- so no geometry is needed to build it. Two extra
-    restraints keep the pair stacked: one on the rise between the bases'
-    centres of mass, and one on the angle their R-groups make.
-
-    The fixed wall positions are in nanometres, i.e. they assume
-    ``units='plumed'``.
-
-    Parameters
-    ----------
-    idx : list of int
-        Ten 0-based atom indices, ordered N3, H3, O6, O4, N1, H1, O2, N2,
-        NR1, NR2.
-    temperature : float or openmm.unit.Quantity
-        Simulation temperature in kelvin.
-    pace : int, optional
-        ``PACE`` of the metadynamics bias, in steps. Default is 500.
-    height : float, optional
-        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0.
-    sigma : float, optional
-        Gaussian width of the bias, in CV units. Default is 0.05.
-    bias : float, optional
-        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
-        Default is 20.0.
-    grid_bin : int, optional
-        Number of grid bins. Default is 200. No bounds are set, so PLUMED
-        sizes the grid itself.
-    kappa : float, optional
-        Spring constant of every wall and restraint. Default is 2000.0.
-    f_opes : bool, optional
-        If True, bias with ``OPES_METAD`` instead of well-tempered
-        ``METAD``. Default is False.
-    units : str, optional
-        ``'plumed'`` (the default) for nanometres and kJ/mol, or ``'ase'`` for
-        angstrom and eV. See the module docstring. The wall positions here are
-        absolute nanometres, so ``'ase'`` needs them rewritten.
-
-    Returns
-    -------
-    plumed_input : str
-        The PLUMED input script.
-    fes_command : str
-        Shell command that reconstructs the free-energy surface from the
-        bias written by *plumed_input*.
-    """
-    idx = _one_based(idx)
-    # 0   1   2   3   4   5   6   7   8    9
-    n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2 = idx
-
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
-        f_opes, 'z', pace, height, sigma, bias, kelvin, kt, grid_bin)
-
-    plumed_input = f"""
-{_units_header(units)}# Get the distances
-n3_h3: DISTANCE ATOMS={n3},{h3}
-o6_h3: DISTANCE ATOMS={o6},{h3}
-o4_h3: DISTANCE ATOMS={o4},{h3}
-n1_h1: DISTANCE ATOMS={n1},{h1}
-n3_h1: DISTANCE ATOMS={n3},{h1}
-
-n1_o2: DISTANCE ATOMS={n1},{o2}
-n2_o2: DISTANCE ATOMS={n2},{o2}
-n1_n3: DISTANCE ATOMS={n1},{n3}
-
-# Define the CVs
-z1: COMBINE ARG=n3_h3,o6_h3 COEFFICIENTS=1,-1 PERIODIC=NO
-z2: COMBINE ARG=o6_h3,o4_h3 COEFFICIENTS=1,-1 PERIODIC=NO
-z3: COMBINE ARG=n1_h1,n3_h1 COEFFICIENTS=1,-1 PERIODIC=NO
-z4: COMBINE ARG=n1_o2,n2_o2 COEFFICIENTS=1,-1 PERIODIC=NO
-z5: COMBINE ARG=n1_o2,n1_n3 COEFFICIENTS=1,-1 PERIODIC=NO
-
-# Combine into a single CV
-z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
-
-o6_o4: DISTANCE ATOMS={o6},{o4}
-UPPER_WALLS ARG=o6_o4 AT=0.36  KAPPA={kappa}
-LOWER_WALLS ARG=o6_o4 AT=0.25  KAPPA={kappa}
-o6_n3: DISTANCE ATOMS={o6},{n3}
-UPPER_WALLS ARG=o6_n3 AT=0.34  KAPPA={kappa}
-LOWER_WALLS ARG=o6_n3 AT=0.26  KAPPA={kappa}
-
-UPPER_WALLS ARG=n1_n3 AT=0.38  KAPPA={kappa}
-LOWER_WALLS ARG=n1_n3 AT=0.29  KAPPA={kappa}
-
-UPPER_WALLS ARG=n1_o2 AT=0.37  KAPPA={kappa}
-LOWER_WALLS ARG=n1_o2 AT=0.29  KAPPA={kappa}
-
-UPPER_WALLS ARG=n2_o2 AT=0.37  KAPPA={kappa}
-LOWER_WALLS ARG=n2_o2 AT=0.30  KAPPA={kappa}
-
-# rise restraint
-base1: GROUP ATOMS={nr1},{o6},{n1},{n2}
-base2: GROUP ATOMS={nr2},{o4},{n3},{o2}
-com1: COM ATOMS=base1
-com2: COM ATOMS=base2
-dist: DISTANCE ATOMS=com1,com2 COMPONENTS
-RESTRAINT ARG=dist.z AT=0.0 KAPPA={kappa}
-
-# Constraints to prevent excessive opening of the base pair
-nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}
-w_a1: LOWER_WALLS ARG=nr_ang AT={_angle_radians(120.0)} KAPPA={kappa}
-w_a2: UPPER_WALLS ARG=nr_ang AT={_angle_radians(140.0)} KAPPA={kappa}
-
-{metad_line}
-PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
-        """
-    return plumed_input, fes_command
-
-
 def plumed_input_neb_path(temperature,
                           wall=0.1,
                           pace=500,
-                          height=15.0,
+                          height=None,
                           sigma=0.1,
                           bias=5.0,
                           grid_min=0.0,
@@ -1568,7 +1109,9 @@ def plumed_input_neb_path(temperature,
         ``PACE`` of the metadynamics bias, in steps. Default is 500.
     height : float, optional
         Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 15.0.
+        for ``OPES_METAD``, in the script's energy unit. None, the default,
+        deposits 15 kJ/mol -- written as 15.0 for ``units='plumed'`` and as
+        its equivalent 0.155 for ``units='ase'``.
     sigma : float, optional
         Gaussian width of the bias, in units of path node index. Default is
         0.1.
@@ -1606,13 +1149,14 @@ def plumed_input_neb_path(temperature,
         Shell command that reconstructs the free-energy surface from the
         bias written by *plumed_input*.
     """
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
+    height = _default_height(height, units)
+    kelvin, kt = plumed_temperature_pair(temperature, units)
+    metad_line, fes_command = plumed_bias_and_fes(
         f_opes, 'path.sss', pace, height, sigma, bias, kelvin, kt,
         grid_bin, grid_min=grid_min, grid_max=grid_max, label='metad: ')
 
     plumed_input = f'''
-{_units_header(units)}FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
+{plumed_units_header(units)}FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
 path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
 {metad_line}
 path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}
@@ -1620,103 +1164,3 @@ PRINT ARG=path.sss,path.zzz,metad.bias STRIDE={pace} FILE=COLVAR
         '''
     return plumed_input, fes_command
 
-
-def plumed_input_neb_path_wob(idx,
-                              temperature,
-                              wall=0.1,
-                              pace=500,
-                              height=10.0,
-                              sigma=0.1,
-                              bias=5.0,
-                              grid_min=0.0,
-                              grid_max=26.0,
-                              grid_bin=500,
-                              kappa=500.0,
-                              lambda_val=500.0,
-                              neigh_size=8,
-                              f_opes=False,
-                              units="plumed"):
-    """
-    Bias progress along a reference path, holding a wobble pair together.
-
-    :func:`plumed_input_neb_path` with two additions for a mispaired base:
-    a wall on the glycosidic torsion, which stops the bases sliding past one
-    another, and a monitored R-group distance so the pair coming apart is
-    visible in the COLVAR. The restraint on that distance is written but
-    commented out, since which value it should take depends on the pair.
-
-    Parameters
-    ----------
-    idx : list of int
-        Six 0-based atom indices; the first, third, fifth and sixth are used,
-        being CA1, CB1, NR1 and NR2 -- the two glycosidic carbons and the two
-        R-group nitrogens.
-    temperature : float or openmm.unit.Quantity
-        Simulation temperature in kelvin.
-    wall : float, optional
-        Upper wall on ``path.zzz``. Default is 0.1.
-    pace : int, optional
-        ``PACE`` of the metadynamics bias, in steps. Default is 500.
-    height : float, optional
-        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
-        for ``OPES_METAD``, in the script's energy unit. Default is 10.0.
-    sigma : float, optional
-        Gaussian width of the bias, in units of path node index. Default is
-        0.1.
-    bias : float, optional
-        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
-        Default is 5.0.
-    grid_min, grid_max : float, optional
-        Bounds of the ``path.sss`` bias/FES grid. Default is 0.0 and 26.0.
-    grid_bin : int, optional
-        Number of grid bins. Default is 500.
-    kappa : float, optional
-        Spring constant of every wall. Default is 500.0.
-    lambda_val : float, optional
-        ``LAMBDA`` parameter of ``PATHMSD``. Default is 500.0.
-    neigh_size : int, optional
-        ``NEIGH_SIZE`` of ``PATHMSD``. Default is 8.
-    f_opes : bool, optional
-        If True, bias with ``OPES_METAD`` instead of well-tempered
-        ``METAD``. Default is False.
-    units : str, optional
-        ``'plumed'`` (the default) for nanometres and kJ/mol, or ``'ase'`` for
-        angstrom and eV. See the module docstring.
-
-    Returns
-    -------
-    plumed_input : str
-        The PLUMED input script.
-    fes_command : str
-        Shell command that reconstructs the free-energy surface from the
-        bias written by *plumed_input*.
-    """
-    idx = _one_based(idx)
-    ca1, _, cb1, _, nr1, nr2 = idx
-
-    kelvin, kt = _temperature_pair(temperature, units)
-    metad_line, fes_command = _bias_and_fes_command(
-        f_opes, 'path.sss', pace, height, sigma, bias, kelvin, kt,
-        grid_bin, grid_min=grid_min, grid_max=grid_max, label='metad: ')
-
-    plumed_input = f'''
-{_units_header(units)}FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
-path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
-{metad_line}
-path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}
-
-# Constraint to bound the sliding of the bases
-dih: TORSION ATOMS={ca1},{nr1},{cb1},{nr2}
-w_a1: LOWER_WALLS ARG=dih AT=-1.0 KAPPA={kappa}
-w_a2: UPPER_WALLS ARG=dih AT=1.0 KAPPA={kappa}
-
-# w_a1: LOWER_WALLS ARG=dih AT={_angle_radians(150.0)} KAPPA={kappa}
-# w_a2: UPPER_WALLS ARG=dih AT={_angle_radians(190.0)} KAPPA={kappa}
-
-# Constraint to R-groups to keep bases together
-d_rr: DISTANCE ATOMS={nr1},{nr2}
-# w_d1: UPPER_WALLS ARG=d_rr AT=1.0 KAPPA={kappa}
-
-PRINT ARG=path.sss,path.zzz,metad.bias,dih,d_rr STRIDE={pace} FILE=COLVAR
-        '''
-    return plumed_input, fes_command

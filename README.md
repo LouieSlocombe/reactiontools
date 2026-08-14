@@ -10,8 +10,8 @@ true saddle point, following the IRC away from it, driving PLUMED, and
 producing publication-ready figures with consistent styling.
 
 It also holds the collective variables an enhanced-sampling run is biased
-along — `tools_cv` for proton transfer and base-pair rearrangement, `tools_path`
-for turning a steered trajectory into a `PATHMSD` reference. Those are written
+along — `tools_cv` for proton transfer, `tools_path` for turning a steered
+trajectory into a `PATHMSD` reference. Those are written
 as text for whatever runs PLUMED, so they are equally usable from an ASE run
 here or from an OpenMM one driven by
 [openmmnqe](https://github.com/LouieSlocombe/openmmnqe), which depends on this
@@ -790,33 +790,68 @@ successful one.
 
 ### `tools_cv` — collective variables for proton transfer
 
-Twelve builders that write the PLUMED input biasing a reaction, in three
-families: a coordination difference for one or two proton transfers, the
-hydrogen-bond network of a wobble base pair, and progress along a reference
-path. Each returns the script and the shell command that turns the resulting
-bias back into a free-energy surface.
+Six builders that write the PLUMED input biasing a reaction, in two families: a
+coordination difference for one or two proton transfers, and progress along a
+reference path. Each returns the script and the shell command that turns the
+resulting bias back into a free-energy surface. Below them sit the building
+blocks for writing a collective variable of your own, which is where one that
+encodes a particular system belongs.
 
 | Function | Description |
 | --- | --- |
 | `plumed_input_1pt(geometry, idx, temperature, r_0=1.1, wall=1.5, angle_lim=130.0, ...)` | Bias one proton transfer. The CV is the donor/acceptor coordination difference, running +1 to −1 as the proton crosses. |
 | `plumed_input_2pt_1d(geometry, idx1, idx2, temperature, ...)` | Two transfers averaged into one concerted coordinate. |
 | `plumed_input_2pt_2d(geometry, idx1, idx2, temperature, ...)` | The same two kept as separate axes, so the surface resolves concerted from stepwise. |
-| `plumed_input_wob_1(idx1, idx2, temperature, r_0=0.14, wall=0.4, ...)` | The *difference* of two transfer coordinates — near zero while they move together, growing when one leads. `r_0` and `wall` are absolute lengths here, not multipliers. |
-| `plumed_input_wob_2(geometry, idx, temperature, r_0=1.1, wall=4.0, ...)` | A wobble pair's five-term hydrogen-bond network, built from `COORDINATION`, with walls scaled off the starting geometry. |
-| `plumed_input_wob_3(geometry, idx_o4, idx_h3, idx_o2, idx_o6, idx_n2, idx_nr1, idx_nr2, temperature, ...)` | A transfer plus the angle the pair opens through, so a transfer that needs the bases to slide first is visible. |
-| `plumed_input_wob_4(idx, temperature, ...)` | The same five-term network from plain distances with fixed walls, plus a rise restraint keeping the bases stacked. Needs no geometry. |
 | `plumed_input_neb_path(temperature, wall=0.1, lambda_val=250.0, neigh_size=8, ...)` | Bias `path.sss` along a `PATHMSD` reference, walling `path.zzz`. For reactions no single geometric coordinate describes. |
-| `plumed_input_neb_path_wob(idx, temperature, ...)` | The same with a glycosidic-torsion wall holding a mispaired base together. |
 | `plumed_input_steered(cv_block, cv_start, cv_stop, steps, ...)` | Drag any CV with a `MOVINGRESTRAINT`, rather than biasing it. Returns the script and the total step count. |
 | `plumed_input_steered_pt(geometry, idx, steps, ...)` | The same for a proton transfer, reading the pull's start and end off the geometry. |
 | `switching_value(r, r_0, nn=6, mm=None)` | PLUMED's rational switching function in Python, for predicting what a coordination CV is worth without running it. |
 | `as_positions(source)` | Coordinates in ångström from an `Atoms`, an OpenMM `Modeller`, an array or a file. |
+| `plumed_bias_and_fes(f_opes, arg, pace, height, sigma, bias, temperature, kt, grid_bin, grid_min=None, grid_max=None, ...)` | The `METAD`/`OPES_METAD` line and the command that reads its surface back, built together so they cannot disagree. |
+| `plumed_one_based(indices)` | Zero-based indices as PLUMED's one-based, order preserved. |
+| `plumed_units_header(units)` | The `UNITS` line the script needs, or an empty string for PLUMED's own. |
+| `plumed_temperature_pair(temperature, units)` | Kelvin for the bias `TEMP=`, and kBT in the script's energy unit for the reconstruction's `--kt`. |
+| `plumed_angle_radians(degrees)` | A wall angle in the radians PLUMED wants. |
 
 `geometry` is whatever holds one — an `ase.Atoms`, an `openmm.app.Modeller`, a
 bare `(n, 3)` array or a path — and `temperature` is a number of kelvin or an
 `openmm.unit.Quantity`. Every builder takes `f_opes=True` to swap
 well-tempered `METAD` for `OPES_METAD`, which also swaps the returned command
 from `plumed sum_hills` to the OPES one.
+
+**Building your own.** A CV that encodes one particular system belongs with that
+study rather than here, so the last five entries are public: write the CV lines
+yourself and hand the label you biased to `plumed_bias_and_fes`, and what comes
+out is a script indistinguishable from the ones above — including a
+reconstruction command that agrees with the bias about the grid and the
+temperature, which is the pairing that goes wrong when the two are written
+separately.
+
+```python
+from reactiontools import (plumed_angle_radians, plumed_bias_and_fes,
+                           plumed_one_based, plumed_temperature_pair,
+                           plumed_units_header)
+
+n1, h1, o2 = plumed_one_based([30, 31, 44])
+kelvin, kt = plumed_temperature_pair(300.0, "plumed")
+metad_line, fes_command = plumed_bias_and_fes(
+    False, 'z', pace=500, height=15.0, sigma=0.05, bias=20.0,
+    temperature=kelvin, kt=kt, grid_bin=200, grid_min=-0.3, grid_max=0.3)
+
+script = f"""{plumed_units_header("plumed")}n1_h1: DISTANCE ATOMS={n1},{h1}
+o2_h1: DISTANCE ATOMS={o2},{h1}
+z:     COMBINE ARG=n1_h1,o2_h1 COEFFICIENTS=1,-1 PERIODIC=NO
+ang:   ANGLE ATOMS={n1},{h1},{o2}
+       LOWER_WALLS ARG=ang AT={plumed_angle_radians(130.0)} KAPPA=500
+{metad_line}
+PRINT ARG=z,metad.bias STRIDE=500 FILE=COLVAR
+"""
+```
+
+`plumed_one_based` is not `plumed_selection` from `tools_plumed`: that one sorts
+and dedupes to collapse indices into ranges, which is right for the atom group
+of a `COORDINATION` and wrong for anything positional like a donor, hydrogen and
+acceptor read off in order.
 
 **Units.** These scripts are for an external PLUMED, so `units="plumed"` (the
 default) writes no `UNITS` line and works in nanometres and kJ/mol. Pass
@@ -958,9 +993,10 @@ ASE's `Plumed` calculator. **The two defaults are opposite, and nothing checks
 that a script matches the run it is given to**: taking one built by
 `plumed_input_1pt` into an ASE run, or the reverse, is wrong by a factor of ten
 in every length and by 96.5 in every energy. Pass `units="ase"` to `tools_cv`
-for the ASE convention, and remember that lengths you supply yourself — the
-absolute `r_0` and `wall` of `plumed_input_wob_1`, the fixed walls inside
-`plumed_input_wob_4` — are in whichever you chose.
+for the ASE convention, and remember that lengths you supply yourself — `wall`
+in `plumed_input_neb_path`, and anything you interpolate into a CV block of your
+own — are in whichever you chose. Lengths taken off the geometry are converted
+for you; these are not, and nothing checks them.
 
 ## Testing
 
