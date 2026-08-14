@@ -1,6 +1,6 @@
 """Tools for transition-state, NEB and metadynamics calculations.
 
-The package is organised into six modules, all of which are re-exported here:
+The package is organised into seven modules, all of which are re-exported here:
 
 ``tools_reaction``
     Build, optimise and post-process nudged elastic band (NEB) paths, either
@@ -23,6 +23,9 @@ The package is organised into six modules, all of which are re-exported here:
 ``tools_fes``
     Read PLUMED output -- ``COLVAR``, ``fes.dat``, ``HILLS`` -- and plot free
     energy in one or two dimensions, in whichever energy unit you want.
+``tools_units``
+    The energy units the rest of the package converts between, and the thermal
+    energy kBT that reweighting needs.
 ``tools_plotting``
     Ready-made plots for structures, NEB and IRC profiles, MD trajectories and
     one-dimensional PLUMED surfaces.
@@ -44,13 +47,10 @@ functions shell out to ORCA, which is licensed separately and installed by
 hand; see ``build_tools/README.md``. Everything else works without either.
 """
 
-from .tools_fes import (DEFAULT_ENERGY_UNIT,
-                        ENERGY_UNITS,
-                        FES,
+from .tools_fes import (FES,
                         FESSummary,
                         PlumedData,
                         as_fes,
-                        convert_energy,
                         fes_convergence,
                         summarise_fes,
                         plot_fes,
@@ -61,8 +61,7 @@ from .tools_fes import (DEFAULT_ENERGY_UNIT,
                         plot_fes_slices,
                         plot_plumed_colvar,
                         plot_plumed_fes,
-                        read_plumed_file,
-                        unit_label)
+                        read_plumed_file)
 from .tools_geometry import (bonded_cluster_indices_no_anchor_hub,
                              get_dimer_bonded_cluster_indices,
                              flip_and_face_bases,
@@ -115,6 +114,11 @@ from .tools_reaction import (ConvergenceError,
                              quick_guess_path,
                              quick_guess_ts)
 from .tools_style import n_plot, ax_plot
+from .tools_units import (DEFAULT_ENERGY_UNIT,
+                          ENERGY_UNITS,
+                          convert_energy,
+                          thermal_energy,
+                          unit_label)
 
 __version__ = "0.1.0"
 
@@ -167,13 +171,10 @@ __all__ = [
     "run_sum_hills",
     "sum_hills_files",
     # tools_fes
-    "DEFAULT_ENERGY_UNIT",
-    "ENERGY_UNITS",
     "FES",
     "FESSummary",
     "PlumedData",
     "as_fes",
-    "convert_energy",
     "fes_convergence",
     "summarise_fes",
     "plot_fes",
@@ -185,6 +186,11 @@ __all__ = [
     "plot_plumed_colvar",
     "plot_plumed_fes",
     "read_plumed_file",
+    # tools_units
+    "DEFAULT_ENERGY_UNIT",
+    "ENERGY_UNITS",
+    "convert_energy",
+    "thermal_energy",
     "unit_label",
     # tools_style
     "n_plot",

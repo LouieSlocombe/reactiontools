@@ -33,6 +33,13 @@ what PLUMED writes when it is driven from OpenMM. Runs driven from ASE are in
 eV instead, so pass ``source_unit="eV"`` -- which is what the thin wrappers
 :func:`~reactiontools.tools_plotting.plot_plumed` and
 :func:`~reactiontools.tools_plotting.plot_plumed_multi` do.
+
+The units themselves -- :data:`~reactiontools.tools_units.ENERGY_UNITS`,
+:func:`~reactiontools.tools_units.convert_energy` and
+:func:`~reactiontools.tools_units.unit_label` -- live in
+:mod:`reactiontools.tools_units` and are re-exported here, so that the script
+builders can convert energies without importing matplotlib through this
+module.
 """
 
 import os
@@ -41,9 +48,13 @@ from dataclasses import dataclass, field
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from ase.units import kB
 
 from .tools_style import _finalise, _style_axes, ax_plot
+from .tools_units import (DEFAULT_ENERGY_UNIT,
+                          ENERGY_UNITS,
+                          convert_energy,
+                          thermal_energy,
+                          unit_label)
 
 __all__ = [
     "DEFAULT_ENERGY_UNIT",
@@ -66,106 +77,6 @@ __all__ = [
     "summarise_fes",
     "unit_label",
 ]
-
-#: Size of one energy unit expressed in kJ/mol. PLUMED writes kJ/mol by
-#: default when driven from OpenMM, which is why it is the reference.
-ENERGY_UNITS = {
-    "kj/mol": 1.0,
-    "kcal/mol": 4.184,
-    "ev": 96.48533212331,
-    "mev": 0.09648533212331,
-    "hartree": 2625.4996394799,
-    "kt300": 2.494339,
-}
-
-#: Unit the FES files are assumed to be written in when nothing else is said.
-DEFAULT_ENERGY_UNIT = "kJ/mol"
-
-#: Pretty names used in axis labels, keyed by the normalised unit name.
-_UNIT_LABELS = {
-    "kj/mol": "kJ mol$^{-1}$",
-    "kcal/mol": "kcal mol$^{-1}$",
-    "ev": "eV",
-    "mev": "meV",
-    "hartree": "$E_\\mathrm{h}$",
-    "kt300": "$k_\\mathrm{B}T$",
-}
-
-
-# ---------------------------------------------------------------------------
-# Energy units
-# ---------------------------------------------------------------------------
-def _normalise_unit(unit):
-    """Normalise an energy-unit name and validate it.
-
-    Parameters
-    ----------
-    unit : str or None
-        Unit name, matched case- and whitespace-insensitively against
-        :data:`ENERGY_UNITS`.
-
-    Returns
-    -------
-    str or None
-        The normalised key, or None if *unit* is None.
-
-    Raises
-    ------
-    KeyError
-        If the unit is not known.
-    """
-    if unit is None:
-        return None
-    key = str(unit).strip().lower().replace(" ", "")
-    if key not in ENERGY_UNITS:
-        raise KeyError(f"Unknown energy unit {unit!r}. Known units: {sorted(ENERGY_UNITS)}")
-    return key
-
-
-def unit_label(unit):
-    """Return the axis label for an energy unit.
-
-    Parameters
-    ----------
-    unit : str or None
-        Energy unit name.
-
-    Returns
-    -------
-    str
-        A LaTeX-ready label such as ``"$F$ (eV)"``, or ``"$F$"`` when the
-        unit is unknown.
-    """
-    key = _normalise_unit(unit)
-    if key is None:
-        return r"$F$"
-    return rf"$F$ ({_UNIT_LABELS[key]})"
-
-
-def convert_energy(values, source=DEFAULT_ENERGY_UNIT, target=None):
-    """Convert energies between the units listed in :data:`ENERGY_UNITS`.
-
-    Parameters
-    ----------
-    values : array_like
-        Energies expressed in *source* units.
-    source : str, optional
-        Unit of *values*.
-    target : str or None, optional
-        Unit to convert to. ``None``, the default, returns *values* unchanged.
-
-    Returns
-    -------
-    numpy.ndarray
-        The converted energies.
-    """
-    values = np.asarray(values, dtype=float)
-    source_key = _normalise_unit(source)
-    target_key = _normalise_unit(target)
-    if target_key is None or target_key == source_key:
-        return values
-    return values * (ENERGY_UNITS[source_key] / ENERGY_UNITS[target_key])
-
 
 # ---------------------------------------------------------------------------
 # PLUMED file reading
@@ -1085,8 +996,7 @@ def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
             raise ValueError(
                 "Cannot use temperature without knowing the surface's energy "
                 "unit; pass source_unit or energy_unit.")
-        kt = float(convert_energy(kB * temperature, source="eV",
-                                  target=fes.energy_unit))
+        kt = thermal_energy(temperature, fes.energy_unit)
 
     cv = fes.cvs[0]
     mask_a = _basin_mask(fes, basin_a, "basin_a")

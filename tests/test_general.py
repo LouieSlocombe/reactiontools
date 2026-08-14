@@ -1,6 +1,96 @@
-"""Package-level tests: the public surface."""
+"""Package-level tests: the public surface and the layering beneath it."""
+
+import ast
+from pathlib import Path
+
+import pytest
 
 import reactiontools
+
+_PACKAGE = Path(reactiontools.__file__).resolve().parent
+
+#: Modules that must stay free of matplotlib. They build strings and crunch
+#: numbers for callers who may never draw anything, and ``tools_fes`` -- the
+#: obvious place to reach for the unit conversions -- imports pyplot at module
+#: scope. Keeping the edge out is what lets ``tools_style`` and
+#: ``tools_units`` exist as separate modules at all.
+_PLOT_FREE = {"tools_units", "tools_plumed", "tools_cv", "tools_io", "tools_path"}
+
+
+def _module_imports(name):
+    """Intra-package and third-party top-level imports of one module.
+
+    Read off the source rather than from a live import, so that a module can
+    be checked without the package ``__init__`` -- which imports everything --
+    having already pulled its dependencies in.
+
+    Parameters
+    ----------
+    name : str
+        Module name within the package, without the ``reactiontools.`` prefix.
+
+    Returns
+    -------
+    local : set of str
+        Names of sibling modules imported with a relative import.
+    external : set of str
+        Top-level names of everything else imported.
+    """
+    tree = ast.parse((_PACKAGE / f"{name}.py").read_text())
+    local, external = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                if node.module:
+                    local.add(node.module.split(".")[0])
+            elif node.module:
+                external.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                external.add(alias.name.split(".")[0])
+    return local, external
+
+
+def _reachable(name, seen=None):
+    """Every sibling module reachable from *name*, and every external import."""
+    seen = set() if seen is None else seen
+    if name in seen:
+        return seen, set()
+    seen.add(name)
+    local, external = _module_imports(name)
+    for sibling in local:
+        seen, more = _reachable(sibling, seen)
+        external |= more
+    return seen, external
+
+
+def _package_modules():
+    return sorted(path.stem for path in _PACKAGE.glob("tools_*.py"))
+
+
+@pytest.mark.parametrize("name", _package_modules())
+def test_no_module_imports_itself_in_a_cycle(name):
+    """The intra-package import graph must stay acyclic.
+
+    A cycle here does not fail at import time in every order, only in some, so
+    it shows up as an ImportError that depends on which module the user
+    happened to import first.
+    """
+    local, _ = _module_imports(name)
+
+    for sibling in local:
+        reachable, _ = _reachable(sibling)
+        assert name not in reachable, f"{name} <-> {sibling} import cycle"
+
+
+@pytest.mark.parametrize("name", sorted(_PLOT_FREE))
+def test_the_plot_free_modules_stay_plot_free(name):
+    if not (_PACKAGE / f"{name}.py").exists():
+        pytest.skip(f"{name} does not exist yet")
+
+    _, external = _reachable(name)
+
+    assert "matplotlib" not in external
 
 
 def test_version_is_a_string():
