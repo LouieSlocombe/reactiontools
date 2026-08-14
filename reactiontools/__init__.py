@@ -1,6 +1,6 @@
 """Tools for transition-state, NEB and metadynamics calculations.
 
-The package is organised into nine modules, all of which are re-exported here:
+The package is organised into ten modules, all of which are re-exported here:
 
 ``tools_reaction``
     Build, optimise and post-process nudged elastic band (NEB) paths, either
@@ -25,6 +25,10 @@ The package is organised into nine modules, all of which are re-exported here:
     Turn a steered-MD trajectory into that reference path, by picking frames
     evenly spaced along a collective variable, and size the ``LAMBDA`` it
     should be biased with.
+``tools_cv``
+    Collective variables for proton transfer -- one or two transfers, a wobble
+    base pair's hydrogen-bond network, or progress along a reference path --
+    and the PLUMED input that biases them.
 ``tools_plumed``
     Prepare PLUMED input, bias an ASE dynamics run with it, and turn the
     metadynamics hills that come out into a free-energy surface.
@@ -57,6 +61,19 @@ to ORCA, which is licensed separately and installed by hand; see
 ``build_tools/README.md``. Everything else works without any of them.
 """
 
+from .tools_cv import (as_positions,
+                       plumed_input_1pt,
+                       plumed_input_2pt_1d,
+                       plumed_input_2pt_2d,
+                       plumed_input_neb_path,
+                       plumed_input_neb_path_wob,
+                       plumed_input_steered,
+                       plumed_input_steered_pt,
+                       plumed_input_wob_1,
+                       plumed_input_wob_2,
+                       plumed_input_wob_3,
+                       plumed_input_wob_4,
+                       switching_value)
 from .tools_fes import (FES,
                         FESSummary,
                         PlumedData,
@@ -210,6 +227,20 @@ __all__ = [
     "run_opes_fes",
     "run_sum_hills",
     "sum_hills_files",
+    # tools_cv
+    "as_positions",
+    "plumed_input_1pt",
+    "plumed_input_2pt_1d",
+    "plumed_input_2pt_2d",
+    "plumed_input_neb_path",
+    "plumed_input_neb_path_wob",
+    "plumed_input_steered",
+    "plumed_input_steered_pt",
+    "plumed_input_wob_1",
+    "plumed_input_wob_2",
+    "plumed_input_wob_3",
+    "plumed_input_wob_4",
+    "switching_value",
     # tools_fes
     "FES",
     "FESSummary",
