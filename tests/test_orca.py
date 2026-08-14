@@ -19,7 +19,12 @@ from ase.io import read
 
 from reactiontools import (orca_calc_preset,
                            orca_calculate_goat,
-                           orca_optimise_atoms)
+                           orca_optimise_atoms,
+                           orca_preset_ccsd_gold,
+                           orca_preset_dft_cheap,
+                           orca_preset_dft_gold,
+                           orca_preset_mp2_gold,
+                           orca_preset_xtb)
 
 # Skip rather than fail: ORCA is licensed separately and installed by hand, so
 # a machine without it is the normal case, not a broken one.
@@ -112,3 +117,59 @@ def test_orca_calc_preset_builds_a_qmmm_region():
 
     assert calc.parameters["orcasimpleinput"].startswith("QM/XTB2 ")
     assert "%QMMM QMATOMS {0:5} END END" in calc.parameters["orcablocks"]
+
+
+class TestPresets:
+    """The ``orca_preset_*`` dictionaries, splatted into orca_calc_preset.
+
+    Like the tests above these are pure string assembly, so they run without
+    ORCA. They pin the level of theory each preset names, which is the whole
+    point of having them: a preset that quietly changed functional would
+    change every result taken with it.
+    """
+
+    def test_dft_cheap_is_blyp_in_the_gas_phase(self):
+        calc = orca_calc_preset(orca_path="/nonexistent/orca",
+                                **orca_preset_dft_cheap)
+
+        assert calc.parameters["orcasimpleinput"].split() == [
+            "BLYP", "6-31+G(d,p)", "EnGrad"]
+        assert "SMD" not in calc.parameters["orcablocks"]
+
+    def test_dft_gold_is_b3lyp_with_d4_in_water(self):
+        calc = orca_calc_preset(orca_path="/nonexistent/orca",
+                                **orca_preset_dft_gold)
+
+        assert calc.parameters["orcasimpleinput"].split() == [
+            "B3LYP", "D4", "DEF2-SVP", "EnGrad"]
+        assert 'SMDSOLVENT "WATER"' in calc.parameters["orcablocks"]
+
+    def test_xtb_names_the_method_and_takes_no_basis(self):
+        calc = orca_calc_preset(orca_path="/nonexistent/orca",
+                                **orca_preset_xtb)
+
+        assert calc.parameters["orcasimpleinput"].split() == ["XTB2", "EnGrad"]
+
+    def test_mp2_gold_uses_the_dlpno_approximation_and_an_aux_basis(self):
+        calc = orca_calc_preset(orca_path="/nonexistent/orca",
+                                **orca_preset_mp2_gold)
+
+        assert calc.parameters["orcasimpleinput"].split() == [
+            "DLPNO-MP2", "DEF2-TZVPP", "DEF2-TZVPP/C", "EnGrad"]
+
+    def test_ccsd_gold_is_canonical_rather_than_dlpno(self):
+        """``'CCSD(T)'`` is passed through as an ORCA keyword, unlike
+        ``calc_type='CCSD'`` which builds the DLPNO approximation."""
+        calc = orca_calc_preset(orca_path="/nonexistent/orca",
+                                **orca_preset_ccsd_gold)
+
+        assert calc.parameters["orcasimpleinput"].split() == [
+            "CCSD(T)", "DEF2-TZVPP", "EnGrad"]
+        assert "DLPNO" not in calc.parameters["orcasimpleinput"]
+
+    def test_a_keyword_after_the_splat_overrides_the_preset(self):
+        calc = orca_calc_preset(orca_path="/nonexistent/orca",
+                                **orca_preset_dft_cheap,
+                                n_procs=8)
+
+        assert "%pal nprocs 8 end" in calc.parameters["orcablocks"]

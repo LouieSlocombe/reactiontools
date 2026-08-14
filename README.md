@@ -709,14 +709,41 @@ Needs an ORCA install; see the dependency table above.
 | --- | --- |
 | `orca_calc_preset(calc_type='DFT', xc='r2SCAN-3c', charge=0, multiplicity=1, ...)` | Build an ASE ORCA calculator from presets for DFT, MP2, CCSD(T) or QM/XTB2, without hand-writing ORCA input. Drop the result into any function that takes a `calc`. |
 | `orca_optimise_atoms(atoms, xc='r2SCAN-3c', tight_opt=True, ...)` | Relax a geometry with ORCA's own optimiser rather than ASE's, for molecules that BFGS in Cartesians struggles with. |
-| `orca_calculate_goat(atoms, charge=0, multiplicity=1, n_procs=1)` | Run a GOAT conformer search, returning `(conformers, DataFrame)` of energies and populations. |
+| `orca_calculate_goat(atoms, charge=0, multiplicity=1, n_procs=1, method='XTB')` | Run a GOAT conformer search, returning `(conformers, DataFrame)` of energies and populations. |
 
 `f_solv` and `f_disp` take either `True` for the default (SMD water, D4) or a
 string naming the solvent or dispersion keyword directly.
 
 Worth running `orca_calculate_goat` before building a band: a NEB between two
 arbitrary conformers explores the conformational change as well as the
-reaction, and the barrier that comes back is not the one you wanted.
+reaction, and the barrier that comes back is not the one you wanted. It
+searches at `method='XTB'` by default, because GOAT runs many optimisations
+and the method has to be a cheap one.
+
+#### Presets
+
+Five dictionaries name levels of theory worth reaching for by habit. Splat one
+into `orca_calc_preset`, and override anything on top of it — later keywords
+win:
+
+```python
+from reactiontools import orca_calc_preset, orca_preset_dft_gold
+
+calc = orca_calc_preset(**orca_preset_dft_gold, n_procs=8)
+```
+
+| Preset | Level of theory |
+| --- | --- |
+| `orca_preset_dft_cheap` | BLYP/6-31+G(d,p), gas phase. A first look, or the many single points of a scan. |
+| `orca_preset_dft_gold` | B3LYP/def2-SVP with D4 dispersion, in implicit water. |
+| `orca_preset_xtb` | GFN2-xTB. Fast enough to drive a NEB with, so the usual choice for a first band. |
+| `orca_preset_mp2_gold` | DLPNO-MP2/def2-TZVPP in implicit water. |
+| `orca_preset_ccsd_gold` | CCSD(T)/def2-TZVPP in implicit water, the reference to judge the others against. |
+
+`orca_preset_ccsd_gold` sets `calc_type='CCSD(T)'`, which is passed straight
+through to ORCA and so runs *canonical* CCSD(T). Pass `calc_type='CCSD'`
+instead for the linear-scaling `DLPNO-CCSD(T)` approximation, which is the only
+tractable option beyond a handful of atoms.
 
 ### `tools_geometry` — building product end states
 

@@ -8,10 +8,11 @@ has to be put on the machine by hand; the functions here find it through the
 :func:`orca_calc_preset` is the entry point: it builds an ASE calculator from a
 handful of presets, so a DFT, MP2, CCSD(T) or QM/XTB2 job can be set up without
 hand-writing ORCA's input syntax. That calculator drops straight into the
-reaction-path functions in :mod:`reactiontools.tools_reaction`. The other two
-functions run ORCA's own drivers instead of ASE's: :func:`orca_optimise_atoms`
-for a geometry optimisation and :func:`orca_calculate_goat` for a GOAT
-conformer search.
+reaction-path functions in :mod:`reactiontools.tools_reaction`. The
+``orca_preset_*`` dictionaries below name a few levels of theory worth reaching
+for by habit, and are splatted into it. The other two functions run ORCA's own
+drivers instead of ASE's: :func:`orca_optimise_atoms` for a geometry
+optimisation and :func:`orca_calculate_goat` for a GOAT conformer search.
 """
 
 import os
@@ -161,6 +162,87 @@ def orca_calc_preset(orca_path=None,
     )
 
 
+# Ready-made argument sets for :func:`orca_calc_preset`, splatted into it:
+# ``orca_calc_preset(**orca_preset_dft_gold)``. They name the levels of theory
+# worth reaching for by habit rather than by deliberation, so that a script
+# says which one it wanted instead of spelling out a functional and a basis.
+# Override anything on top of a preset by passing it as a keyword after the
+# splat, since later keywords win: ``orca_calc_preset(**orca_preset_dft_gold,
+# n_procs=8)``.
+
+#: Cheap DFT: BLYP/6-31+G(d,p), gas phase, no dispersion. For a first look at
+#: a structure, or for the many single points of a scan.
+orca_preset_dft_cheap = {
+    'calc_type': 'DFT',
+    'xc': 'BLYP',
+    'basis_set': '6-31+G(d,p)',
+    'f_disp': False,
+    'f_solv': False,
+    'atom_list': None,
+    'calc_extra': None,
+    'scf_option': None
+}
+
+#: Production DFT: B3LYP/def2-SVP with D4 dispersion in implicit water.
+#: ``f_disp``/``f_solv`` are ``True`` rather than named, which
+#: :func:`orca_calc_preset` reads as ``D4`` and ``WATER``; pass a string
+#: instead for a different solvent or dispersion correction.
+orca_preset_dft_gold = {
+    'calc_type': 'DFT',
+    'xc': 'B3LYP',
+    'basis_set': 'DEF2-SVP',
+    'f_disp': True,
+    'f_solv': True,
+    'atom_list': None,
+    'calc_extra': None,
+    'scf_option': None
+}
+
+#: GFN2-xTB: a semi-empirical tight-binding method, orders of magnitude
+#: cheaper than DFT. Fast enough to drive a NEB with, which is what makes it
+#: the usual choice for a first band before refining at a higher level.
+orca_preset_xtb = {
+    'calc_type': 'XTB2',
+    'xc': '',
+    'basis_set': '',
+    'f_disp': False,
+    'f_solv': False,
+    'atom_list': None,
+    'calc_extra': None,
+    'scf_option': None
+}
+
+#: DLPNO-MP2/def2-TZVPP in implicit water, for a correlated energy on a
+#: geometry optimised more cheaply.
+orca_preset_mp2_gold = {
+    'calc_type': 'MP2',
+    'xc': '',
+    'basis_set': 'DEF2-TZVPP',
+    'f_disp': False,
+    'f_solv': True,
+    'atom_list': None,
+    'calc_extra': None,
+    'scf_option': None
+}
+
+#: CCSD(T)/def2-TZVPP in implicit water, the reference energy to judge the
+#: others against. Note the ``calc_type`` is the literal ORCA keyword
+#: ``'CCSD(T)'``, which :func:`orca_calc_preset` passes straight through, and
+#: so runs *canonical* CCSD(T). Pass ``calc_type='CCSD'`` instead for the
+#: linear-scaling ``DLPNO-CCSD(T)`` approximation, which is the only tractable
+#: option beyond a handful of atoms.
+orca_preset_ccsd_gold = {
+    'calc_type': 'CCSD(T)',
+    'xc': '',
+    'basis_set': 'DEF2-TZVPP',
+    'f_disp': False,
+    'f_solv': True,
+    'atom_list': None,
+    'calc_extra': None,
+    'scf_option': None
+}
+
+
 def orca_optimise_atoms(atoms,
                         charge=0,
                         multiplicity=1,
@@ -304,7 +386,8 @@ def orca_calculate_goat(atoms,
                         charge=0,
                         multiplicity=1,
                         orca_path=None,
-                        n_procs=1):
+                        n_procs=1,
+                        method='XTB'):
     """Run ORCA's GOAT conformer search and collect the resulting ensemble.
 
     Worth running before a band is built: a NEB between two arbitrary
@@ -324,6 +407,12 @@ def orca_calculate_goat(atoms,
         environment variable.
     n_procs : int, optional
         Number of MPI processes requested via ``%pal``.
+    method : str, optional
+        Level of theory GOAT explores at, appended to the ``GOAT`` keyword.
+        The default ``'XTB'`` is what makes the search affordable: GOAT runs
+        many optimisations, so the method has to be a cheap one. Anything
+        ORCA accepts as a method keyword works; ``''`` leaves the input line
+        as a bare ``GOAT``, which falls back to ORCA's own default.
 
     Returns
     -------
@@ -345,7 +434,7 @@ def orca_calculate_goat(atoms,
             charge=charge,
             mult=multiplicity,
             directory=temp_dir,
-            orcasimpleinput='GOAT',
+            orcasimpleinput=f'GOAT {method}'.strip(),
             orcablocks=inpt_procs
         )
         atoms.calc = calc

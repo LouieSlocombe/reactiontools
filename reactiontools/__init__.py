@@ -10,8 +10,9 @@ The package is organised into six modules, all of which are re-exported here:
     away from it, and take quick geodesic guesses at a path or a transition
     state.
 ``tools_orca``
-    Build ASE ORCA calculators from a few presets, optimise a geometry with
-    ORCA's own driver, and run a GOAT conformer search.
+    Build ASE ORCA calculators from a few presets -- named levels of theory in
+    the ``orca_preset_*`` dictionaries -- optimise a geometry with ORCA's own
+    driver, and run a GOAT conformer search.
 ``tools_geometry``
     Work out which atoms make up each half of a stacked dimer and swap those
     halves over, or move a hydrogen across a hydrogen bond, to build a product
@@ -69,8 +70,13 @@ from .tools_geometry import (bonded_cluster_indices_no_anchor_hub,
                              get_best_flip_and_face_bases,
                              swap_bonding_configuration)
 from .tools_orca import (orca_calc_preset,
+                         orca_calculate_goat,
                          orca_optimise_atoms,
-                         orca_calculate_goat)
+                         orca_preset_ccsd_gold,
+                         orca_preset_dft_cheap,
+                         orca_preset_dft_gold,
+                         orca_preset_mp2_gold,
+                         orca_preset_xtb)
 from .tools_plotting import (show_atoms,
                              plot_images,
                              plot_neb,
@@ -140,6 +146,11 @@ __all__ = [
     "orca_calc_preset",
     "orca_optimise_atoms",
     "orca_calculate_goat",
+    "orca_preset_dft_cheap",
+    "orca_preset_dft_gold",
+    "orca_preset_xtb",
+    "orca_preset_mp2_gold",
+    "orca_preset_ccsd_gold",
     # tools_geometry
     "bonded_cluster_indices_no_anchor_hub",
     "get_dimer_bonded_cluster_indices",
