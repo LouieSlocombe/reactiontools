@@ -43,7 +43,9 @@ module.
 """
 
 import os
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -65,6 +67,8 @@ __all__ = [
     "as_fes",
     "convert_energy",
     "fes_convergence",
+    "fes_series_files",
+    "load_fes_series",
     "plot_fes",
     "plot_fes_1d",
     "plot_fes_2d",
@@ -601,6 +605,96 @@ def as_fes(source,
         fes.energy = np.where(fes.energy > max_energy, np.nan, fes.energy)
 
     return fes
+
+
+def fes_series_files(directory=".", pattern=r"^fes_?(\d+)\.dat$"):
+    r"""Find the numbered free-energy surfaces in a directory, in index order.
+
+    The counterpart of :func:`~reactiontools.tools_plumed.sum_hills_files` for
+    the other two ways a convergence series gets written: the bundled OPES
+    ``FES_from_*`` scripts, and any run that numbered its own output. Both
+    produce ``fes_1.dat``, ``fes2.dat`` and the like, which sorting by name
+    puts in the wrong order the moment there are ten of them -- and for a
+    convergence series the order is the entire point.
+
+    Parameters
+    ----------
+    directory : str or path-like, optional
+        Directory to search.
+    pattern : str, optional
+        Regular expression matched against each file name, case-insensitively.
+        Its first capture group, if present, is the sort key. The default
+        matches ``fes_<n>.dat`` and ``fes<n>.dat``.
+
+    Returns
+    -------
+    list of pathlib.Path
+        Matching files, ordered by the index they carry, ready to hand to
+        :func:`plot_fes_1d` or :func:`fes_convergence`.
+
+    See Also
+    --------
+    reactiontools.tools_plumed.sum_hills_files : For a strided ``sum_hills``
+        run, which numbers its files differently again.
+
+    Examples
+    --------
+    A convergence series written by the OPES scripts::
+
+        plot_fes_1d(fes_series_files("."), source_unit="kJ/mol")
+    """
+    regex = re.compile(pattern, re.IGNORECASE)
+    directory = Path(directory)
+
+    matches = []
+    for path in directory.iterdir():
+        found = regex.match(path.name)
+        if found:
+            # Sort on the captured index when the pattern provides one.
+            key = int(found.group(1)) if found.groups() else path.name
+            matches.append((key, path))
+
+    return [path for _, path in sorted(matches, key=lambda item: item[0])]
+
+
+def load_fes_series(directory=".",
+                    energy_unit="eV",
+                    source_unit=DEFAULT_ENERGY_UNIT,
+                    pattern=r"^fes_?(\d+)\.dat$",
+                    verbose=True):
+    r"""Load the numbered free-energy surfaces in a directory, in index order.
+
+    :func:`fes_series_files` followed by :func:`as_fes` on each, so 1-D and
+    2-D surfaces are both handled and the result goes straight to
+    :func:`plot_fes_1d`, :func:`plot_fes_2d` or :func:`fes_convergence`.
+
+    Parameters
+    ----------
+    directory : str or path-like, optional
+        Directory containing the surfaces.
+    energy_unit : str, optional
+        Unit to convert the free energies to. Default is ``"eV"``.
+    source_unit : str, optional
+        Unit the files are written in. The default is kJ/mol, which is what
+        PLUMED writes when driven from OpenMM; a run driven from ASE through
+        :data:`~reactiontools.tools_plumed.PLUMED_ASE_UNITS` writes eV.
+    pattern : str, optional
+        Regular expression selecting the files; see :func:`fes_series_files`.
+    verbose : bool, optional
+        Report each file as it is loaded.
+
+    Returns
+    -------
+    list of FES
+        One surface per file, ordered by file index.
+    """
+    surfaces = []
+    for path in fes_series_files(directory, pattern=pattern):
+        fes = as_fes(path, energy_unit=energy_unit, source_unit=source_unit)
+        if verbose:
+            print(f"Loading {path} with {fes.ndim} CV(s)", flush=True)
+        surfaces.append(fes)
+    return surfaces
 
 
 def _as_fes_list(sources, **kwargs):

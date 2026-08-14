@@ -13,6 +13,8 @@ from reactiontools.tools_fes import (FES,
                                      as_fes,
                                      convert_energy,
                                      fes_convergence,
+                                     fes_series_files,
+                                     load_fes_series,
                                      plot_fes_convergence,
                                      summarise_fes,
                                      plot_fes,
@@ -674,3 +676,75 @@ class TestPlotFesConvergence:
                              filename=str(tmp_path / "conv.png"))
 
         assert (tmp_path / "conv.png").exists()
+
+
+class TestFesSeriesFiles:
+    """Finding a numbered convergence series, in the order it was written."""
+
+    def _write_series(self, directory, names):
+        for name in names:
+            path = directory / name
+            np.savetxt(path, np.column_stack([np.linspace(-1, 1, 5),
+                                              np.zeros(5)]))
+
+    def test_files_come_back_in_index_order_not_alphabetical(self, tmp_path):
+        # fes_10 sorts before fes_2 by name, which scrambles a convergence
+        # series -- where the order is the entire point.
+        self._write_series(tmp_path, ["fes_1.dat", "fes_2.dat", "fes_10.dat"])
+
+        found = fes_series_files(tmp_path)
+
+        assert [path.name for path in found] == ["fes_1.dat", "fes_2.dat", "fes_10.dat"]
+
+    def test_the_underscore_is_optional(self, tmp_path):
+        self._write_series(tmp_path, ["fes1.dat", "fes2.dat"])
+
+        assert len(fes_series_files(tmp_path)) == 2
+
+    def test_matching_is_case_insensitive(self, tmp_path):
+        self._write_series(tmp_path, ["FES1.dat"])
+
+        assert len(fes_series_files(tmp_path)) == 1
+
+    def test_unnumbered_and_unrelated_files_are_left_out(self, tmp_path):
+        self._write_series(tmp_path, ["fes_1.dat", "fes.dat", "COLVAR", "HILLS"])
+
+        assert [path.name for path in fes_series_files(tmp_path)] == ["fes_1.dat"]
+
+    def test_an_empty_directory_gives_an_empty_list(self, tmp_path):
+        assert fes_series_files(tmp_path) == []
+
+    def test_a_custom_pattern_is_honoured(self, tmp_path):
+        self._write_series(tmp_path, ["surface_3.dat", "surface_1.dat"])
+
+        found = fes_series_files(tmp_path, pattern=r"^surface_(\d+)\.dat$")
+
+        assert [path.name for path in found] == ["surface_1.dat", "surface_3.dat"]
+
+
+class TestLoadFesSeries:
+    def test_it_loads_every_surface_in_order(self, tmp_path):
+        for i in (1, 2, 10):
+            np.savetxt(tmp_path / f"fes_{i}.dat",
+                       np.column_stack([np.linspace(-1, 1, 5),
+                                        np.full(5, float(i))]))
+
+        series = load_fes_series(tmp_path, verbose=False)
+
+        assert len(series) == 3
+        assert all(fes.ndim == 1 for fes in series)
+
+    def test_energies_are_converted_out_of_the_source_unit(self, tmp_path):
+        # 1 eV is 96.485 kJ/mol; written in kJ/mol and asked for in eV, the
+        # spread of the surface should come back divided by that.
+        np.savetxt(tmp_path / "fes_1.dat",
+                   np.column_stack([np.linspace(-1, 1, 5),
+                                    np.array([96.48533212331, 0, 0, 0, 0])]))
+
+        fes = load_fes_series(tmp_path, energy_unit="eV",
+                              source_unit="kJ/mol", verbose=False)[0]
+
+        assert np.nanmax(fes.energy) == pytest.approx(1.0)
+
+    def test_an_empty_directory_gives_an_empty_list(self, tmp_path):
+        assert load_fes_series(tmp_path, verbose=False) == []
