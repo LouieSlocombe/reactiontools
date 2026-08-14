@@ -22,9 +22,8 @@ Every ``optimise_*`` function records whether it reached its force criterion in
 :class:`ConvergenceWarning` when it did not; pass ``raise_on_unconverged=True``
 for a :class:`ConvergenceError` instead.
 
-Sella is an optional dependency needed only by the saddle-point searches,
-:func:`optimise_ts` and :func:`optimise_irc`. Install it with
-``pip install 'reactiontools[ts]'``; everything else here works without it.
+Sella is installed with the package and imported on demand by the
+saddle-point searches, :func:`optimise_ts` and :func:`optimise_irc`.
 """
 
 import copy
@@ -45,8 +44,10 @@ from ase.parallel import world
 from ase.vibrations import Vibrations
 from scipy.interpolate import CubicSpline
 
-_SELLA_HINT = ("{name} needs sella, which is not installed. "
-               "Install it with `pip install 'reactiontools[ts]'`.")
+_SELLA_HINT = (
+    "{name} needs sella, which is not installed. "
+    "Reinstall reactiontools with its dependencies."
+)
 
 
 class ConvergenceWarning(UserWarning):
@@ -108,10 +109,12 @@ def _check_converged(converged, what, fmax, steps, raise_on_unconverged):
     if converged:
         return True
 
-    message = (f"{what} hit its {steps}-step limit without reaching "
-               f"fmax={fmax} eV/Å, so the result is not a converged "
-               f"stationary point. Raise steps, loosen fmax, or start from a "
-               f"better guess.")
+    message = (
+        f"{what} hit its {steps}-step limit without reaching "
+        f"fmax={fmax} eV/Å, so the result is not a converged "
+        f"stationary point. Raise steps, loosen fmax, or start from a "
+        f"better guess."
+    )
     if raise_on_unconverged:
         raise ConvergenceError(message)
     # stacklevel=3: past this helper and past the optimise_* function that
@@ -123,9 +126,8 @@ def _check_converged(converged, what, fmax, steps, raise_on_unconverged):
 def _import_sella(name):
     """Import sella on demand, with an install hint when it is missing.
 
-    Sella is an optional dependency: it is only needed by the saddle-point
-    searches, so importing it at module scope would make the whole package
-    unimportable for the NEB-only workflows that are the common case.
+    Importing Sella only for saddle-point searches keeps package startup
+    lightweight.
 
     Parameters
     ----------
@@ -163,7 +165,10 @@ def get_neb_path(images):
         Cumulative distance coordinate starting at zero.
     """
     positions = [atoms.positions for atoms in images]
-    path = [0] + [np.linalg.norm(positions[i + 1] - positions[i]) for i in range(len(positions) - 1)]
+    path = [0] + [
+        np.linalg.norm(positions[i + 1] - positions[i])
+        for i in range(len(positions) - 1)
+    ]
     return np.cumsum(path)
 
 
@@ -237,19 +242,22 @@ def resample_path(path, n_resample):
     return irc_resampled
 
 
-def optimise_geom(atoms, calc,
-                  fmax=0.01,
-                  steps=1000,
-                  opti_traj='opti.traj',
-                  use_socket=False,
-                  socket_port=None,
-                  socket_unixsocket=None,
-                  socket_log=None,
-                  raise_on_unconverged=False,
-                  optimiser=BFGS,
-                  logfile='-',
-                  keep_traj=False,
-                  _what="Geometry optimisation"):
+def optimise_geom(
+    atoms,
+    calc,
+    fmax=0.01,
+    steps=1000,
+    opti_traj="opti.traj",
+    use_socket=False,
+    socket_port=None,
+    socket_unixsocket=None,
+    socket_log=None,
+    raise_on_unconverged=False,
+    optimiser=BFGS,
+    logfile="-",
+    keep_traj=False,
+    _what="Geometry optimisation",
+):
     """Relax a structure and return the final image.
 
     Whether the optimiser actually converged is recorded in
@@ -319,38 +327,43 @@ def optimise_geom(atoms, calc,
     """
     atoms = atoms.copy()
     if use_socket:
-        context = SocketIOCalculator(calc, port=socket_port,
-                                     unixsocket=socket_unixsocket,
-                                     log=socket_log)
+        context = SocketIOCalculator(
+            calc, port=socket_port, unixsocket=socket_unixsocket, log=socket_log
+        )
     else:
         context = nullcontext(calc)
     with context as live_calc:
         atoms.calc = live_calc
-        converged = optimiser(atoms,
-                              trajectory=opti_traj,
-                              logfile=logfile).run(fmax=fmax, steps=steps)
+        converged = optimiser(atoms, trajectory=opti_traj, logfile=logfile).run(
+            fmax=fmax, steps=steps
+        )
     atoms = read(opti_traj, index=-1)
     if not keep_traj:
         Path(opti_traj).unlink()
     atoms.calc = calc
     atoms.info["converged"] = _check_converged(
-        converged, _what, fmax, steps, raise_on_unconverged)
+        converged, _what, fmax, steps, raise_on_unconverged
+    )
     return atoms
 
 
-def optimise_reactant_product(reactant, product, calc,
-                              fmax=0.01,
-                              steps=1000,
-                              reactant_opti='reactant_opti.traj',
-                              product_opti='product_opti.traj',
-                              use_socket=False,
-                              socket_port=None,
-                              socket_unixsocket=None,
-                              socket_log=None,
-                              raise_on_unconverged=False,
-                              optimiser=BFGS,
-                              logfile='-',
-                              keep_traj=False):
+def optimise_reactant_product(
+    reactant,
+    product,
+    calc,
+    fmax=0.01,
+    steps=1000,
+    reactant_opti="reactant_opti.traj",
+    product_opti="product_opti.traj",
+    use_socket=False,
+    socket_port=None,
+    socket_unixsocket=None,
+    socket_log=None,
+    raise_on_unconverged=False,
+    optimiser=BFGS,
+    logfile="-",
+    keep_traj=False,
+):
     """Optimise reactant and product structures independently.
 
     Each endpoint carries its own ``info["converged"]``, and the two are
@@ -397,46 +410,55 @@ def optimise_reactant_product(reactant, product, calc,
         If either endpoint did not converge and ``raise_on_unconverged`` is
         True.
     """
-    print('Optimising reactant...', flush=True)
-    reactant = optimise_geom(reactant, calc,
-                             fmax=fmax,
-                             steps=steps,
-                             opti_traj=reactant_opti,
-                             use_socket=use_socket,
-                             socket_port=socket_port,
-                             socket_unixsocket=socket_unixsocket,
-                             socket_log=socket_log,
-                             raise_on_unconverged=raise_on_unconverged,
-                             optimiser=optimiser,
-                             logfile=logfile,
-                             keep_traj=keep_traj,
-                             _what="Reactant optimisation")
+    print("Optimising reactant...", flush=True)
+    reactant = optimise_geom(
+        reactant,
+        calc,
+        fmax=fmax,
+        steps=steps,
+        opti_traj=reactant_opti,
+        use_socket=use_socket,
+        socket_port=socket_port,
+        socket_unixsocket=socket_unixsocket,
+        socket_log=socket_log,
+        raise_on_unconverged=raise_on_unconverged,
+        optimiser=optimiser,
+        logfile=logfile,
+        keep_traj=keep_traj,
+        _what="Reactant optimisation",
+    )
 
-    print('Optimising product...', flush=True)
-    product = optimise_geom(product, calc,
-                            fmax=fmax,
-                            steps=steps,
-                            opti_traj=product_opti,
-                            use_socket=use_socket,
-                            socket_port=socket_port,
-                            socket_unixsocket=socket_unixsocket,
-                            socket_log=socket_log,
-                            raise_on_unconverged=raise_on_unconverged,
-                            optimiser=optimiser,
-                            logfile=logfile,
-                            keep_traj=keep_traj,
-                            _what="Product optimisation")
+    print("Optimising product...", flush=True)
+    product = optimise_geom(
+        product,
+        calc,
+        fmax=fmax,
+        steps=steps,
+        opti_traj=product_opti,
+        use_socket=use_socket,
+        socket_port=socket_port,
+        socket_unixsocket=socket_unixsocket,
+        socket_log=socket_log,
+        raise_on_unconverged=raise_on_unconverged,
+        optimiser=optimiser,
+        logfile=logfile,
+        keep_traj=keep_traj,
+        _what="Product optimisation",
+    )
     return reactant, product
 
 
-def _build_band(reactant, product,
-                n_images,
-                climb,
-                rm_ro_trans,
-                geo_int,
-                k,
-                parallel=False,
-                world=None):
+def _build_band(
+    reactant,
+    product,
+    n_images,
+    climb,
+    rm_ro_trans,
+    geo_int,
+    k,
+    parallel=False,
+    world=None,
+):
     """Build an interpolated NEB whose images carry no calculators yet.
 
     Shared by :func:`prepare_neb` and :func:`prepare_parallel_neb`, which
@@ -469,20 +491,20 @@ def _build_band(reactant, product,
     ase.mep.NEB
         Interpolated band with ``image.calc`` still ``None`` throughout.
     """
-    neb_images = ([reactant]
-                  + [reactant.copy() for _ in range(n_images - 2)]
-                  + [product])
+    neb_images = [reactant] + [reactant.copy() for _ in range(n_images - 2)] + [product]
 
     if geo_int:
         neb_images = gi.geodesic_interpolate(neb_images, n_images=n_images)
 
-    neb = NEB(neb_images,
-              climb=climb,
-              remove_rotation_and_translation=rm_ro_trans,
-              k=k,
-              method='improvedtangent',
-              parallel=parallel,
-              world=world)
+    neb = NEB(
+        neb_images,
+        climb=climb,
+        remove_rotation_and_translation=rm_ro_trans,
+        k=k,
+        method="improvedtangent",
+        parallel=parallel,
+        world=world,
+    )
     if not geo_int:
         neb.interpolate()
         neb.interpolate("idpp")
@@ -515,17 +537,14 @@ def _validate_band(images):
     if len(images) < 3:
         raise ValueError(
             f"A band needs at least 3 images to leave an interior image to "
-            f"relax, got {len(images)}")
+            f"relax, got {len(images)}"
+        )
     return images
 
 
-def _band_from_images(images,
-                      n_images,
-                      climb,
-                      rm_ro_trans,
-                      k,
-                      parallel=False,
-                      world=None):
+def _band_from_images(
+    images, n_images, climb, rm_ro_trans, k, parallel=False, world=None
+):
     """Build a NEB from an existing band, interpolating nothing.
 
     The counterpart to :func:`_build_band`: the images are already where they
@@ -567,13 +586,15 @@ def _band_from_images(images,
         # than no answer.
         image.info.pop("converged", None)
 
-    return NEB(band,
-               climb=climb,
-               remove_rotation_and_translation=rm_ro_trans,
-               k=k,
-               method='improvedtangent',
-               parallel=parallel,
-               world=world)
+    return NEB(
+        band,
+        climb=climb,
+        remove_rotation_and_translation=rm_ro_trans,
+        k=k,
+        method="improvedtangent",
+        parallel=parallel,
+        world=world,
+    )
 
 
 def _attach_calculators(neb, calc):
@@ -603,14 +624,18 @@ def _attach_calculators(neb, calc):
     return neb
 
 
-def prepare_neb(reactant, product, calc,
-                n_images=5,
-                climb=True,
-                rm_ro_trans=True,
-                geo_int=True,
-                k=2.0,
-                parallel=False,
-                world=None):
+def prepare_neb(
+    reactant,
+    product,
+    calc,
+    n_images=5,
+    climb=True,
+    rm_ro_trans=True,
+    geo_int=True,
+    k=2.0,
+    parallel=False,
+    world=None,
+):
     """Build an ASE NEB object from reactant and product end states.
 
     Parameters
@@ -649,20 +674,30 @@ def prepare_neb(reactant, product, calc,
     ase.mep.NEB
         Configured NEB object.
     """
-    neb = _build_band(reactant, product,
-                      n_images, climb, rm_ro_trans, geo_int, k,
-                      parallel=parallel,
-                      world=world)
+    neb = _build_band(
+        reactant,
+        product,
+        n_images,
+        climb,
+        rm_ro_trans,
+        geo_int,
+        k,
+        parallel=parallel,
+        world=world,
+    )
     return _attach_calculators(neb, calc)
 
 
-def restart_neb(images, calc,
-                n_images=None,
-                climb=True,
-                rm_ro_trans=True,
-                k=2.0,
-                parallel=False,
-                world=None):
+def restart_neb(
+    images,
+    calc,
+    n_images=None,
+    climb=True,
+    rm_ro_trans=True,
+    k=2.0,
+    parallel=False,
+    world=None,
+):
     """Build a NEB from a band that has already been relaxed once.
 
     :func:`prepare_neb` interpolates a fresh band between two endpoints, which
@@ -734,19 +769,21 @@ def restart_neb(images, calc,
             neb = restart_neb(images, calc, climb=True, rm_ro_trans=False)
             images = optimise_neb(neb, fmax=0.05, steps=500)
     """
-    neb = _band_from_images(images, n_images, climb, rm_ro_trans, k,
-                            parallel=parallel,
-                            world=world)
+    neb = _band_from_images(
+        images, n_images, climb, rm_ro_trans, k, parallel=parallel, world=world
+    )
     return _attach_calculators(neb, calc)
 
 
-def optimise_neb(neb,
-                 fmax=0.01,
-                 steps=1000,
-                 ts_traj='ts.traj',
-                 raise_on_unconverged=False,
-                 optimiser=BFGS,
-                 logfile='-'):
+def optimise_neb(
+    neb,
+    fmax=0.01,
+    steps=1000,
+    ts_traj="ts.traj",
+    raise_on_unconverged=False,
+    optimiser=BFGS,
+    logfile="-",
+):
     """Optimise an NEB band and return the final trajectory images.
 
     A band that runs out of steps warns :class:`ConvergenceWarning` rather
@@ -790,12 +827,13 @@ def optimise_neb(neb,
         If the band did not converge and ``raise_on_unconverged`` is True.
     """
     n_images = len(neb.images)
-    converged = optimiser(neb,
-                          trajectory=ts_traj,
-                          logfile=logfile).run(fmax=fmax, steps=steps)
+    converged = optimiser(neb, trajectory=ts_traj, logfile=logfile).run(
+        fmax=fmax, steps=steps
+    )
     images = read(ts_traj, index=f"-{n_images}:")
-    converged = _check_converged(converged, "NEB optimisation", fmax, steps,
-                                 raise_on_unconverged)
+    converged = _check_converged(
+        converged, "NEB optimisation", fmax, steps, raise_on_unconverged
+    )
     for image in images:
         image.info["converged"] = converged
     return images
@@ -823,8 +861,7 @@ class _FixedEnergy(Calculator):
         super().__init__()
         self.energy = energy
 
-    def calculate(self, atoms=None, properties=("energy",),
-                  system_changes=None):
+    def calculate(self, atoms=None, properties=("energy",), system_changes=None):
         super().calculate(atoms, properties, system_changes or [])
         self.results = {"energy": self.energy, "free_energy": self.energy}
 
@@ -860,12 +897,15 @@ def _cached_energy(atoms):
 
 
 @contextmanager
-def socket_calculators(n_calculators, make_calc=None,
-                       make_launcher=None,
-                       unixsocket=None,
-                       port=None,
-                       timeout=None,
-                       log=None):
+def socket_calculators(
+    n_calculators,
+    make_calc=None,
+    make_launcher=None,
+    unixsocket=None,
+    port=None,
+    timeout=None,
+    log=None,
+):
     """Open a pool of socket calculators, one per image.
 
     Each :class:`~ase.calculators.socketio.SocketIOCalculator` gets its own
@@ -932,14 +972,18 @@ def socket_calculators(n_calculators, make_calc=None,
     # fails to bind, the three already listening still have to be closed.
     with ExitStack() as stack:
         calculators = [
-            stack.enter_context(SocketIOCalculator(
-                calc=None if make_calc is None else make_calc(i),
-                launch_client=None if make_launcher is None else make_launcher(i),
-                unixsocket=None if unixsocket is None else f"{unixsocket}-{i}",
-                port=None if port is None else port + i,
-                timeout=timeout,
-                log=None if log is None else f"{log}-{i}.log"))
-            for i in range(n_calculators)]
+            stack.enter_context(
+                SocketIOCalculator(
+                    calc=None if make_calc is None else make_calc(i),
+                    launch_client=None if make_launcher is None else make_launcher(i),
+                    unixsocket=None if unixsocket is None else f"{unixsocket}-{i}",
+                    port=None if port is None else port + i,
+                    timeout=timeout,
+                    log=None if log is None else f"{log}-{i}.log",
+                )
+            )
+            for i in range(n_calculators)
+        ]
         yield calculators
 
 
@@ -965,7 +1009,8 @@ def _require_single_rank(name):
         raise RuntimeError(
             f"{name} parallelises over sockets within one process, but "
             f"{world.size} MPI ranks are running. Run it without mpirun and "
-            f"give the clients the ranks instead.")
+            f"give the clients the ranks instead."
+        )
 
 
 @contextmanager
@@ -995,8 +1040,7 @@ def _parallel_band(neb, energies, make_calc, socket_kwargs):
     ase.mep.NEB
         The band, wired up. The sockets close when the block exits.
     """
-    with socket_calculators(len(neb.images) - 2, make_calc,
-                            **socket_kwargs) as calcs:
+    with socket_calculators(len(neb.images) - 2, make_calc, **socket_kwargs) as calcs:
         for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
             if energy is None:
                 endpoint.calc = calcs[0]
@@ -1010,13 +1054,17 @@ def _parallel_band(neb, energies, make_calc, socket_kwargs):
 
 
 @contextmanager
-def prepare_parallel_neb(reactant, product, make_calc,
-                         n_images=5,
-                         climb=True,
-                         rm_ro_trans=True,
-                         geo_int=True,
-                         k=2.0,
-                         **socket_kwargs):
+def prepare_parallel_neb(
+    reactant,
+    product,
+    make_calc,
+    n_images=5,
+    climb=True,
+    rm_ro_trans=True,
+    geo_int=True,
+    k=2.0,
+    **socket_kwargs,
+):
     """Build a NEB that evaluates its images concurrently over sockets.
 
     The serial :func:`prepare_neb` walks the band one image at a time, so a
@@ -1099,28 +1147,39 @@ def prepare_parallel_neb(reactant, product, make_calc,
     if n_images - 2 < 1:
         raise ValueError(
             f"n_images must be at least 3 to leave an interior image to "
-            f"relax, got {n_images}")
+            f"relax, got {n_images}"
+        )
     _require_single_rank("prepare_parallel_neb")
 
     # Read the endpoint energies before copying: Atoms.copy() drops the
     # calculator, and with it the energy the endpoint optimisation left.
     energies = [_cached_energy(reactant), _cached_energy(product)]
 
-    neb = _build_band(reactant.copy(), product.copy(),
-                      n_images, climb, rm_ro_trans, geo_int, k,
-                      parallel=True)
+    neb = _build_band(
+        reactant.copy(),
+        product.copy(),
+        n_images,
+        climb,
+        rm_ro_trans,
+        geo_int,
+        k,
+        parallel=True,
+    )
 
     with _parallel_band(neb, energies, make_calc, socket_kwargs) as band:
         yield band
 
 
 @contextmanager
-def restart_parallel_neb(images, make_calc,
-                         n_images=None,
-                         climb=True,
-                         rm_ro_trans=True,
-                         k=2.0,
-                         **socket_kwargs):
+def restart_parallel_neb(
+    images,
+    make_calc,
+    n_images=None,
+    climb=True,
+    rm_ro_trans=True,
+    k=2.0,
+    **socket_kwargs,
+):
     """Continue an existing band over sockets, evaluating its images at once.
 
     :func:`restart_neb` for the case where the images are expensive enough to
@@ -1191,8 +1250,7 @@ def restart_parallel_neb(images, make_calc,
     # passes the endpoints through untouched, so these stay right either way.
     energies = [_cached_energy(images[0]), _cached_energy(images[-1])]
 
-    neb = _band_from_images(images, n_images, climb, rm_ro_trans, k,
-                            parallel=True)
+    neb = _band_from_images(images, n_images, climb, rm_ro_trans, k, parallel=True)
 
     with _parallel_band(neb, energies, make_calc, socket_kwargs) as band:
         yield band
@@ -1220,7 +1278,7 @@ def _get_energy(image, calc):
     """
     if image.calc is not None:
         try:
-            return image.calc.results['energy']
+            return image.calc.results["energy"]
         except (AttributeError, KeyError):
             pass
     image.calc = copy.deepcopy(calc)
@@ -1283,11 +1341,13 @@ class NebSummary:
 
     def __str__(self):
         """Report the barriers and the reaction energy, one per line."""
-        return (f"Barrier:         {self._ev(self.barrier)} eV\n"
-                f"Reverse barrier: {self._ev(self.reverse_barrier)} eV\n"
-                f"Reaction energy: {self._ev(self.reaction_energy)} eV\n"
-                f"TS image:        {self.ts_index} of "
-                f"{len(self.energies) - 1}")
+        return (
+            f"Barrier:         {self._ev(self.barrier)} eV\n"
+            f"Reverse barrier: {self._ev(self.reverse_barrier)} eV\n"
+            f"Reaction energy: {self._ev(self.reaction_energy)} eV\n"
+            f"TS image:        {self.ts_index} of "
+            f"{len(self.energies) - 1}"
+        )
 
 
 def summarise_neb(images, calc=None):
@@ -1338,11 +1398,13 @@ def summarise_neb(images, calc=None):
 
     energies = np.array([_get_energy(image, calc) for image in images])
     ts_index = int(np.argmax(energies))
-    return NebSummary(energies=energies,
-                      ts_index=ts_index,
-                      barrier=float(energies[ts_index] - energies[0]),
-                      reverse_barrier=float(energies[ts_index] - energies[-1]),
-                      reaction_energy=float(energies[-1] - energies[0]))
+    return NebSummary(
+        energies=energies,
+        ts_index=ts_index,
+        barrier=float(energies[ts_index] - energies[0]),
+        reverse_barrier=float(energies[ts_index] - energies[-1]),
+        reaction_energy=float(energies[-1] - energies[0]),
+    )
 
 
 def get_ts_image(neb_images, calc=None):
@@ -1372,14 +1434,17 @@ def get_ts_image(neb_images, calc=None):
     return neb_images[index]
 
 
-def optimise_ts(ts_image, calc,
-                fmax=0.01,
-                steps=1000,
-                eta=1e-4,
-                gamma=0.1,
-                sella_traj='sella.traj',
-                raise_on_unconverged=False,
-                logfile='-'):
+def optimise_ts(
+    ts_image,
+    calc,
+    fmax=0.01,
+    steps=1000,
+    eta=1e-4,
+    gamma=0.1,
+    sella_traj="sella.traj",
+    raise_on_unconverged=False,
+    logfile="-",
+):
     """Refine a transition-state guess to a true saddle point with Sella.
 
     A NEB band gets close to the saddle but rarely converges tightly onto it,
@@ -1431,37 +1496,39 @@ def optimise_ts(ts_image, calc,
     """
     Sella, _IRC = _import_sella("optimise_ts")
 
-    print('Running Sella TS search', flush=True)
+    print("Running Sella TS search", flush=True)
     ts_image = ts_image.copy()
     ts_image.calc = calc
 
-    print(f'Initial energy: {ts_image.get_potential_energy():.3} eV', flush=True)
-    print(f'Initial max force: {get_fmax(ts_image):.3} eV/A', flush=True)
+    print(f"Initial energy: {ts_image.get_potential_energy():.3} eV", flush=True)
+    print(f"Initial max force: {get_fmax(ts_image):.3} eV/A", flush=True)
 
-    sella_ts = Sella(ts_image,
-                     trajectory=sella_traj,
-                     logfile=logfile,
-                     eta=eta,
-                     gamma=gamma)
+    sella_ts = Sella(
+        ts_image, trajectory=sella_traj, logfile=logfile, eta=eta, gamma=gamma
+    )
     converged = sella_ts.run(fmax=fmax, steps=steps)
 
     ts = read(sella_traj, index=-1)
     ts.info["converged"] = _check_converged(
-        converged, "Sella TS search", fmax, steps, raise_on_unconverged)
+        converged, "Sella TS search", fmax, steps, raise_on_unconverged
+    )
     return ts
 
 
-def optimise_irc(ts_image, calc,
-                 fmax=0.01,
-                 steps=1000,
-                 dx=0.1,
-                 eta=1e-4,
-                 gamma=0.1,
-                 keep_going=True,
-                 irc_f_traj='irc_f.traj',
-                 irc_r_traj='irc_r.traj',
-                 raise_on_unconverged=False,
-                 logfile='-'):
+def optimise_irc(
+    ts_image,
+    calc,
+    fmax=0.01,
+    steps=1000,
+    dx=0.1,
+    eta=1e-4,
+    gamma=0.1,
+    keep_going=True,
+    irc_f_traj="irc_f.traj",
+    irc_r_traj="irc_r.traj",
+    raise_on_unconverged=False,
+    logfile="-",
+):
     """Follow the intrinsic reaction coordinate downhill from a saddle point.
 
     Runs Sella's IRC in both directions, which is what confirms that a saddle
@@ -1525,38 +1592,41 @@ def optimise_irc(ts_image, calc,
     irc_f = ts_image.copy()
     irc_f.calc = calc
     print("Running IRC forward", flush=True)
-    sella_irc_f = IRC(irc_f,
-                      trajectory=irc_f_traj,
-                      logfile=logfile,
-                      dx=dx,
-                      eta=eta,
-                      gamma=gamma,
-                      keep_going=keep_going)
-    converged_f = sella_irc_f.run(fmax=fmax,
-                                  steps=steps,
-                                  direction='forward')
+    sella_irc_f = IRC(
+        irc_f,
+        trajectory=irc_f_traj,
+        logfile=logfile,
+        dx=dx,
+        eta=eta,
+        gamma=gamma,
+        keep_going=keep_going,
+    )
+    converged_f = sella_irc_f.run(fmax=fmax, steps=steps, direction="forward")
 
     irc_r = ts_image.copy()
     irc_r.calc = calc
 
     print("Running IRC reverse", flush=True)
-    sella_irc_r = IRC(irc_r,
-                      trajectory=irc_r_traj,
-                      logfile=logfile,
-                      dx=dx,
-                      eta=eta,
-                      gamma=gamma,
-                      keep_going=keep_going)
-    converged_r = sella_irc_r.run(fmax=fmax,
-                                  steps=steps,
-                                  direction='reverse')
+    sella_irc_r = IRC(
+        irc_r,
+        trajectory=irc_r_traj,
+        logfile=logfile,
+        dx=dx,
+        eta=eta,
+        gamma=gamma,
+        keep_going=keep_going,
+    )
+    converged_r = sella_irc_r.run(fmax=fmax, steps=steps, direction="reverse")
 
     forward = read(irc_f_traj, index=":")
     reverse = read(irc_r_traj, index=":")
-    for path, ran_to_fmax, what in ((forward, converged_f, "Forward IRC"),
-                                    (reverse, converged_r, "Reverse IRC")):
-        converged = _check_converged(ran_to_fmax, what, fmax, steps,
-                                     raise_on_unconverged)
+    for path, ran_to_fmax, what in (
+        (forward, converged_f, "Forward IRC"),
+        (reverse, converged_r, "Reverse IRC"),
+    ):
+        converged = _check_converged(
+            ran_to_fmax, what, fmax, steps, raise_on_unconverged
+        )
         for image in path:
             image.info["converged"] = converged
     return forward, reverse

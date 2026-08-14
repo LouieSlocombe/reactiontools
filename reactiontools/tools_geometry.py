@@ -24,10 +24,9 @@ from ase.optimize import BFGS
 from .tools_reaction import _check_converged
 
 
-def bonded_cluster_indices_no_anchor_hub(atoms: Atoms,
-                                         anchor: int,
-                                         mult: float = 1.0,
-                                         multi_h: float = 1.3) -> list[int]:
+def bonded_cluster_indices_no_anchor_hub(
+    atoms: Atoms, anchor: int, mult: float = 1.0, multi_h: float = 1.3
+) -> list[int]:
     """Collect the atoms bonded to an anchor without routing through it.
 
     A plain flood fill over the bonded graph would leak through the anchor
@@ -68,7 +67,7 @@ def bonded_cluster_indices_no_anchor_hub(atoms: Atoms,
 
     cutoffs = natural_cutoffs(atoms, mult=mult)
     for i, atom in enumerate(atoms):
-        if atom.symbol == 'H':
+        if atom.symbol == "H":
             cutoffs[i] = covalent_radii[atom.number] * multi_h
 
     nl = NeighborList(cutoffs, skin=0.0, self_interaction=False, bothways=True)
@@ -97,10 +96,9 @@ def bonded_cluster_indices_no_anchor_hub(atoms: Atoms,
     return sorted(visited)
 
 
-def get_dimer_bonded_cluster_indices(atoms: Atoms,
-                                     anchors: list[int],
-                                     mults=None,
-                                     multi_h: float = 1.3) -> list[int]:
+def get_dimer_bonded_cluster_indices(
+    atoms: Atoms, anchors: list[int], mults=None, multi_h: float = 1.3
+) -> list[int]:
     """Collect the atoms of both halves of a dimer, as one index list.
 
     Runs :func:`bonded_cluster_indices_no_anchor_hub` from each anchor and
@@ -136,8 +134,12 @@ def get_dimer_bonded_cluster_indices(atoms: Atoms,
     if len(mults) != 2:
         raise ValueError("Mults list must contain exactly two values.")
 
-    base_a = bonded_cluster_indices_no_anchor_hub(atoms, anchors[0], mult=mults[0], multi_h=multi_h)
-    base_b = bonded_cluster_indices_no_anchor_hub(atoms, anchors[1], mult=mults[1], multi_h=multi_h)
+    base_a = bonded_cluster_indices_no_anchor_hub(
+        atoms, anchors[0], mult=mults[0], multi_h=multi_h
+    )
+    base_b = bonded_cluster_indices_no_anchor_hub(
+        atoms, anchors[1], mult=mults[1], multi_h=multi_h
+    )
 
     return sorted(set(base_a + base_b))
 
@@ -235,11 +237,11 @@ def _rigid_transform(points, anchor_pos, R_target, new_anchor_pos):
 
 
 def flip_and_face_bases(
-        atoms: Atoms,
-        baseA_idxs: list,
-        baseB_idxs: list,
-        anchors: list,
-        rot_matrix: list | None = None,
+    atoms: Atoms,
+    baseA_idxs: list,
+    baseB_idxs: list,
+    anchors: list,
+    rot_matrix: list | None = None,
 ) -> Atoms:
     """Swap two fragments over, each landing on the other's anchor.
 
@@ -311,16 +313,18 @@ def flip_and_face_bases(
     return atoms
 
 
-def optimize_with_fixed_anchors(atoms: Atoms,
-                                baseA_idxs: list,
-                                baseB_idxs: list,
-                                anchor_indices: list,
-                                calc,
-                                fmax: float = 0.05,
-                                steps: int = 1000,
-                                raise_on_unconverged: bool = False,
-                                optimiser=BFGS,
-                                logfile='-') -> Atoms:
+def optimize_with_fixed_anchors(
+    atoms: Atoms,
+    baseA_idxs: list,
+    baseB_idxs: list,
+    anchor_indices: list,
+    calc,
+    fmax: float = 0.05,
+    steps: int = 1000,
+    raise_on_unconverged: bool = False,
+    optimiser=BFGS,
+    logfile="-",
+) -> Atoms:
     """Relax the two fragments while holding their anchors still.
 
     A structure straight out of :func:`flip_and_face_bases` is rigid-body
@@ -383,8 +387,7 @@ def optimize_with_fixed_anchors(atoms: Atoms,
     atoms_opt = atoms_opt[selection]
 
     atoms_opt.calc = calc
-    converged = optimiser(atoms_opt, logfile=logfile).run(fmax=fmax,
-                                                          steps=steps)
+    converged = optimiser(atoms_opt, logfile=logfile).run(fmax=fmax, steps=steps)
 
     # Write the relaxed coordinates back through the full position array:
     # indexing an Atoms object returns a new object, so assigning to
@@ -394,22 +397,22 @@ def optimize_with_fixed_anchors(atoms: Atoms,
     positions[selection] = atoms_opt.get_positions()
     atoms_out.set_positions(positions)
     atoms_out.info["converged"] = _check_converged(
-        converged, "Fixed-anchor relaxation", fmax, steps,
-        raise_on_unconverged)
+        converged, "Fixed-anchor relaxation", fmax, steps, raise_on_unconverged
+    )
 
     return atoms_out
 
 
 def get_best_flip_and_face_bases(
-        atoms: Atoms,
-        baseA_idxs: list,
-        baseB_idxs: list,
-        anchors: list,
-        optimise_after: bool = True,
-        calc=None,
-        raise_on_unconverged: bool = False,
-        optimiser=BFGS,
-        logfile='-',
+    atoms: Atoms,
+    baseA_idxs: list,
+    baseB_idxs: list,
+    anchors: list,
+    optimise_after: bool = True,
+    calc=None,
+    raise_on_unconverged: bool = False,
+    optimiser=BFGS,
+    logfile="-",
 ) -> Atoms:
     """Search the reflection signs for the tightest flipped structure.
 
@@ -458,17 +461,20 @@ def get_best_flip_and_face_bases(
         True.
     """
     if optimise_after and calc is None:
-        raise ValueError("optimise_after=True needs a calculator; pass calc=, "
-                         "or set optimise_after=False to skip the relaxation.")
+        raise ValueError(
+            "optimise_after=True needs a calculator; pass calc=, "
+            "or set optimise_after=False to skip the relaxation."
+        )
 
     # Sorted so the search order -- and which matrix wins a tie in the COM
     # distance below -- does not depend on set iteration order.
-    rot_matrix_permutations = sorted(set(permutations((-1.0, 1.0, 1.0)))
-                                     | set(permutations((-1.0, -1.0, 1.0))))
+    rot_matrix_permutations = sorted(
+        set(permutations((-1.0, 1.0, 1.0))) | set(permutations((-1.0, -1.0, 1.0)))
+    )
     print(f"All permutations of rot_matrix: {rot_matrix_permutations}", flush=True)
 
     best_rot_matrix = None
-    best_dist_after = float('inf')
+    best_dist_after = float("inf")
     for rot_matrix in rot_matrix_permutations:
         rot_matrix = list(rot_matrix)
         print(f"Trying rot_matrix: {rot_matrix}", flush=True)
@@ -551,7 +557,9 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
 
     direction = acceptor_pos - donor_pos
     direction /= np.linalg.norm(direction)
-    new_hydrogen_pos = acceptor_pos - direction * np.linalg.norm(hydrogen_pos - donor_pos)
+    new_hydrogen_pos = acceptor_pos - direction * np.linalg.norm(
+        hydrogen_pos - donor_pos
+    )
 
     atoms.positions[hydrogen_index] = new_hydrogen_pos
 

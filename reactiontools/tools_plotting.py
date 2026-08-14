@@ -29,9 +29,11 @@ from ase.visualize.plot import plot_atoms
 from scipy.interpolate import make_interp_spline
 
 from .tools_fes import plot_fes_1d
+
 # _get_energy lives with the reaction tools so summarise_neb can share it;
 # re-exported here because callers and tests import it from this module.
 from .tools_reaction import _get_energy, get_neb_path
+
 # Re-exported: the styling helpers used to live here, and callers import them
 # from this module.
 from .tools_style import ax_plot, n_plot  # noqa: F401
@@ -39,10 +41,12 @@ from .tools_style import ax_plot, n_plot  # noqa: F401
 C_CYCLE = ("#D4447E", "#2F3E56", "#5FABA2", "#E9A66C", "#7B6CA8", "#9AA5B1")
 
 # Named camera angles, expressed as ASE rotation strings
-_ATOM_VIEWS = {"top": "0x,0y,0z",
-               "side": "-90x,0y,0z",
-               "front": "-90x,-90y,0z",
-               "tilted": "300x,0y,0z"}
+_ATOM_VIEWS = {
+    "top": "0x,0y,0z",
+    "side": "-90x,0y,0z",
+    "front": "-90x,-90y,0z",
+    "tilted": "300x,0y,0z",
+}
 
 
 def _save_and_show(fig, save, show, filename):
@@ -71,17 +75,19 @@ def _save_and_show(fig, save, show, filename):
         plt.show()
 
 
-def plot_images(images,
-                view="tilted",
-                rotation=None,
-                n_cols=4,
-                titles=None,
-                radii=0.8,
-                show_unit_cell=2,
-                fig_size=None,
-                save=False,
-                show=True,
-                filename="images"):
+def plot_images(
+    images,
+    view="tilted",
+    rotation=None,
+    n_cols=4,
+    titles=None,
+    radii=0.8,
+    show_unit_cell=2,
+    fig_size=None,
+    save=False,
+    show=True,
+    filename="images",
+):
     """Plot a series of structures as a grid of panels, one per image.
 
     Each panel is titled with the index of the image, which makes it easy to
@@ -145,18 +151,13 @@ def plot_images(images,
     if fig_size is None:
         fig_size = (3.0 * n_cols, 3.0 * n_rows)
 
-    fig, axes = plt.subplots(n_rows,
-                             n_cols,
-                             figsize=fig_size,
-                             constrained_layout=True)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=fig_size, constrained_layout=True)
     axes = np.atleast_1d(axes).ravel()
 
     for ax, image, title in zip(axes, images, titles):
-        plot_atoms(image,
-                   ax,
-                   rotation=rotation,
-                   show_unit_cell=show_unit_cell,
-                   radii=radii)
+        plot_atoms(
+            image, ax, rotation=rotation, show_unit_cell=show_unit_cell, radii=radii
+        )
         ax.set_title(title, fontsize=12)
     # Blank the axes frames, including any unused panels in the last row
     for ax in axes:
@@ -166,13 +167,9 @@ def plot_images(images,
     return fig, axes
 
 
-def show_atoms(atoms,
-               view="tilted",
-               rotation=None,
-               ax=None,
-               save=True,
-               show=True,
-               filename="atoms"):
+def show_atoms(
+    atoms, view="tilted", rotation=None, ax=None, save=True, show=True, filename="atoms"
+):
     """Draw one or more structures superimposed on a single axes.
 
     Unlike :func:`plot_images`, which gives every structure its own panel,
@@ -223,8 +220,21 @@ def show_atoms(atoms,
     return fig, ax
 
 
-def _plot_profile(images, calc, fig, ax, save, show, smooth, k, fig_size,
-                  filename, label, color=None, annotate=False):
+def _plot_profile(
+    images,
+    calc,
+    fig,
+    ax,
+    save,
+    show,
+    smooth,
+    k,
+    fig_size,
+    filename,
+    label,
+    color=None,
+    annotate=False,
+):
     """Draw a reaction-path energy profile in meV against path distance.
 
     Shared body of :func:`plot_neb` and :func:`plot_irc`, which differ only
@@ -256,33 +266,41 @@ def _plot_profile(images, calc, fig, ax, save, show, smooth, k, fig_size,
         spl = make_interp_spline(path, energies, k=k)
         path_smooth = np.linspace(min(path), max(path), 100)
         ax.scatter(path, energies, **color_kwargs)
-        ax.plot(path_smooth, spl(path_smooth), '-', lw=2, label=label,
-                **color_kwargs)
+        ax.plot(path_smooth, spl(path_smooth), "-", lw=2, label=label, **color_kwargs)
     else:
-        ax.plot(path, energies, 'o-', lw=2, label=label, **color_kwargs)
+        ax.plot(path, energies, "o-", lw=2, label=label, **color_kwargs)
     if annotate:
         # Shift-invariant, so the barrier is the same whether it is measured
         # off these meV values or the raw energies summarise_neb reports.
         barrier = energies[np.argmax(energies)] - energies[0]
-        ax.text(0.02, 0.95, f"$E_\\mathrm{{a}}$ = {barrier:.0f} meV",
-                transform=ax.transAxes, va="top", ha="left", fontsize=12)
+        ax.text(
+            0.02,
+            0.95,
+            f"$E_\\mathrm{{a}}$ = {barrier:.0f} meV",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontsize=12,
+        )
     ax_plot(fig, ax, "Path (Å)", "Energy (meV)")
     _save_and_show(fig, save, show, filename)
     return fig, ax
 
 
-def plot_neb(images,
-             calc=None,
-             fig=None,
-             ax=None,
-             save=True,
-             show=True,
-             smooth=True,
-             k=2,
-             fig_size=(8, 3),
-             filename="neb",
-             label=None,
-             annotate=False):
+def plot_neb(
+    images,
+    calc=None,
+    fig=None,
+    ax=None,
+    save=True,
+    show=True,
+    smooth=True,
+    k=2,
+    fig_size=(8, 3),
+    filename="neb",
+    label=None,
+    annotate=False,
+):
     """Plot a nudged elastic band energy profile.
 
     Parameters
@@ -322,22 +340,36 @@ def plot_neb(images,
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    return _plot_profile(images, calc, fig, ax, save, show, smooth, k,
-                         fig_size, filename, label, annotate=annotate)
+    return _plot_profile(
+        images,
+        calc,
+        fig,
+        ax,
+        save,
+        show,
+        smooth,
+        k,
+        fig_size,
+        filename,
+        label,
+        annotate=annotate,
+    )
 
 
-def plot_irc(images,
-             calc=None,
-             fig=None,
-             ax=None,
-             save=True,
-             show=True,
-             smooth=True,
-             k=2,
-             fig_size=(8, 3),
-             filename="irc",
-             color="black",
-             label=None):
+def plot_irc(
+    images,
+    calc=None,
+    fig=None,
+    ax=None,
+    save=True,
+    show=True,
+    smooth=True,
+    k=2,
+    fig_size=(8, 3),
+    filename="irc",
+    color="black",
+    label=None,
+):
     """Plot an intrinsic reaction coordinate energy profile.
 
     The same profile as :func:`plot_neb`, with defaults suited to an IRC: a
@@ -379,12 +411,23 @@ def plot_irc(images,
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    return _plot_profile(images, calc, fig, ax, save, show, smooth, k,
-                         fig_size, filename, label, color=color)
+    return _plot_profile(
+        images,
+        calc,
+        fig,
+        ax,
+        save,
+        show,
+        smooth,
+        k,
+        fig_size,
+        filename,
+        label,
+        color=color,
+    )
 
 
-def _plot_trajectory_series(trajectories, labels, timestep, ax, frame_value,
-                            y_lab):
+def _plot_trajectory_series(trajectories, labels, timestep, ax, frame_value, y_lab):
     """Plot a per-frame quantity against frame number or time.
 
     Shared body of :func:`plot_temperature` and :func:`plot_total_energy`,
@@ -450,9 +493,14 @@ def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    return _plot_trajectory_series(trajectories, labels, timestep, ax,
-                                   lambda atoms: atoms.get_temperature(),
-                                   "Temperature (K)")
+    return _plot_trajectory_series(
+        trajectories,
+        labels,
+        timestep,
+        ax,
+        lambda atoms: atoms.get_temperature(),
+        "Temperature (K)",
+    )
 
 
 def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
@@ -474,9 +522,14 @@ def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
     tuple
         ``(fig, ax)`` containing the matplotlib figure and axes.
     """
-    return _plot_trajectory_series(trajectories, labels, timestep, ax,
-                                   lambda atoms: atoms.get_total_energy(),
-                                   "Total energy (eV)")
+    return _plot_trajectory_series(
+        trajectories,
+        labels,
+        timestep,
+        ax,
+        lambda atoms: atoms.get_total_energy(),
+        "Total energy (eV)",
+    )
 
 
 #: Unit conversion applied to every ``fes.dat`` these wrappers read. ASE works
@@ -511,8 +564,7 @@ def _expand_fes_files(files):
 
     resolved = []
     for file in (Path(f) for f in files):
-        resolved.extend(sorted(file.glob("**/fes.dat")) if file.is_dir()
-                        else [file])
+        resolved.extend(sorted(file.glob("**/fes.dat")) if file.is_dir() else [file])
     if not resolved:
         raise ValueError(f"no fes.dat files found in {files}")
     return resolved
@@ -538,16 +590,17 @@ def _fes_labels(files):
     return labels
 
 
-def plot_plumed(file='fes.dat',
-                fig=None,
-                ax=None,
-                save=True,
-                show=True,
-                fig_size=(8, 3),
-                filename="fes",
-                x_range=None,
-                x_label="CV",
-                ):
+def plot_plumed(
+    file="fes.dat",
+    fig=None,
+    ax=None,
+    save=True,
+    show=True,
+    fig_size=(8, 3),
+    filename="fes",
+    x_range=None,
+    x_label="CV",
+):
     """Plot a one-dimensional PLUMED free-energy surface.
 
     Parameters
@@ -581,34 +634,37 @@ def plot_plumed(file='fes.dat',
 
     # shift_min_to_zero=False: sum_hills is normally run with --mintozero, so
     # shifting again here would hide a surface that was not.
-    fig, ax = plot_fes_1d(file,
-                          fig=fig,
-                          ax=ax,
-                          shift_min_to_zero=False,
-                          x_lab=x_label,
-                          y_lab="Free Energy (meV)",
-                          lw=2,
-                          color='black',
-                          **_FES_UNITS)
+    fig, ax = plot_fes_1d(
+        file,
+        fig=fig,
+        ax=ax,
+        shift_min_to_zero=False,
+        x_lab=x_label,
+        y_lab="Free Energy (meV)",
+        lw=2,
+        color="black",
+        **_FES_UNITS,
+    )
     if x_range is not None:
         ax.set_xlim(x_range)
     _save_and_show(fig, save, show, filename)
     return fig, ax
 
 
-def plot_plumed_multi(files,
-                      labels=None,
-                      fig=None,
-                      ax=None,
-                      save=True,
-                      show=True,
-                      fig_size=(8, 3),
-                      filename="fes_multi",
-                      x_range=None,
-                      x_label='CV',
-                      mintozero=False,
-                      colors=C_CYCLE,
-                      ):
+def plot_plumed_multi(
+    files,
+    labels=None,
+    fig=None,
+    ax=None,
+    save=True,
+    show=True,
+    fig_size=(8, 3),
+    filename="fes_multi",
+    x_range=None,
+    x_label="CV",
+    mintozero=False,
+    colors=C_CYCLE,
+):
     """Plot the free-energy surfaces of several PLUMED runs on one axes.
 
     Parameters
@@ -658,16 +714,18 @@ def plot_plumed_multi(files,
     # One call per file rather than one call with every file, so each curve
     # keeps its own colour from C_CYCLE.
     for i, (file, label) in enumerate(zip(files, labels)):
-        fig, ax = plot_fes_1d(file,
-                              fig=fig,
-                              ax=ax,
-                              labels=[label],
-                              shift_min_to_zero=mintozero,
-                              x_lab=x_label,
-                              y_lab="Free Energy (meV)",
-                              lw=2,
-                              color=colors[i % len(colors)],
-                              **_FES_UNITS)
+        fig, ax = plot_fes_1d(
+            file,
+            fig=fig,
+            ax=ax,
+            labels=[label],
+            shift_min_to_zero=mintozero,
+            x_lab=x_label,
+            y_lab="Free Energy (meV)",
+            lw=2,
+            color=colors[i % len(colors)],
+            **_FES_UNITS,
+        )
 
     if x_range is not None:
         ax.set_xlim(x_range)

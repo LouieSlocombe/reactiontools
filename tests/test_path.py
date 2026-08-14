@@ -4,27 +4,23 @@ The trajectory a steered run would produce is faked -- the proton slides from
 the donor to the acceptor at a constant rate -- so the frame selection and the
 files it writes can be checked without running any dynamics.
 
-The frame-selection functions are numpy only; anything that reads a trajectory
-needs mdtraj and is marked accordingly.
+The frame-selection functions are NumPy-only; trajectory readers use MDTraj.
 """
 
-import importlib.util
 import os
 
 import numpy as np
 import pytest
 
-from reactiontools import (cv_from_colvar,
-                           estimate_path_lambda,
-                           path_from_steered_md,
-                           select_frames_by_cv,
-                           select_frames_by_msd)
+from reactiontools import (
+    cv_from_colvar,
+    estimate_path_lambda,
+    path_from_steered_md,
+    select_frames_by_cv,
+    select_frames_by_msd,
+)
 
 from .conftest import PT_ACCEPTOR, PT_DONOR, PT_HYDROGEN
-
-mdtraj_required = pytest.mark.skipif(
-    importlib.util.find_spec("mdtraj") is None,
-    reason="needs mdtraj, the optional [path] extra")
 
 
 def write_colvar(path, cv, fields=("time", "pt_cv", "smd.pt_cv_cntr", "smd.work")):
@@ -125,7 +121,6 @@ class TestCvFromColvar:
         assert np.all(np.diff(cv) > 0)
 
 
-@mdtraj_required
 class TestEstimatePathLambda:
     def test_it_reports_inverse_square_nanometres_by_default(self, tmp_path, pt_pdb):
         import mdtraj as md
@@ -162,7 +157,6 @@ class TestEstimatePathLambda:
             estimate_path_lambda(str(pt_pdb))
 
 
-@mdtraj_required
 class TestPathFromSteeredMd:
     def test_it_writes_a_pathmsd_reference(self, tmp_path, pt_pdb):
         import mdtraj as md
@@ -172,13 +166,15 @@ class TestPathFromSteeredMd:
         write_colvar(tmp_path / "COLVAR_SMD", np.concatenate(([0.0], fraction)))
 
         output = tmp_path / "neb_path.pdb"
-        lambda_val = path_from_steered_md(str(traj_file),
-                                          template_pdb=str(pt_pdb),
-                                          output_file=str(output),
-                                          colvar_file=str(tmp_path / "COLVAR_SMD"),
-                                          cv_name="pt_cv",
-                                          n_images=8,
-                                          atom_line="ATOM")
+        lambda_val = path_from_steered_md(
+            str(traj_file),
+            template_pdb=str(pt_pdb),
+            output_file=str(output),
+            colvar_file=str(tmp_path / "COLVAR_SMD"),
+            cv_name="pt_cv",
+            n_images=8,
+            atom_line="ATOM",
+        )
 
         assert lambda_val > 0.0
         path = md.load(str(output))
@@ -199,13 +195,15 @@ class TestPathFromSteeredMd:
         fake_steered_traj(traj_file, pt_pdb, n_frames=40)
 
         output = tmp_path / "neb_path.pdb"
-        path_from_steered_md(str(traj_file),
-                             template_pdb=str(pt_pdb),
-                             output_file=str(output),
-                             colvar_file=None,
-                             n_images=6,
-                             smooth=2,
-                             atom_line="ATOM")
+        path_from_steered_md(
+            str(traj_file),
+            template_pdb=str(pt_pdb),
+            output_file=str(output),
+            colvar_file=None,
+            n_images=6,
+            smooth=2,
+            atom_line="ATOM",
+        )
 
         assert md.load(str(output)).n_frames == 6
 
@@ -214,37 +212,44 @@ class TestPathFromSteeredMd:
         fake_steered_traj(traj_file, pt_pdb, n_frames=20)
 
         with pytest.raises(ValueError, match="atoms but"):
-            path_from_steered_md(str(traj_file),
-                                 template_pdb=str(pt_pdb),
-                                 output_file=str(tmp_path / "neb_path.pdb"),
-                                 colvar_file=None,
-                                 atom_indices=[PT_DONOR, PT_HYDROGEN, PT_ACCEPTOR],
-                                 n_images=5,
-                                 atom_line="ATOM")
+            path_from_steered_md(
+                str(traj_file),
+                template_pdb=str(pt_pdb),
+                output_file=str(tmp_path / "neb_path.pdb"),
+                colvar_file=None,
+                atom_indices=[PT_DONOR, PT_HYDROGEN, PT_ACCEPTOR],
+                n_images=5,
+                atom_line="ATOM",
+            )
 
     def test_it_wants_more_frames_than_images(self, tmp_path, pt_pdb):
         traj_file = tmp_path / "smd_steps.pdb"
         fake_steered_traj(traj_file, pt_pdb, n_frames=5)
 
         with pytest.raises(ValueError, match="too few"):
-            path_from_steered_md(str(traj_file),
-                                 template_pdb=str(pt_pdb),
-                                 output_file=str(tmp_path / "neb_path.pdb"),
-                                 colvar_file=None,
-                                 n_images=15,
-                                 atom_line="ATOM")
+            path_from_steered_md(
+                str(traj_file),
+                template_pdb=str(pt_pdb),
+                output_file=str(tmp_path / "neb_path.pdb"),
+                colvar_file=None,
+                n_images=15,
+                atom_line="ATOM",
+            )
 
     def test_a_wrong_atom_line_is_caught_rather_than_writing_a_short_path(
-            self, tmp_path, pt_pdb):
+        self, tmp_path, pt_pdb
+    ):
         # ASE writes ATOM records; asking for HETATM would silently carry no
         # atoms into the reference, so this must fail loudly.
         traj_file = tmp_path / "smd_steps.pdb"
         fake_steered_traj(traj_file, pt_pdb, n_frames=20)
 
         with pytest.raises(ValueError, match="records"):
-            path_from_steered_md(str(traj_file),
-                                 template_pdb=str(pt_pdb),
-                                 output_file=str(tmp_path / "neb_path.pdb"),
-                                 colvar_file=None,
-                                 n_images=5,
-                                 atom_line="HETATM")
+            path_from_steered_md(
+                str(traj_file),
+                template_pdb=str(pt_pdb),
+                output_file=str(tmp_path / "neb_path.pdb"),
+                colvar_file=None,
+                n_images=5,
+                atom_line="HETATM",
+            )

@@ -11,9 +11,11 @@ dependencies:
   - pandas
   - ase
   - scipy
-  - mdtraj      # the [path] extra: reading a steered trajectory in tools_path
+  - mdtraj
   - pip
   - pytest
+  - pytest-cov
+  - ruff
   - plumed
   - py-plumed
 

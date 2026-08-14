@@ -4,29 +4,31 @@ These only need numpy, pandas and matplotlib, so they run without ASE, a
 calculator or an MD engine. conftest selects the Agg backend, so nothing tries
 to open a window on a headless machine.
 """
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from reactiontools.tools_fes import (FES,
-                                     FESSummary,
-                                     as_fes,
-                                     convert_energy,
-                                     fes_convergence,
-                                     fes_series_files,
-                                     load_fes_series,
-                                     plot_fes_convergence,
-                                     summarise_fes,
-                                     plot_fes,
-                                     plot_fes_1d,
-                                     plot_fes_2d,
-                                     plot_fes_2d_overlay,
-                                     plot_fes_slices,
-                                     plot_plumed_colvar,
-                                     plot_plumed_fes,
-                                     read_plumed_file,
-                                     unit_label,
-                                     )
+from reactiontools.tools_fes import (
+    FES,
+    FESSummary,
+    as_fes,
+    convert_energy,
+    fes_convergence,
+    fes_series_files,
+    load_fes_series,
+    plot_fes,
+    plot_fes_1d,
+    plot_fes_2d,
+    plot_fes_2d_overlay,
+    plot_fes_convergence,
+    plot_fes_slices,
+    plot_plumed_colvar,
+    plot_plumed_fes,
+    read_plumed_file,
+    summarise_fes,
+    unit_label,
+)
 
 EV_IN_KJ_PER_MOL = 96.48533212331
 
@@ -39,7 +41,9 @@ def write_fes_1d(path, n_bins=50, derivatives=True, infinities=False):
         free[:3] = np.inf
 
     with open(path, "w") as handle:
-        handle.write("#! FIELDS pt_cv file.free" + (" der_pt_cv\n" if derivatives else "\n"))
+        handle.write(
+            "#! FIELDS pt_cv file.free" + (" der_pt_cv\n" if derivatives else "\n")
+        )
         handle.write(f"#! SET min_pt_cv -3.141593\n#! SET nbins_pt_cv {n_bins}\n")
         handle.write("#! SET periodic_pt_cv false\n")
         for cv, value in zip(x, free, strict=True):
@@ -49,17 +53,23 @@ def write_fes_1d(path, n_bins=50, derivatives=True, infinities=False):
 
 def write_fes_2d(path, n_x=21, n_y=17, derivatives=True, blocks=True):
     """Write a 2-D PLUMED FES file, x running fastest as PLUMED does."""
-    grid_x, grid_y = np.meshgrid(np.linspace(-2.0, 2.0, n_x), np.linspace(0.0, 3.0, n_y))
-    free = 10.0 * (grid_x ** 2 - 1.0) ** 2 + 5.0 * (grid_y - 1.5) ** 2
+    grid_x, grid_y = np.meshgrid(
+        np.linspace(-2.0, 2.0, n_x), np.linspace(0.0, 3.0, n_y)
+    )
+    free = 10.0 * (grid_x**2 - 1.0) ** 2 + 5.0 * (grid_y - 1.5) ** 2
 
     with open(path, "w") as handle:
-        handle.write("#! FIELDS cv_diff1 cv_diff2 file.free" +
-                     (" der_cv_diff1 der_cv_diff2\n" if derivatives else "\n"))
+        handle.write(
+            "#! FIELDS cv_diff1 cv_diff2 file.free"
+            + (" der_cv_diff1 der_cv_diff2\n" if derivatives else "\n")
+        )
         handle.write("#! SET min_cv_diff1 -2\n")
         for i in range(n_y):
             for j in range(n_x):
-                handle.write(f"{grid_x[i, j]:.9f} {grid_y[i, j]:.9f}  {free[i, j]:.9f}" +
-                             (" 0.0 0.0\n" if derivatives else "\n"))
+                handle.write(
+                    f"{grid_x[i, j]:.9f} {grid_y[i, j]:.9f}  {free[i, j]:.9f}"
+                    + (" 0.0 0.0\n" if derivatives else "\n")
+                )
             if blocks:
                 handle.write("\n")  # PLUMED separates grid rows with a blank line
     return grid_x, grid_y, free
@@ -205,9 +215,9 @@ def test_as_fes_accepts_every_array_layout(fes_2d_file):
         assert np.allclose(other.energy, reference.energy)
 
     x = np.linspace(-1.0, 1.0, 30)
-    free_1d = x ** 2
-    rows = as_fes(np.vstack([x, free_1d]))          # (2, N), the package convention
-    columns = as_fes(np.vstack([x, free_1d]).T)     # (N, 2)
+    free_1d = x**2
+    rows = as_fes(np.vstack([x, free_1d]))  # (2, N), the package convention
+    columns = as_fes(np.vstack([x, free_1d]).T)  # (N, 2)
     assert rows.ndim == 1
     assert np.allclose(rows.energy, columns.energy)
 
@@ -258,20 +268,24 @@ def test_plot_fes_1d_single_curve_has_no_legend(fes_1d_file):
 
 
 def test_plot_fes_1d_series_labels_from_times(fes_1d_file):
-    _, ax = plot_fes_1d([fes_1d_file] * 3,
-                          labels=[10, 20, 30],
-                          label_template=r"$t={:g}$ ps",
-                          energy_unit="eV")
-    assert [text.get_text() for text in ax.get_legend().get_texts()] == \
-        [r"$t=10$ ps", r"$t=20$ ps", r"$t=30$ ps"]
+    _, ax = plot_fes_1d(
+        [fes_1d_file] * 3,
+        labels=[10, 20, 30],
+        label_template=r"$t={:g}$ ps",
+        energy_unit="eV",
+    )
+    assert [text.get_text() for text in ax.get_legend().get_texts()] == [
+        r"$t=10$ ps",
+        r"$t=20$ ps",
+        r"$t=30$ ps",
+    ]
     assert ax.get_ylabel() == r"$F$ (eV)"
 
 
 def test_plot_fes_1d_max_datasets_keeps_the_last_ones(fes_1d_file):
-    _, ax = plot_fes_1d([fes_1d_file] * 5,
-                          labels=list(range(5)),
-                          label_template="{:g}",
-                          max_datasets=2)
+    _, ax = plot_fes_1d(
+        [fes_1d_file] * 5, labels=list(range(5)), label_template="{:g}", max_datasets=2
+    )
     assert len(ax.lines) == 2
     assert [text.get_text() for text in ax.get_legend().get_texts()] == ["3", "4"]
 
@@ -298,9 +312,9 @@ def test_plot_fes_2d_single_panel_with_colorbar(fes_2d_file):
 
 
 def test_plot_fes_2d_shares_one_colorbar_across_panels(fes_2d_file):
-    fig, axes = plot_fes_2d([fes_2d_file] * 3,
-                              labels=[1.0, 2.0, 3.0],
-                              label_template=r"$t={:g}$ ps")
+    fig, axes = plot_fes_2d(
+        [fes_2d_file] * 3, labels=[1.0, 2.0, 3.0], label_template=r"$t={:g}$ ps"
+    )
     assert axes.size == 3
     assert len(fig.axes) == 4  # three panels + one shared colour bar
     assert axes[1].get_title() == r"$t=2$ ps"
@@ -319,9 +333,9 @@ def test_plot_fes_2d_checks_axes_count(fes_2d_file):
 
 
 def test_plot_fes_2d_overlay_labels_each_surface(fes_2d_file):
-    _, ax = plot_fes_2d_overlay([fes_2d_file, fes_2d_file],
-                                  labels=["MD", "PIMD"],
-                                  levels=5)
+    _, ax = plot_fes_2d_overlay(
+        [fes_2d_file, fes_2d_file], labels=["MD", "PIMD"], levels=5
+    )
     assert [text.get_text() for text in ax.get_legend().get_texts()] == ["MD", "PIMD"]
 
 
@@ -347,10 +361,12 @@ def test_slice_at_picks_the_right_row_and_column(fes_2d_file):
 
 
 def test_plot_fes_slices_draws_one_line_per_surface_and_value(fes_2d_file):
-    _, ax = plot_fes_slices([fes_2d_file, fes_2d_file],
-                              at=[-1.0, 0.0],
-                              labels=["MD", "PIMD"],
-                              energy_unit="eV")
+    _, ax = plot_fes_slices(
+        [fes_2d_file, fes_2d_file],
+        at=[-1.0, 0.0],
+        labels=["MD", "PIMD"],
+        energy_unit="eV",
+    )
     assert len(ax.lines) == 4
     texts = [text.get_text() for text in ax.get_legend().get_texts()]
     assert texts[0] == r"MD, cv_diff1$=-1.00$"
@@ -394,8 +410,11 @@ def test_saving_writes_only_what_was_asked_for(tmp_path, fes_1d_file):
     assert not (tmp_path / "png_only.pdf").exists()
 
     plot_fes_1d(fes_1d_file)  # nothing is written without a filename
-    assert sorted(p.name for p in tmp_path.glob("*.p*")) == ["both.pdf", "both.png",
-                                                            "png_only.png"]
+    assert sorted(p.name for p in tmp_path.glob("*.p*")) == [
+        "both.pdf",
+        "both.png",
+        "png_only.png",
+    ]
 
 
 def test_saving_picks_the_right_figure(tmp_path, fes_2d_file):
@@ -458,9 +477,9 @@ def double_well(n_bins=601):
     Boltzmann weighting favours.
     """
     x = np.linspace(0.0, 6.0, n_bins)
-    energy = np.where(x < 3.0,
-                      0.5 * ((x - 1.0) / 2.0) ** 2,
-                      0.2 + 0.3 * ((x - 5.0) / 2.0) ** 2)
+    energy = np.where(
+        x < 3.0, 0.5 * ((x - 1.0) / 2.0) ** 2, 0.2 + 0.3 * ((x - 5.0) / 2.0) ** 2
+    )
     return np.column_stack([x, energy])
 
 
@@ -511,35 +530,38 @@ class TestSummariseFes:
     def test_boltzmann_weighting_favours_the_wider_basin(self, well):
         """Basin B is the flatter one, so entropy pulls its free energy down."""
         depths = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
-        weighted = summarise_fes(well, (0.0, 2.0), (4.0, 6.0),
-                                 source_unit="eV", temperature=300)
+        weighted = summarise_fes(
+            well, (0.0, 2.0), (4.0, 6.0), source_unit="eV", temperature=300
+        )
 
         assert weighted.delta_f < depths.delta_f
 
     def test_temperature_leaves_the_barriers_alone(self, well):
         """A barrier is measured out of the bottom of a well either way."""
         plain = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
-        weighted = summarise_fes(well, (0.0, 2.0), (4.0, 6.0),
-                                 source_unit="eV", temperature=300)
+        weighted = summarise_fes(
+            well, (0.0, 2.0), (4.0, 6.0), source_unit="eV", temperature=300
+        )
 
         assert weighted.forward_barrier == pytest.approx(plain.forward_barrier)
         assert weighted.reverse_barrier == pytest.approx(plain.reverse_barrier)
 
     def test_converts_units_on_the_way_in(self, well):
         in_ev = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
-        in_kj = summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV",
-                              energy_unit="kJ/mol")
+        in_kj = summarise_fes(
+            well, (0.0, 2.0), (4.0, 6.0), source_unit="eV", energy_unit="kJ/mol"
+        )
 
         assert in_kj.forward_barrier == pytest.approx(
-            in_ev.forward_barrier * EV_IN_KJ_PER_MOL)
+            in_ev.forward_barrier * EV_IN_KJ_PER_MOL
+        )
         assert in_kj.energy_unit == "kJ/mol"
 
     def test_reads_a_file(self, tmp_path, well):
         path = tmp_path / "profile.dat"
         np.savetxt(path, well, header="! FIELDS cv file.free", comments="#")
 
-        summary = summarise_fes(str(path), (0.0, 2.0), (4.0, 6.0),
-                                source_unit="eV")
+        summary = summarise_fes(str(path), (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         assert summary.forward_barrier == pytest.approx(0.5, abs=1e-3)
 
@@ -584,27 +606,28 @@ class TestSummariseFes:
 
     def test_temperature_needs_a_known_energy_unit(self, well):
         with pytest.raises(ValueError, match="without knowing"):
-            summarise_fes(well, (0.0, 2.0), (4.0, 6.0), source_unit=None,
-                          temperature=300)
+            summarise_fes(
+                well, (0.0, 2.0), (4.0, 6.0), source_unit=None, temperature=300
+            )
 
 
 class TestFesConvergence:
     @pytest.fixture
     def series(self, well):
         """A barrier growing towards its final height, as hills fill a well."""
-        return [np.column_stack([well[:, 0], well[:, 1] * scale])
-                for scale in (0.3, 0.6, 0.85, 1.0)]
+        return [
+            np.column_stack([well[:, 0], well[:, 1] * scale])
+            for scale in (0.3, 0.6, 0.85, 1.0)
+        ]
 
     def test_summarises_every_surface(self, series):
-        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                    source_unit="eV")
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         assert len(summaries) == len(series)
         assert all(isinstance(s, FESSummary) for s in summaries)
 
     def test_keeps_the_order_it_was_given(self, series):
-        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                    source_unit="eV")
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         barriers = [s.forward_barrier for s in summaries]
         assert barriers == sorted(barriers)
@@ -612,68 +635,73 @@ class TestFesConvergence:
 
     def test_uses_the_same_basins_throughout(self, series):
         """Fixed windows are what make the numbers comparable across a run."""
-        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                    source_unit="eV")
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         assert len({s.minimum_a for s in summaries}) == 1
 
     def test_accepts_a_single_surface(self, well):
-        assert len(fes_convergence(well, (0.0, 2.0), (4.0, 6.0),
-                                   source_unit="eV")) == 1
+        assert len(fes_convergence(well, (0.0, 2.0), (4.0, 6.0), source_unit="eV")) == 1
 
 
 class TestPlotFesConvergence:
     @pytest.fixture
     def series(self, well):
-        return [np.column_stack([well[:, 0], well[:, 1] * scale])
-                for scale in (0.3, 0.6, 0.85, 1.0)]
+        return [
+            np.column_stack([well[:, 0], well[:, 1] * scale])
+            for scale in (0.3, 0.6, 0.85, 1.0)
+        ]
 
     def test_draws_the_barrier_and_the_difference(self, series):
-        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                       source_unit="eV")
+        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         assert len(ax.lines) == 2
         assert len(ax.get_legend().get_texts()) == 2
 
     def test_numbers_the_surfaces_when_given_no_times(self, series):
-        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                       source_unit="eV")
+        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         assert list(ax.lines[0].get_xdata()) == [1, 2, 3, 4]
 
     def test_uses_the_times_it_is_given(self, series):
-        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                       source_unit="eV", times=[25, 50, 75, 100])
+        _, ax = plot_fes_convergence(
+            series, (0.0, 2.0), (4.0, 6.0), source_unit="eV", times=[25, 50, 75, 100]
+        )
 
         assert list(ax.lines[0].get_xdata()) == [25, 50, 75, 100]
 
     def test_the_barrier_curve_matches_the_summaries(self, series):
-        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                    source_unit="eV")
+        summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
-        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                       source_unit="eV")
+        _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         assert list(ax.lines[0].get_ydata()) == pytest.approx(
-            [s.forward_barrier for s in summaries])
+            [s.forward_barrier for s in summaries]
+        )
 
     def test_checks_the_number_of_times(self, series):
         with pytest.raises(ValueError, match="2 times for 4 surfaces"):
-            plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0),
-                                 source_unit="eV", times=[1, 2])
+            plot_fes_convergence(
+                series, (0.0, 2.0), (4.0, 6.0), source_unit="eV", times=[1, 2]
+            )
 
     def test_draws_on_a_supplied_axes(self, series):
         fig, ax = plt.subplots()
 
         returned_fig, returned_ax = plot_fes_convergence(
-            series, (0.0, 2.0), (4.0, 6.0), source_unit="eV", fig=fig, ax=ax)
+            series, (0.0, 2.0), (4.0, 6.0), source_unit="eV", fig=fig, ax=ax
+        )
 
         assert returned_fig is fig
         assert returned_ax is ax
 
     def test_saves_when_given_a_filename(self, tmp_path, series):
-        plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV",
-                             filename=str(tmp_path / "conv.png"))
+        plot_fes_convergence(
+            series,
+            (0.0, 2.0),
+            (4.0, 6.0),
+            source_unit="eV",
+            filename=str(tmp_path / "conv.png"),
+        )
 
         assert (tmp_path / "conv.png").exists()
 
@@ -684,8 +712,7 @@ class TestFesSeriesFiles:
     def _write_series(self, directory, names):
         for name in names:
             path = directory / name
-            np.savetxt(path, np.column_stack([np.linspace(-1, 1, 5),
-                                              np.zeros(5)]))
+            np.savetxt(path, np.column_stack([np.linspace(-1, 1, 5), np.zeros(5)]))
 
     def test_files_come_back_in_index_order_not_alphabetical(self, tmp_path):
         # fes_10 sorts before fes_2 by name, which scrambles a convergence
@@ -725,9 +752,10 @@ class TestFesSeriesFiles:
 class TestLoadFesSeries:
     def test_it_loads_every_surface_in_order(self, tmp_path):
         for i in (1, 2, 10):
-            np.savetxt(tmp_path / f"fes_{i}.dat",
-                       np.column_stack([np.linspace(-1, 1, 5),
-                                        np.full(5, float(i))]))
+            np.savetxt(
+                tmp_path / f"fes_{i}.dat",
+                np.column_stack([np.linspace(-1, 1, 5), np.full(5, float(i))]),
+            )
 
         series = load_fes_series(tmp_path, verbose=False)
 
@@ -737,12 +765,16 @@ class TestLoadFesSeries:
     def test_energies_are_converted_out_of_the_source_unit(self, tmp_path):
         # 1 eV is 96.485 kJ/mol; written in kJ/mol and asked for in eV, the
         # spread of the surface should come back divided by that.
-        np.savetxt(tmp_path / "fes_1.dat",
-                   np.column_stack([np.linspace(-1, 1, 5),
-                                    np.array([96.48533212331, 0, 0, 0, 0])]))
+        np.savetxt(
+            tmp_path / "fes_1.dat",
+            np.column_stack(
+                [np.linspace(-1, 1, 5), np.array([96.48533212331, 0, 0, 0, 0])]
+            ),
+        )
 
-        fes = load_fes_series(tmp_path, energy_unit="eV",
-                              source_unit="kJ/mol", verbose=False)[0]
+        fes = load_fes_series(
+            tmp_path, energy_unit="eV", source_unit="kJ/mol", verbose=False
+        )[0]
 
         assert np.nanmax(fes.energy) == pytest.approx(1.0)
 

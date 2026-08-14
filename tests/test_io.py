@@ -3,21 +3,34 @@
 import pytest
 from ase.build import molecule
 
-from reactiontools import (convert_pdb_to_xyz,
-                           convert_xyz_to_pdb,
-                           convert_xyz_to_plumed_ref,
-                           element_from_pdb_line,
-                           format_pdb_atom_name,
-                           pdb_remove_ter_index,
-                           strip_hydrogens_keep_indices,
-                           write_xyz_frame)
+from reactiontools import (
+    convert_pdb_to_xyz,
+    convert_xyz_to_pdb,
+    convert_xyz_to_plumed_ref,
+    element_from_pdb_line,
+    format_pdb_atom_name,
+    pdb_remove_ter_index,
+    strip_hydrogens_keep_indices,
+    write_xyz_frame,
+)
 
 
-def _pdb_line(serial=1, name=" C1 ", resname="AAA", chain="A", resid=1,
-              x=0.0, y=0.0, z=0.0, element="C"):
+def _pdb_line(
+    serial=1,
+    name=" C1 ",
+    resname="AAA",
+    chain="A",
+    resid=1,
+    x=0.0,
+    y=0.0,
+    z=0.0,
+    element="C",
+):
     """One ATOM record, built by column so the tests can vary one field."""
-    return (f"ATOM  {serial:>5} {name} {resname:>3} {chain}{resid:>4}    "
-            f"{x:>8.3f}{y:>8.3f}{z:>8.3f}  1.00  0.00          {element:>2}\n")
+    return (
+        f"ATOM  {serial:>5} {name} {resname:>3} {chain}{resid:>4}    "
+        f"{x:>8.3f}{y:>8.3f}{z:>8.3f}  1.00  0.00          {element:>2}\n"
+    )
 
 
 class TestElementFromPdbLine:
@@ -81,9 +94,12 @@ class TestRoundTrip:
 
     def test_a_multi_model_pdb_gives_one_frame_per_model(self, tmp_path):
         pdb = tmp_path / "path.pdb"
-        pdb.write_text("".join(
-            f"MODEL     {model}\n{_pdb_line(x=float(model))}ENDMDL\n"
-            for model in (1, 2, 3)))
+        pdb.write_text(
+            "".join(
+                f"MODEL     {model}\n{_pdb_line(x=float(model))}ENDMDL\n"
+                for model in (1, 2, 3)
+            )
+        )
 
         assert convert_pdb_to_xyz(pdb, tmp_path / "path.xyz") == 3
 
@@ -102,36 +118,47 @@ class TestPdbRemoveTerIndex:
 
         pdb_remove_ter_index(pdb, pdb)
 
-        serials = [line[6:11].strip() for line in pdb.read_text().splitlines()
-                   if line.startswith("ATOM")]
+        serials = [
+            line[6:11].strip()
+            for line in pdb.read_text().splitlines()
+            if line.startswith("ATOM")
+        ]
         assert serials == ["1", "2"]
 
     def test_numbering_restarts_at_each_model(self, tmp_path):
         pdb = tmp_path / "in.pdb"
-        pdb.write_text("MODEL     1\n" + _pdb_line(serial=5) + _pdb_line(serial=6) + "ENDMDL\n"
-                       "MODEL     2\n" + _pdb_line(serial=7) + _pdb_line(serial=8) + "ENDMDL\n")
+        pdb.write_text(
+            "MODEL     1\n" + _pdb_line(serial=5) + _pdb_line(serial=6) + "ENDMDL\n"
+            "MODEL     2\n" + _pdb_line(serial=7) + _pdb_line(serial=8) + "ENDMDL\n"
+        )
 
         pdb_remove_ter_index(pdb, pdb)
 
-        serials = [line[6:11].strip() for line in pdb.read_text().splitlines()
-                   if line.startswith("ATOM")]
+        serials = [
+            line[6:11].strip()
+            for line in pdb.read_text().splitlines()
+            if line.startswith("ATOM")
+        ]
         assert serials == ["1", "2", "1", "2"]
 
     def test_conect_records_follow_the_atoms_they_point_at(self, tmp_path):
         pdb = tmp_path / "in.pdb"
-        pdb.write_text(_pdb_line(serial=17) + _pdb_line(serial=42)
-                       + "CONECT   17   42\n")
+        pdb.write_text(
+            _pdb_line(serial=17) + _pdb_line(serial=42) + "CONECT   17   42\n"
+        )
 
         pdb_remove_ter_index(pdb, pdb)
 
-        conect = next(line for line in pdb.read_text().splitlines()
-                      if line.startswith("CONECT"))
+        conect = next(
+            line for line in pdb.read_text().splitlines() if line.startswith("CONECT")
+        )
         assert conect.split() == ["CONECT", "1", "2"]
 
     def test_a_ter_shares_the_serial_of_the_atom_after_it(self, tmp_path):
         pdb = tmp_path / "in.pdb"
-        pdb.write_text(_pdb_line(serial=1) + "TER       2      AAA A   1\n"
-                       + _pdb_line(serial=3))
+        pdb.write_text(
+            _pdb_line(serial=1) + "TER       2      AAA A   1\n" + _pdb_line(serial=3)
+        )
 
         pdb_remove_ter_index(pdb, pdb)
 
@@ -146,9 +173,11 @@ class TestPdbRemoveTerIndex:
 class TestStripHydrogensKeepIndices:
     def test_every_hydrogen_goes_when_nothing_is_kept(self, tmp_path):
         pdb = tmp_path / "in.pdb"
-        pdb.write_text(_pdb_line(serial=1, element="O")
-                       + _pdb_line(serial=2, element="H")
-                       + _pdb_line(serial=3, element="H"))
+        pdb.write_text(
+            _pdb_line(serial=1, element="O")
+            + _pdb_line(serial=2, element="H")
+            + _pdb_line(serial=3, element="H")
+        )
 
         out = tmp_path / "out.pdb"
         strip_hydrogens_keep_indices(pdb, out)
@@ -157,9 +186,11 @@ class TestStripHydrogensKeepIndices:
 
     def test_the_named_hydrogens_stay(self, tmp_path):
         pdb = tmp_path / "in.pdb"
-        pdb.write_text(_pdb_line(serial=1, element="O")
-                       + _pdb_line(serial=2, element="H")
-                       + _pdb_line(serial=3, element="H"))
+        pdb.write_text(
+            _pdb_line(serial=1, element="O")
+            + _pdb_line(serial=2, element="H")
+            + _pdb_line(serial=3, element="H")
+        )
 
         out = tmp_path / "out.pdb"
         # keep is 0-based, so index 1 is the atom with serial 2.
@@ -181,15 +212,20 @@ class TestStripHydrogensKeepIndices:
 class TestConvertXyzToPlumedRef:
     def test_each_frame_becomes_a_model_with_the_template_records(self, tmp_path):
         template = tmp_path / "index_atoms.pdb"
-        template.write_text(_pdb_line(serial=1, name=" O1 ", element="O")
-                            + _pdb_line(serial=2, name=" H1 ", element="H"))
+        template.write_text(
+            _pdb_line(serial=1, name=" O1 ", element="O")
+            + _pdb_line(serial=2, name=" H1 ", element="H")
+        )
 
         xyz = tmp_path / "path.xyz"
         with open(xyz, "w") as handle:
             for step in range(3):
-                write_xyz_frame(handle, ["O", "H"],
-                                [(0.0, 0.0, 0.0), (float(step), 0.0, 0.0)],
-                                comment=f"image {step}")
+                write_xyz_frame(
+                    handle,
+                    ["O", "H"],
+                    [(0.0, 0.0, 0.0), (float(step), 0.0, 0.0)],
+                    comment=f"image {step}",
+                )
 
         out = tmp_path / "neb_path.pdb"
         convert_xyz_to_plumed_ref(xyz, template, out, atom_line="ATOM")
@@ -204,8 +240,10 @@ class TestConvertXyzToPlumedRef:
 
     def test_the_reference_and_its_template_end_up_numbered_alike(self, tmp_path):
         template = tmp_path / "index_atoms.pdb"
-        template.write_text(_pdb_line(serial=90, name=" O1 ", element="O")
-                            + _pdb_line(serial=91, name=" H1 ", element="H"))
+        template.write_text(
+            _pdb_line(serial=90, name=" O1 ", element="O")
+            + _pdb_line(serial=91, name=" H1 ", element="H")
+        )
 
         xyz = tmp_path / "path.xyz"
         with open(xyz, "w") as handle:
@@ -216,14 +254,40 @@ class TestConvertXyzToPlumedRef:
 
         # PLUMED matches reference to template by serial, so both are
         # renumbered from 1 on the way out. This is the whole point.
-        template_serials = [line[6:11].strip()
-                            for line in template.read_text().splitlines()
-                            if line.startswith("ATOM")]
-        out_serials = [line[6:11].strip()
-                       for line in out.read_text().splitlines()
-                       if line.startswith("ATOM")]
+        template_serials = [
+            line[6:11].strip()
+            for line in template.read_text().splitlines()
+            if line.startswith("ATOM")
+        ]
+        out_serials = [
+            line[6:11].strip()
+            for line in out.read_text().splitlines()
+            if line.startswith("ATOM")
+        ]
         assert template_serials == ["1", "2"]
         assert out_serials == ["1", "2"]
+
+    def test_accepts_multiple_template_record_types(self, tmp_path):
+        template = tmp_path / "index_atoms.pdb"
+        template.write_text(
+            _pdb_line(serial=1, name=" O1 ", element="O")
+            + _pdb_line(serial=2, name=" H1 ", element="H").replace(
+                "ATOM  ", "HETATM", 1
+            )
+        )
+        xyz = tmp_path / "path.xyz"
+        with open(xyz, "w") as handle:
+            write_xyz_frame(handle, ["O", "H"], [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)])
+
+        out = tmp_path / "neb_path.pdb"
+        convert_xyz_to_plumed_ref(xyz, template, out, atom_line=("ATOM", "HETATM"))
+
+        atom_lines = [
+            line
+            for line in out.read_text().splitlines()
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        assert len(atom_lines) == 2
 
     def test_an_empty_xyz_writes_nothing_rather_than_failing(self, tmp_path):
         template = tmp_path / "index_atoms.pdb"

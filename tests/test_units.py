@@ -3,12 +3,14 @@
 import numpy as np
 import pytest
 
-from reactiontools import (DEFAULT_ENERGY_UNIT,
-                           ENERGY_UNITS,
-                           as_kelvin,
-                           convert_energy,
-                           thermal_energy,
-                           unit_label)
+from reactiontools import (
+    DEFAULT_ENERGY_UNIT,
+    ENERGY_UNITS,
+    as_kelvin,
+    convert_energy,
+    thermal_energy,
+    unit_label,
+)
 
 
 class TestConvertEnergy:
@@ -69,7 +71,8 @@ class TestThermalEnergy:
         openmm_unit = pytest.importorskip("openmm.unit")
 
         assert thermal_energy(300.0 * openmm_unit.kelvin) == pytest.approx(
-            thermal_energy(300.0))
+            thermal_energy(300.0)
+        )
 
 
 class TestAsKelvin:

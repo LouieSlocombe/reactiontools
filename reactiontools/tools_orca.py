@@ -25,20 +25,22 @@ from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
 
 
-def orca_calc_preset(orca_path=None,
-                     directory=None,
-                     calc_type='DFT',
-                     xc='r2SCAN-3c',
-                     charge=0,
-                     multiplicity=1,
-                     basis_set='',
-                     n_procs=1,
-                     f_solv=False,
-                     f_disp=False,
-                     atom_list=None,
-                     calc_extra=None,
-                     blocks_extra=None,
-                     scf_option=None):
+def orca_calc_preset(
+    orca_path=None,
+    directory=None,
+    calc_type="DFT",
+    xc="r2SCAN-3c",
+    charge=0,
+    multiplicity=1,
+    basis_set="",
+    n_procs=1,
+    f_solv=False,
+    f_disp=False,
+    atom_list=None,
+    calc_extra=None,
+    blocks_extra=None,
+    scf_option=None,
+):
     """Build an ASE ORCA calculator from a small set of common presets.
 
     Assembles the ORCA "simple input" line and block section for one of a
@@ -96,69 +98,67 @@ def orca_calc_preset(orca_path=None,
         (``EnGrad``).
     """
     if orca_path is None:
-        orca_path = os.environ.get('ORCA_PATH')
+        orca_path = os.environ.get("ORCA_PATH")
     if directory is None:
-        directory = os.path.join(tempfile.mkdtemp(), 'orca')
+        directory = os.path.join(tempfile.mkdtemp(), "orca")
 
     profile = OrcaProfile(command=orca_path)
-    inpt_procs = f'%pal nprocs {n_procs} end' if n_procs > 1 else ''
+    inpt_procs = f"%pal nprocs {n_procs} end" if n_procs > 1 else ""
 
     if f_solv is not None and f_solv is not False:
         # `is True`, not truthiness: a solvent name is truthy too, and testing
         # it that way overwrote every name with WATER.
         if f_solv is True:
-            f_solv = 'WATER'
-        inpt_solv = (f'\n%CPCM SMD TRUE\n'
-                     f'    SMDSOLVENT "{f_solv}"\n'
-                     f'END')
+            f_solv = "WATER"
+        inpt_solv = f'\n%CPCM SMD TRUE\n    SMDSOLVENT "{f_solv}"\nEND'
     else:
-        inpt_solv = ''
+        inpt_solv = ""
 
     if f_disp is None or f_disp is False:
-        inpt_disp = ''
+        inpt_disp = ""
     else:
-        inpt_disp = 'D4' if f_disp is True else f_disp
+        inpt_disp = "D4" if f_disp is True else f_disp
 
-    if atom_list is not None and calc_type == 'QM/XTB2':
-        inpt_xtb = f'\n%QMMM QMATOMS {{{atom_list}}} END END\n'
+    if atom_list is not None and calc_type == "QM/XTB2":
+        inpt_xtb = f"\n%QMMM QMATOMS {{{atom_list}}} END END\n"
     else:
-        inpt_xtb = ''
+        inpt_xtb = ""
 
     if blocks_extra is None:
-        blocks_extra = ''
+        blocks_extra = ""
 
     inpt_blocks = inpt_procs + inpt_solv + blocks_extra
 
-    if calc_type == 'DFT':
-        inpt_simple = f'{xc} {inpt_disp} {basis_set}'
-    elif calc_type == 'MP2':
-        inpt_simple = f'DLPNO-{calc_type} {basis_set} {basis_set}/C'
-    elif calc_type == 'CCSD':
-        inpt_simple = f'DLPNO-{calc_type}(T) {basis_set} {basis_set}/C'
-    elif calc_type == 'QM/XTB2':
-        inpt_simple = f'{calc_type} {xc} {inpt_disp} {basis_set}'
+    if calc_type == "DFT":
+        inpt_simple = f"{xc} {inpt_disp} {basis_set}"
+    elif calc_type == "MP2":
+        inpt_simple = f"DLPNO-{calc_type} {basis_set} {basis_set}/C"
+    elif calc_type == "CCSD":
+        inpt_simple = f"DLPNO-{calc_type}(T) {basis_set} {basis_set}/C"
+    elif calc_type == "QM/XTB2":
+        inpt_simple = f"{calc_type} {xc} {inpt_disp} {basis_set}"
         inpt_blocks = inpt_procs + inpt_solv + inpt_xtb
     else:
-        inpt_simple = f'{calc_type} {basis_set}'
+        inpt_simple = f"{calc_type} {basis_set}"
 
     # NOTE: open-shell MP2/CCSD conventionally use a UHF reference;
     # UKS is kept for all methods to preserve existing behaviour.
-    if multiplicity > 1 and calc_type in ('DFT', 'QM/XTB2', 'MP2', 'CCSD'):
-        inpt_simple = 'UKS ' + inpt_simple
+    if multiplicity > 1 and calc_type in ("DFT", "QM/XTB2", "MP2", "CCSD"):
+        inpt_simple = "UKS " + inpt_simple
 
     if scf_option is not None:
-        inpt_simple += ' ' + scf_option
+        inpt_simple += " " + scf_option
 
     if calc_extra is not None:
-        inpt_simple += ' ' + calc_extra
+        inpt_simple += " " + calc_extra
 
     return ORCA(
         profile=profile,
         charge=charge,
         mult=multiplicity,
         directory=directory,
-        orcasimpleinput=inpt_simple + ' EnGrad',
-        orcablocks=inpt_blocks
+        orcasimpleinput=inpt_simple + " EnGrad",
+        orcablocks=inpt_blocks,
     )
 
 
@@ -173,14 +173,14 @@ def orca_calc_preset(orca_path=None,
 #: Cheap DFT: BLYP/6-31+G(d,p), gas phase, no dispersion. For a first look at
 #: a structure, or for the many single points of a scan.
 orca_preset_dft_cheap = {
-    'calc_type': 'DFT',
-    'xc': 'BLYP',
-    'basis_set': '6-31+G(d,p)',
-    'f_disp': False,
-    'f_solv': False,
-    'atom_list': None,
-    'calc_extra': None,
-    'scf_option': None
+    "calc_type": "DFT",
+    "xc": "BLYP",
+    "basis_set": "6-31+G(d,p)",
+    "f_disp": False,
+    "f_solv": False,
+    "atom_list": None,
+    "calc_extra": None,
+    "scf_option": None,
 }
 
 #: Production DFT: B3LYP/def2-SVP with D4 dispersion in implicit water.
@@ -188,41 +188,41 @@ orca_preset_dft_cheap = {
 #: :func:`orca_calc_preset` reads as ``D4`` and ``WATER``; pass a string
 #: instead for a different solvent or dispersion correction.
 orca_preset_dft_gold = {
-    'calc_type': 'DFT',
-    'xc': 'B3LYP',
-    'basis_set': 'DEF2-SVP',
-    'f_disp': True,
-    'f_solv': True,
-    'atom_list': None,
-    'calc_extra': None,
-    'scf_option': None
+    "calc_type": "DFT",
+    "xc": "B3LYP",
+    "basis_set": "DEF2-SVP",
+    "f_disp": True,
+    "f_solv": True,
+    "atom_list": None,
+    "calc_extra": None,
+    "scf_option": None,
 }
 
 #: GFN2-xTB: a semi-empirical tight-binding method, orders of magnitude
 #: cheaper than DFT. Fast enough to drive a NEB with, which is what makes it
 #: the usual choice for a first band before refining at a higher level.
 orca_preset_xtb = {
-    'calc_type': 'XTB2',
-    'xc': '',
-    'basis_set': '',
-    'f_disp': False,
-    'f_solv': False,
-    'atom_list': None,
-    'calc_extra': None,
-    'scf_option': None
+    "calc_type": "XTB2",
+    "xc": "",
+    "basis_set": "",
+    "f_disp": False,
+    "f_solv": False,
+    "atom_list": None,
+    "calc_extra": None,
+    "scf_option": None,
 }
 
 #: DLPNO-MP2/def2-TZVPP in implicit water, for a correlated energy on a
 #: geometry optimised more cheaply.
 orca_preset_mp2_gold = {
-    'calc_type': 'MP2',
-    'xc': '',
-    'basis_set': 'DEF2-TZVPP',
-    'f_disp': False,
-    'f_solv': True,
-    'atom_list': None,
-    'calc_extra': None,
-    'scf_option': None
+    "calc_type": "MP2",
+    "xc": "",
+    "basis_set": "DEF2-TZVPP",
+    "f_disp": False,
+    "f_solv": True,
+    "atom_list": None,
+    "calc_extra": None,
+    "scf_option": None,
 }
 
 #: CCSD(T)/def2-TZVPP in implicit water, the reference energy to judge the
@@ -232,28 +232,30 @@ orca_preset_mp2_gold = {
 #: linear-scaling ``DLPNO-CCSD(T)`` approximation, which is the only tractable
 #: option beyond a handful of atoms.
 orca_preset_ccsd_gold = {
-    'calc_type': 'CCSD(T)',
-    'xc': '',
-    'basis_set': 'DEF2-TZVPP',
-    'f_disp': False,
-    'f_solv': True,
-    'atom_list': None,
-    'calc_extra': None,
-    'scf_option': None
+    "calc_type": "CCSD(T)",
+    "xc": "",
+    "basis_set": "DEF2-TZVPP",
+    "f_disp": False,
+    "f_solv": True,
+    "atom_list": None,
+    "calc_extra": None,
+    "scf_option": None,
 }
 
 
-def orca_optimise_atoms(atoms,
-                        charge=0,
-                        multiplicity=1,
-                        orca_path=None,
-                        xc='r2SCAN-3c',
-                        basis_set='',
-                        tight_opt=True,
-                        tight_scf=False,
-                        f_solv=False,
-                        f_disp=False,
-                        n_procs=1):
+def orca_optimise_atoms(
+    atoms,
+    charge=0,
+    multiplicity=1,
+    orca_path=None,
+    xc="r2SCAN-3c",
+    basis_set="",
+    tight_opt=True,
+    tight_scf=False,
+    f_solv=False,
+    f_disp=False,
+    n_procs=1,
+):
     """Optimise a geometry at the DFT level with ORCA.
 
     Builds a DFT calculator via :func:`orca_calc_preset` with an
@@ -298,25 +300,27 @@ def orca_optimise_atoms(atoms,
         The optimised geometry, read from ORCA's ``orca.xyz`` output.
     """
     if orca_path is None:
-        orca_path = os.environ.get('ORCA_PATH')
+        orca_path = os.environ.get("ORCA_PATH")
     else:
         orca_path = os.path.abspath(orca_path)
 
-    opt_option = 'TIGHTOPT' if tight_opt else 'OPT'
-    calc_extra = f'{opt_option} TIGHTSCF' if tight_scf else opt_option
+    opt_option = "TIGHTOPT" if tight_opt else "OPT"
+    calc_extra = f"{opt_option} TIGHTSCF" if tight_scf else opt_option
 
     with tempfile.TemporaryDirectory() as temp_dir:
         orca_file = os.path.join(temp_dir, "orca.xyz")
-        calc = orca_calc_preset(orca_path=orca_path,
-                                directory=temp_dir,
-                                charge=charge,
-                                multiplicity=multiplicity,
-                                xc=xc,
-                                basis_set=basis_set,
-                                n_procs=n_procs,
-                                f_solv=f_solv,
-                                f_disp=f_disp,
-                                calc_extra=calc_extra)
+        calc = orca_calc_preset(
+            orca_path=orca_path,
+            directory=temp_dir,
+            charge=charge,
+            multiplicity=multiplicity,
+            xc=xc,
+            basis_set=basis_set,
+            n_procs=n_procs,
+            f_solv=f_solv,
+            f_disp=f_disp,
+            calc_extra=calc_extra,
+        )
         atoms.calc = calc
         _ = atoms.get_potential_energy()
         return read(orca_file, format="xyz")
@@ -351,7 +355,7 @@ def _extract_conformer_info(filepath: str | Path):
         """,
         re.VERBOSE,
     )
-    header_pat = re.compile(r"Conformer\s+Energy.*% total", re.I)
+    header_pat = re.compile(r"Conformer\s+Energy.*% total", re.IGNORECASE)
     rows = []
     in_table = False
     with open(filepath, encoding="utf-8", errors="ignore") as fh:
@@ -377,17 +381,12 @@ def _extract_conformer_info(filepath: str | Path):
             "Could not locate ensemble table. Check that the file is complete."
         )
 
-    return pd.DataFrame(
-        rows, columns=["Conformer", "Energy_kcal_mol", "Percent_total"]
-    )
+    return pd.DataFrame(rows, columns=["Conformer", "Energy_kcal_mol", "Percent_total"])
 
 
-def orca_calculate_goat(atoms,
-                        charge=0,
-                        multiplicity=1,
-                        orca_path=None,
-                        n_procs=1,
-                        method='XTB'):
+def orca_calculate_goat(
+    atoms, charge=0, multiplicity=1, orca_path=None, n_procs=1, method="XTB"
+):
     """Run ORCA's GOAT conformer search and collect the resulting ensemble.
 
     Worth running before a band is built: a NEB between two arbitrary
@@ -422,11 +421,11 @@ def orca_calculate_goat(atoms,
         :func:`_extract_conformer_info`.
     """
     if orca_path is None:
-        orca_path = os.environ.get('ORCA_PATH')
+        orca_path = os.environ.get("ORCA_PATH")
     else:
         orca_path = os.path.abspath(orca_path)
     profile = OrcaProfile(command=orca_path)
-    inpt_procs = f'%pal nprocs {n_procs} end' if n_procs > 1 else ''
+    inpt_procs = f"%pal nprocs {n_procs} end" if n_procs > 1 else ""
 
     with tempfile.TemporaryDirectory() as temp_dir:
         calc = ORCA(
@@ -434,8 +433,8 @@ def orca_calculate_goat(atoms,
             charge=charge,
             mult=multiplicity,
             directory=temp_dir,
-            orcasimpleinput=f'GOAT {method}'.strip(),
-            orcablocks=inpt_procs
+            orcasimpleinput=f"GOAT {method}".strip(),
+            orcablocks=inpt_procs,
         )
         atoms.calc = calc
         _ = atoms.get_potential_energy()
@@ -443,5 +442,5 @@ def orca_calculate_goat(atoms,
         orca_file = os.path.join(temp_dir, "orca.out")
 
         df = _extract_conformer_info(orca_file)
-        atoms = read(xyz_file, format="xyz", index=':')
+        atoms = read(xyz_file, format="xyz", index=":")
         return atoms, df

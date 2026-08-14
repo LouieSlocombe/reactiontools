@@ -20,13 +20,10 @@ __all__ = ["ax_plot", "n_plot"]
 
 # Set on import, so it thickens the frame of every figure drawn in the
 # process, not only the ones passing through ax_plot.
-plt.rcParams['axes.linewidth'] = 2.0
+plt.rcParams["axes.linewidth"] = 2.0
 
 
-def n_plot(xlab,
-           ylab,
-           xs=14,
-           ys=14):
+def n_plot(xlab, ylab, xs=14, ys=14):
     """Style the current axes, as :func:`ax_plot` would.
 
     Parameters
@@ -43,12 +40,7 @@ def n_plot(xlab,
     ax_plot(plt.gcf(), plt.gca(), xlab, ylab, xs=xs, ys=ys)
 
 
-def ax_plot(fig,
-            ax,
-            xlab,
-            ylab,
-            xs=14,
-            ys=14):
+def ax_plot(fig, ax, xlab, ylab, xs=14, ys=14):
     """Style one axes: ticks inward on all four sides, minor ticks on, labels.
 
     The tight-layout pass is skipped when the figure manages its own layout
@@ -71,9 +63,13 @@ def ax_plot(fig,
         Font size for the y-axis label.
     """
     ax.minorticks_on()
-    ax.tick_params(axis='both', which='major', labelsize=ys - 2, direction='in', length=6, width=2)
-    ax.tick_params(axis='both', which='minor', labelsize=ys - 2, direction='in', length=4, width=2)
-    ax.tick_params(axis='both', which='both', top=True, right=True)
+    ax.tick_params(
+        axis="both", which="major", labelsize=ys - 2, direction="in", length=6, width=2
+    )
+    ax.tick_params(
+        axis="both", which="minor", labelsize=ys - 2, direction="in", length=4, width=2
+    )
+    ax.tick_params(axis="both", which="both", top=True, right=True)
     if xlab is not None:
         ax.set_xlabel(xlab, fontsize=xs)
     if ylab is not None:

@@ -51,8 +51,9 @@ class TestOpesFesCommand:
         assert cmd[cmd.index("--bin") + 1] == "200"
 
     def test_a_multi_dimensional_grid_is_comma_joined(self):
-        cmd = _opes_fes_command(grid_min=[-1.1, -1.1], grid_max=[1.1, 1.1],
-                                grid_bin=[200, 200])
+        cmd = _opes_fes_command(
+            grid_min=[-1.1, -1.1], grid_max=[1.1, 1.1], grid_bin=[200, 200]
+        )
 
         assert cmd[cmd.index("--min") + 1] == "-1.1,-1.1"
         assert cmd[cmd.index("--bin") + 1] == "200,200"
@@ -90,15 +91,24 @@ def test_two_dimensional_reweighting_supports_rectangular_grids(tmp_path):
         [
             sys.executable,
             str(script_path("FES_from_Reweighting.py")),
-            "--colvar", str(colvar),
-            "--outfile", str(output),
-            "--cv", "cv_x,cv_y",
-            "--bias", "NO",
-            "--sigma", "0.2,0.3",
-            "--kt", "1.0",
-            "--min", "0.0,0.0",
-            "--max", "1.0,1.0",
-            "--bin", "2,3",
+            "--colvar",
+            str(colvar),
+            "--outfile",
+            str(output),
+            "--cv",
+            "cv_x,cv_y",
+            "--bias",
+            "NO",
+            "--sigma",
+            "0.2,0.3",
+            "--kt",
+            "1.0",
+            "--min",
+            "0.0,0.0",
+            "--max",
+            "1.0,1.0",
+            "--bin",
+            "2,3",
         ],
         check=True,
         capture_output=True,

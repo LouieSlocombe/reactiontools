@@ -6,21 +6,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from reactiontools import (ax_plot,
-                           n_plot,
-                           plot_images,
-                           plot_irc,
-                           plot_neb,
-                           plot_plumed,
-                           plot_plumed_multi,
-                           plot_temperature,
-                           plot_total_energy,
-                           prepare_neb,
-                           show_atoms,
-                           summarise_neb)
-from reactiontools.tools_plotting import (_expand_fes_files,
-                                          _fes_labels,
-                                          _get_energy)
+from reactiontools import (
+    ax_plot,
+    n_plot,
+    plot_images,
+    plot_irc,
+    plot_neb,
+    plot_plumed,
+    plot_plumed_multi,
+    plot_temperature,
+    plot_total_energy,
+    prepare_neb,
+    show_atoms,
+    summarise_neb,
+)
+from reactiontools.tools_plotting import _expand_fes_files, _fes_labels, _get_energy
 
 
 @pytest.fixture
@@ -73,14 +73,20 @@ class TestPlotImages:
     def test_titles_default_to_the_image_index(self, chain):
         fig, axes = plot_images(chain, show=False)
 
-        assert [ax.get_title() for ax in axes[:len(chain)]] == ["0", "1", "2", "3", "4"]
+        assert [ax.get_title() for ax in axes[: len(chain)]] == [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+        ]
 
     def test_custom_titles_are_used(self, chain):
         titles = ["R", "a", "TS", "b", "P"]
 
         fig, axes = plot_images(chain, titles=titles, show=False)
 
-        assert [ax.get_title() for ax in axes[:len(chain)]] == titles
+        assert [ax.get_title() for ax in axes[: len(chain)]] == titles
 
     def test_rejects_a_title_count_mismatch(self, chain):
         with pytest.raises(ValueError, match="titles"):
@@ -128,13 +134,13 @@ class TestGetEnergy:
     def test_uses_the_cached_energy(self, band):
         """Cached results mean the calculator is never needed."""
         assert _get_energy(band[0], calc=None) == pytest.approx(
-            band[0].get_potential_energy())
+            band[0].get_potential_energy()
+        )
 
     def test_falls_back_to_the_calculator(self, calc, water):
         water.calc = None
 
-        assert _get_energy(water, calc) == pytest.approx(
-            water.get_potential_energy())
+        assert _get_energy(water, calc) == pytest.approx(water.get_potential_energy())
 
 
 class TestPlotNeb:
@@ -190,8 +196,9 @@ class TestPlotNeb:
     def test_draws_on_a_supplied_axes(self, band, calc):
         fig, ax = plt.subplots()
 
-        returned_fig, returned_ax = plot_neb(band, calc, fig=fig, ax=ax,
-                                             save=False, show=False)
+        returned_fig, returned_ax = plot_neb(
+            band, calc, fig=fig, ax=ax, save=False, show=False
+        )
 
         assert returned_ax is ax
         assert returned_fig is fig
@@ -201,15 +208,15 @@ class TestPlotNeb:
         fig, ax = plt.subplots()
         plt.figure()  # make a different figure current
 
-        plot_neb(band, calc, fig=fig, ax=ax, save=True, show=False,
-                 filename="profile")
+        plot_neb(band, calc, fig=fig, ax=ax, save=True, show=False, filename="profile")
 
         assert Path("profile.png").exists()
         assert Path("profile.pdf").exists()
 
     def test_label_is_applied(self, band, calc):
-        fig, ax = plot_neb(band, calc, smooth=False, save=False, show=False,
-                           label="forward")
+        fig, ax = plot_neb(
+            band, calc, smooth=False, save=False, show=False, label="forward"
+        )
 
         assert ax.lines[0].get_label() == "forward"
 
@@ -352,7 +359,7 @@ class TestPlotPlumed:
         fig, ax = plot_plumed(fes_file, save=False, show=False)
 
         cv = np.loadtxt(fes_file, usecols=0)
-        assert ax.lines[0].get_ydata() == pytest.approx(cv ** 2 * 1000.0)
+        assert ax.lines[0].get_ydata() == pytest.approx(cv**2 * 1000.0)
 
     def test_does_not_shift_the_surface(self, fes_file):
         """sum_hills is normally run with --mintozero; don't shift again."""
@@ -385,7 +392,7 @@ class TestPlotPlumedMulti:
         for name, offset in (("run_a", 0.0), ("run_b", 2.0)):
             run = tmp_path / "runs" / name
             run.mkdir(parents=True)
-            np.savetxt(run / "fes.dat", np.column_stack([cv, cv ** 2 + offset]))
+            np.savetxt(run / "fes.dat", np.column_stack([cv, cv**2 + offset]))
         return tmp_path / "runs"
 
     def test_one_line_per_run(self, runs):
@@ -399,8 +406,9 @@ class TestPlotPlumedMulti:
         assert [line.get_label() for line in ax.lines] == ["run_a", "run_b"]
 
     def test_custom_labels_are_used(self, runs):
-        fig, ax = plot_plumed_multi(runs, labels=["cold", "hot"],
-                                    save=False, show=False)
+        fig, ax = plot_plumed_multi(
+            runs, labels=["cold", "hot"], save=False, show=False
+        )
 
         assert [line.get_label() for line in ax.lines] == ["cold", "hot"]
 

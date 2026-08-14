@@ -18,16 +18,23 @@ From the repository root, install the package in editable mode so changes to the
 source are picked up without reinstalling:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .
 ```
 
-This also pulls in `geodesic_interpolate` from git, since it's a required
-dependency.
+This installs the complete runtime and development toolchain, including Sella,
+MDTraj, pytest and Ruff.
 
 ## 3. Check the install
 
 ```bash
 pytest
+```
+
+Check formatting and lint before committing:
+
+```bash
+ruff format --check .
+ruff check .
 ```
 
 # Install PLUMED and OPES module

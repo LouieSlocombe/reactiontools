@@ -52,117 +52,133 @@ criterion in ``info["converged"]`` on the structures it returns, and warns
 a ``ConvergenceError`` instead, or promote every one of them at once with
 ``warnings.simplefilter("error", ConvergenceWarning)``.
 
-Three dependencies are needed only by part of the package. The saddle-point
-searches (``optimise_ts`` and ``optimise_irc``) are built on sella, an optional
-extra: install it with ``pip install 'reactiontools[ts]'``. Reading a
-steered-MD trajectory in ``tools_path`` needs mdtraj, the ``path`` extra:
-``pip install 'reactiontools[path]'``. The ``tools_orca`` functions shell out
-to ORCA, which is licensed separately and installed by hand; see
-``build_tools/README.md``. Everything else works without any of them.
+Sella and MDTraj are installed dependencies but are imported only by the
+workflows that use them. The ``tools_orca`` functions shell out to ORCA, which
+is licensed separately and installed by hand; see ``build_tools/README.md``.
 """
 
-from .tools_cv import (as_positions,
-                       plumed_angle_radians,
-                       plumed_bias_and_fes,
-                       plumed_input_1pt,
-                       plumed_input_2pt_1d,
-                       plumed_input_2pt_2d,
-                       plumed_input_neb_path,
-                       plumed_input_steered,
-                       plumed_input_steered_pt,
-                       plumed_one_based,
-                       plumed_temperature_pair,
-                       plumed_units_header,
-                       switching_value)
-from .tools_fes import (FES,
-                        FESSummary,
-                        PlumedData,
-                        as_fes,
-                        fes_convergence,
-                        fes_series_files,
-                        load_fes_series,
-                        summarise_fes,
-                        plot_fes,
-                        plot_fes_convergence,
-                        plot_fes_1d,
-                        plot_fes_2d,
-                        plot_fes_2d_overlay,
-                        plot_fes_slices,
-                        plot_plumed_colvar,
-                        plot_plumed_fes,
-                        read_plumed_file)
-from .tools_geometry import (bonded_cluster_indices_no_anchor_hub,
-                             get_dimer_bonded_cluster_indices,
-                             flip_and_face_bases,
-                             optimize_with_fixed_anchors,
-                             get_best_flip_and_face_bases,
-                             swap_bonding_configuration)
-from .tools_io import (convert_pdb_to_xyz,
-                       convert_xyz_to_pdb,
-                       convert_xyz_to_plumed_ref,
-                       element_from_pdb_line,
-                       format_pdb_atom_name,
-                       pdb_remove_ter_index,
-                       strip_hydrogens_keep_indices,
-                       write_xyz_frame)
-from .tools_orca import (orca_calc_preset,
-                         orca_calculate_goat,
-                         orca_optimise_atoms,
-                         orca_preset_ccsd_gold,
-                         orca_preset_dft_cheap,
-                         orca_preset_dft_gold,
-                         orca_preset_mp2_gold,
-                         orca_preset_xtb)
-from .tools_path import (cv_from_colvar,
-                         estimate_path_lambda,
-                         path_from_steered_md,
-                         select_frames_by_cv,
-                         select_frames_by_msd)
-from .tools_plotting import (show_atoms,
-                             plot_images,
-                             plot_neb,
-                             plot_irc,
-                             plot_temperature,
-                             plot_total_energy,
-                             plot_plumed,
-                             plot_plumed_multi)
-from .tools_plumed import (PLUMED_ASE_UNITS,
-                           plumed_selection,
-                           plumed_metad_input,
-                           plumed_calculator,
-                           find_molecules,
-                           run_opes_fes,
-                           run_sum_hills,
-                           sum_hills_files)
-from .tools_reaction import (ConvergenceError,
-                             ConvergenceWarning,
-                             NebSummary,
-                             summarise_neb,
-                             get_neb_path,
-                             get_fmax,
-                             stitch_path,
-                             resample_path,
-                             optimise_geom,
-                             optimise_reactant_product,
-                             prepare_neb,
-                             restart_neb,
-                             socket_calculators,
-                             prepare_parallel_neb,
-                             restart_parallel_neb,
-                             optimise_neb,
-                             get_ts_image,
-                             optimise_ts,
-                             optimise_irc,
-                             get_vibrations,
-                             quick_guess_path,
-                             quick_guess_ts)
-from .tools_style import n_plot, ax_plot
-from .tools_units import (DEFAULT_ENERGY_UNIT,
-                          ENERGY_UNITS,
-                          as_kelvin,
-                          convert_energy,
-                          thermal_energy,
-                          unit_label)
+from .tools_cv import (
+    as_positions,
+    plumed_angle_radians,
+    plumed_bias_and_fes,
+    plumed_input_1pt,
+    plumed_input_2pt_1d,
+    plumed_input_2pt_2d,
+    plumed_input_neb_path,
+    plumed_input_steered,
+    plumed_input_steered_pt,
+    plumed_one_based,
+    plumed_temperature_pair,
+    plumed_units_header,
+    switching_value,
+)
+from .tools_fes import (
+    FES,
+    FESSummary,
+    PlumedData,
+    as_fes,
+    fes_convergence,
+    fes_series_files,
+    load_fes_series,
+    plot_fes,
+    plot_fes_1d,
+    plot_fes_2d,
+    plot_fes_2d_overlay,
+    plot_fes_convergence,
+    plot_fes_slices,
+    plot_plumed_colvar,
+    plot_plumed_fes,
+    read_plumed_file,
+    summarise_fes,
+)
+from .tools_geometry import (
+    bonded_cluster_indices_no_anchor_hub,
+    flip_and_face_bases,
+    get_best_flip_and_face_bases,
+    get_dimer_bonded_cluster_indices,
+    optimize_with_fixed_anchors,
+    swap_bonding_configuration,
+)
+from .tools_io import (
+    convert_pdb_to_xyz,
+    convert_xyz_to_pdb,
+    convert_xyz_to_plumed_ref,
+    element_from_pdb_line,
+    format_pdb_atom_name,
+    pdb_remove_ter_index,
+    strip_hydrogens_keep_indices,
+    write_xyz_frame,
+)
+from .tools_orca import (
+    orca_calc_preset,
+    orca_calculate_goat,
+    orca_optimise_atoms,
+    orca_preset_ccsd_gold,
+    orca_preset_dft_cheap,
+    orca_preset_dft_gold,
+    orca_preset_mp2_gold,
+    orca_preset_xtb,
+)
+from .tools_path import (
+    cv_from_colvar,
+    estimate_path_lambda,
+    path_from_steered_md,
+    select_frames_by_cv,
+    select_frames_by_msd,
+)
+from .tools_plotting import (
+    plot_images,
+    plot_irc,
+    plot_neb,
+    plot_plumed,
+    plot_plumed_multi,
+    plot_temperature,
+    plot_total_energy,
+    show_atoms,
+)
+from .tools_plumed import (
+    PLUMED_ASE_UNITS,
+    find_molecules,
+    plumed_calculator,
+    plumed_metad_input,
+    plumed_selection,
+    run_opes_fes,
+    run_sum_hills,
+    sum_hills_files,
+)
+from .tools_reaction import (
+    ConvergenceError,
+    ConvergenceWarning,
+    NebSummary,
+    get_fmax,
+    get_neb_path,
+    get_ts_image,
+    get_vibrations,
+    optimise_geom,
+    optimise_irc,
+    optimise_neb,
+    optimise_reactant_product,
+    optimise_ts,
+    prepare_neb,
+    prepare_parallel_neb,
+    quick_guess_path,
+    quick_guess_ts,
+    resample_path,
+    restart_neb,
+    restart_parallel_neb,
+    socket_calculators,
+    stitch_path,
+    summarise_neb,
+)
+from .tools_style import ax_plot, n_plot
+from .tools_units import (
+    DEFAULT_ENERGY_UNIT,
+    ENERGY_UNITS,
+    as_kelvin,
+    convert_energy,
+    thermal_energy,
+    unit_label,
+)
 
 __version__ = "0.2.0"
 

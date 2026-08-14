@@ -12,36 +12,45 @@ import numpy as np
 import pytest
 from ase import Atoms
 
-from reactiontools import (PLUMED_ASE_UNITS,
-                           as_positions,
-                           plumed_angle_radians,
-                           plumed_bias_and_fes,
-                           plumed_input_1pt,
-                           plumed_input_2pt_1d,
-                           plumed_input_2pt_2d,
-                           plumed_input_neb_path,
-                           plumed_input_steered,
-                           plumed_input_steered_pt,
-                           plumed_one_based,
-                           plumed_temperature_pair,
-                           plumed_units_header,
-                           switching_value)
+from reactiontools import (
+    PLUMED_ASE_UNITS,
+    as_positions,
+    plumed_angle_radians,
+    plumed_bias_and_fes,
+    plumed_input_1pt,
+    plumed_input_2pt_1d,
+    plumed_input_2pt_2d,
+    plumed_input_neb_path,
+    plumed_input_steered,
+    plumed_input_steered_pt,
+    plumed_one_based,
+    plumed_temperature_pair,
+    plumed_units_header,
+    switching_value,
+)
 
 DONOR, HYDROGEN, ACCEPTOR = 0, 1, 2
 
 #: Donor, hydrogen, acceptor in a line, in angstrom. The proton sits 1.02 A
 #: from the donor and 1.69 A from the acceptor, so the CV starts positive.
 #: These are the coordinates the golden script below was captured with.
-PT_GEOMETRY = np.array([[0.00, 0.00, 0.00],
-                        [1.02, 0.00, 0.00],
-                        [2.71, 0.00, 0.00]])
+PT_GEOMETRY = np.array([[0.00, 0.00, 0.00], [1.02, 0.00, 0.00], [2.71, 0.00, 0.00]])
 
 #: Two donor/hydrogen/acceptor triples, with spare atoms around them.
-TWO_TRANSFER_GEOMETRY = np.array([[0.00, 0.00, 0.00], [1.02, 0.00, 0.00],
-                                  [2.71, 0.00, 0.00], [0.13, 1.47, 0.00],
-                                  [1.19, 2.05, 0.31], [2.83, 1.63, 0.22],
-                                  [-1.21, 0.44, 0.77], [3.94, 0.62, -0.55],
-                                  [0.61, -1.38, 1.02], [3.31, -1.11, 0.84]])
+TWO_TRANSFER_GEOMETRY = np.array(
+    [
+        [0.00, 0.00, 0.00],
+        [1.02, 0.00, 0.00],
+        [2.71, 0.00, 0.00],
+        [0.13, 1.47, 0.00],
+        [1.19, 2.05, 0.31],
+        [2.83, 1.63, 0.22],
+        [-1.21, 0.44, 0.77],
+        [3.94, 0.62, -0.55],
+        [0.61, -1.38, 1.02],
+        [3.31, -1.11, 0.84],
+    ]
+)
 
 TEMPERATURE = 300.0
 
@@ -49,8 +58,16 @@ TEMPERATURE = 300.0
 #: family at once for the mistakes that are easy to make in an f-string.
 ALL_BUILDERS = [
     ("1pt", plumed_input_1pt, (PT_GEOMETRY, [0, 1, 2], TEMPERATURE)),
-    ("2pt_1d", plumed_input_2pt_1d, (TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE)),
-    ("2pt_2d", plumed_input_2pt_2d, (TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE)),
+    (
+        "2pt_1d",
+        plumed_input_2pt_1d,
+        (TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE),
+    ),
+    (
+        "2pt_2d",
+        plumed_input_2pt_2d,
+        (TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE),
+    ),
     ("neb_path", plumed_input_neb_path, (TEMPERATURE,)),
 ]
 
@@ -61,16 +78,19 @@ _LABEL = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*\S")
 
 def labels_of(script):
     """Every action label defined in a script, in order."""
-    return [_LABEL.match(line).group(1)
-            for line in script.splitlines()
-            if not line.lstrip().startswith("#") and _LABEL.match(line)]
+    return [
+        _LABEL.match(line).group(1)
+        for line in script.splitlines()
+        if not line.lstrip().startswith("#") and _LABEL.match(line)
+    ]
 
 
 class TestEveryBuilder:
     """Checks that should hold for all of them, whatever they bias."""
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_no_placeholder_survives_into_the_script(self, name, builder, args):
         # An f-string that lost a brace, or a value that was never computed,
         # produces a script PLUMED rejects with an unhelpful parse error.
@@ -79,8 +99,9 @@ class TestEveryBuilder:
         assert "{" not in script and "}" not in script
         assert "None" not in script
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_labels_are_unique(self, name, builder, args):
         # PLUMED refers to an action by its label; two actions sharing one is
         # an error it only reports at run time.
@@ -90,8 +111,9 @@ class TestEveryBuilder:
         duplicates = {label for label in labels if labels.count(label) > 1}
         assert not duplicates
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_every_arg_refers_to_something_defined_before_it(self, name, builder, args):
         script, _ = builder(*args)
 
@@ -104,13 +126,15 @@ class TestEveryBuilder:
                     # path.sss, metad.bias and dist.z are components of the
                     # action named before the dot.
                     assert term.split(".")[0] in defined, (
-                        f"{name}: ARG={term} used before it is defined")
+                        f"{name}: ARG={term} used before it is defined"
+                    )
             match = _LABEL.match(line)
             if match:
                 defined.add(match.group(1))
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_indices_are_one_based(self, name, builder, args):
         # Every builder is given a 0-based index 0, which PLUMED must never
         # see: it counts atoms from one, and index 0 is a parse error.
@@ -119,15 +143,17 @@ class TestEveryBuilder:
         for atoms in re.findall(r"(?:ATOMS|GROUPA|GROUPB)=([\d,]+)", script):
             assert "0" not in atoms.split(","), f"{name}: 0-based index leaked"
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_the_bias_and_the_print_agree_on_the_temperature(self, name, builder, args):
         script, _ = builder(*args)
 
         assert f"TEMP={TEMPERATURE}" in script
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_opes_switches_both_the_bias_and_the_command(self, name, builder, args):
         # The bug this catches: builders that hand-rolled their own METAD line
         # accepted f_opes and then silently ignored it. Everything goes through
@@ -140,8 +166,9 @@ class TestEveryBuilder:
         assert "FES_from_State.py" in command
         assert command.startswith(sys.executable)
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_well_tempered_metad_is_the_default(self, name, builder, args):
         script, command = builder(*args)
 
@@ -149,32 +176,38 @@ class TestEveryBuilder:
         assert "BIASFACTOR=" in script
         assert command.startswith("plumed sum_hills")
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_the_command_carries_kt_for_this_temperature(self, name, builder, args):
         _, command = builder(*args)
 
         # 2.4943 kJ/mol at 300 K; the reconstruction reweights by it.
         assert "--kt 2.49434" in command
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
-    def test_ase_units_change_the_header_and_the_thermal_energy(self, name, builder, args):
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
+    def test_ase_units_change_the_header_and_the_thermal_energy(
+        self, name, builder, args
+    ):
         script, command = builder(*args, units="ase")
 
         assert script.lstrip().startswith(PLUMED_ASE_UNITS)
         # kBT at 300 K is 0.025852 eV, not 2.4943 kJ/mol.
         assert "--kt 0.025852" in command
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_plumed_units_write_no_units_line(self, name, builder, args):
         script, _ = builder(*args)
 
         assert "UNITS" not in script
 
-    @pytest.mark.parametrize("name, builder, args", ALL_BUILDERS,
-                             ids=[case[0] for case in ALL_BUILDERS])
+    @pytest.mark.parametrize(
+        "name, builder, args", ALL_BUILDERS, ids=[case[0] for case in ALL_BUILDERS]
+    )
     def test_an_unknown_unit_system_is_rejected(self, name, builder, args):
         with pytest.raises(ValueError, match="Unknown units"):
             builder(*args, units="hartree")
@@ -239,7 +272,8 @@ class TestAsPositions:
         from openmm import unit as openmm_unit
 
         quantity = openmm_unit.Quantity(
-            [openmm.Vec3(*row) for row in PT_GEOMETRY * 0.1], openmm_unit.nanometer)
+            [openmm.Vec3(*row) for row in PT_GEOMETRY * 0.1], openmm_unit.nanometer
+        )
 
         class Modeller:
             positions = quantity
@@ -257,8 +291,9 @@ class TestTemperature:
     def test_an_openmm_quantity_is_still_accepted(self):
         openmm_unit = pytest.importorskip("openmm.unit")
 
-        from_quantity, _ = plumed_input_1pt(PT_GEOMETRY, [0, 1, 2],
-                                            300.0 * openmm_unit.kelvin)
+        from_quantity, _ = plumed_input_1pt(
+            PT_GEOMETRY, [0, 1, 2], 300.0 * openmm_unit.kelvin
+        )
         from_float, _ = plumed_input_1pt(PT_GEOMETRY, [0, 1, 2], 300.0)
 
         assert from_quantity == from_float
@@ -283,12 +318,16 @@ class TestSwitchingValue:
 
 class TestSteered:
     def test_it_schedules_the_pull(self):
-        script, n_steps = plumed_input_steered("pt_cv: DISTANCE ATOMS=1,2",
-                                               1.0, -1.0, 5_000,
-                                               cv_name="pt_cv",
-                                               steps_equil=1_000,
-                                               steps_relax=500,
-                                               stride=50)
+        script, n_steps = plumed_input_steered(
+            "pt_cv: DISTANCE ATOMS=1,2",
+            1.0,
+            -1.0,
+            5_000,
+            cv_name="pt_cv",
+            steps_equil=1_000,
+            steps_relax=500,
+            stride=50,
+        )
 
         assert n_steps == 6_500
         assert "MOVINGRESTRAINT ARG=pt_cv" in script
@@ -297,7 +336,10 @@ class TestSteered:
         assert "STEP1=1000 AT1=1.0000" in script
         assert "STEP2=6000 AT2=-1.0000" in script
         assert "STEP3=6500 AT3=-1.0000" in script
-        assert "PRINT       ARG=pt_cv,smd.pt_cv_cntr,smd.work STRIDE=50 FILE=COLVAR_SMD" in script
+        assert (
+            "PRINT       ARG=pt_cv,smd.pt_cv_cntr,smd.work STRIDE=50 FILE=COLVAR_SMD"
+            in script
+        )
 
     def test_without_holds_it_has_two_milestones(self):
         script, n_steps = plumed_input_steered("cv: DISTANCE ATOMS=1,2", 0.2, 0.5, 100)
@@ -308,9 +350,9 @@ class TestSteered:
         assert "STEP2=" not in script
 
     def test_pt_reads_the_ends_off_the_geometry(self):
-        script, n_steps = plumed_input_steered_pt(PT_GEOMETRY,
-                                                  [DONOR, HYDROGEN, ACCEPTOR],
-                                                  10_000)
+        script, n_steps = plumed_input_steered_pt(
+            PT_GEOMETRY, [DONOR, HYDROGEN, ACCEPTOR], 10_000
+        )
 
         assert n_steps == 10_000
         # PLUMED counts atoms from one
@@ -325,8 +367,9 @@ class TestSteered:
         assert at_values[-1] == pytest.approx(-at_values[0])
 
     def test_explicit_ends_override_the_geometry(self):
-        script, _ = plumed_input_steered_pt(PT_GEOMETRY, [0, 1, 2], 100,
-                                            cv_start=0.9, cv_stop=-0.4)
+        script, _ = plumed_input_steered_pt(
+            PT_GEOMETRY, [0, 1, 2], 100, cv_start=0.9, cv_stop=-0.4
+        )
 
         assert "AT0=0.9000" in script
         assert "AT1=-0.4000" in script
@@ -343,7 +386,9 @@ class TestGoldenScript:
     def test_one_proton_transfer_at_300_kelvin(self):
         script, command = plumed_input_1pt(PT_GEOMETRY, [0, 1, 2], TEMPERATURE)
 
-        assert script == """
+        assert (
+            script
+            == """
 # Proton transfer
 c_d:        COORDINATION GROUPA=1 GROUPB=2 R_0=0.11
 c_a:        COORDINATION GROUPA=3 GROUPB=2 R_0=0.11
@@ -359,8 +404,11 @@ ang_wall:   LOWER_WALLS ARG=ang_1 AT=2.27 KAPPA=500.0
 metad:      METAD ARG=pt_cv PACE=500 HEIGHT=15.0 SIGMA=0.05 BIASFACTOR=20.0 TEMP=300.0 FILE=HILLS GRID_MIN=-1.1 GRID_MAX=1.1 GRID_BIN=200
 PRINT       ARG=c_d,c_a,pt_cv,metad.bias STRIDE=500 FILE=COLVAR
         """
-        assert command == ("plumed sum_hills --hills HILLS --outfile fes.dat "
-                           "--min -1.1 --max 1.1 --bin 200 --kt 2.49434")
+        )
+        assert command == (
+            "plumed sum_hills --hills HILLS --outfile fes.dat "
+            "--min -1.1 --max 1.1 --bin 200 --kt 2.49434"
+        )
 
 
 class TestGrids:
@@ -374,16 +422,18 @@ class TestGrids:
         # Passing no bounds lets PLUMED size its own grid. The bug this pins:
         # a hand-rolled command kept --bin while dropping --min/--max, so the
         # two halves disagreed about the grid.
-        script, command = plumed_input_1pt(PT_GEOMETRY, [0, 1, 2], TEMPERATURE,
-                                           grid_min=None, grid_max=None)
+        script, command = plumed_input_1pt(
+            PT_GEOMETRY, [0, 1, 2], TEMPERATURE, grid_min=None, grid_max=None
+        )
 
         assert "GRID_MIN" not in script
         assert "--min" not in command and "--max" not in command
         assert "--bin 200" in command
 
     def test_the_two_dimensional_builder_doubles_every_grid_setting(self):
-        script, command = plumed_input_2pt_2d(TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5],
-                                              TEMPERATURE)
+        script, command = plumed_input_2pt_2d(
+            TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE
+        )
 
         assert "ARG=cv_diff1,cv_diff2" in script
         assert "SIGMA=0.05,0.05" in script
@@ -399,15 +449,17 @@ class TestWhatEachBuilderBiases:
         assert "pt_cv:      COMBINE ARG=c_d,c_a COEFFICIENTS=1,-1" in script
 
     def test_two_transfers_in_one_dimension_average_them(self):
-        script, _ = plumed_input_2pt_1d(TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5],
-                                        TEMPERATURE)
+        script, _ = plumed_input_2pt_1d(
+            TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE
+        )
 
         assert "METAD ARG=pt_cv" in script
         assert "COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=0.5,0.5" in script
 
     def test_two_transfers_in_two_dimensions_keep_them_apart(self):
-        script, _ = plumed_input_2pt_2d(TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5],
-                                        TEMPERATURE)
+        script, _ = plumed_input_2pt_2d(
+            TWO_TRANSFER_GEOMETRY, [0, 1, 2], [3, 4, 5], TEMPERATURE
+        )
 
         assert "METAD ARG=cv_diff1,cv_diff2" in script
         assert "COEFFICIENTS=0.5,0.5" not in script
@@ -446,9 +498,18 @@ class TestTheBuildingBlocks:
 
     def test_the_bias_and_the_command_agree_about_the_grid(self):
         line, command = plumed_bias_and_fes(
-            False, 'z', pace=500, height=15.0, sigma=0.05, bias=20.0,
-            temperature=TEMPERATURE, kt=2.49434, grid_bin=200,
-            grid_min=-0.3, grid_max=0.3)
+            False,
+            "z",
+            pace=500,
+            height=15.0,
+            sigma=0.05,
+            bias=20.0,
+            temperature=TEMPERATURE,
+            kt=2.49434,
+            grid_bin=200,
+            grid_min=-0.3,
+            grid_max=0.3,
+        )
 
         assert "METAD ARG=z" in line
         assert "GRID_MIN=-0.3 GRID_MAX=0.3 GRID_BIN=200" in line
@@ -456,8 +517,16 @@ class TestTheBuildingBlocks:
 
     def test_opes_switches_both_halves(self):
         line, command = plumed_bias_and_fes(
-            True, 'z', pace=500, height=15.0, sigma=0.05, bias=20.0,
-            temperature=TEMPERATURE, kt=2.49434, grid_bin=200)
+            True,
+            "z",
+            pace=500,
+            height=15.0,
+            sigma=0.05,
+            bias=20.0,
+            temperature=TEMPERATURE,
+            kt=2.49434,
+            grid_bin=200,
+        )
 
         assert "OPES_METAD ARG=z" in line and "BARRIER=15.0" in line
         assert "FES_from_State.py" in command
@@ -468,12 +537,15 @@ class TestTheBuildingBlocks:
         donor, hydrogen, acceptor = plumed_one_based([4, 5, 6])
         kelvin, kt = plumed_temperature_pair(TEMPERATURE, "plumed")
         line, command = plumed_bias_and_fes(
-            False, 'z', 500, 15.0, 0.05, 20.0, kelvin, kt, 200)
-        script = (f"{plumed_units_header('plumed')}"
-                  f"d1: DISTANCE ATOMS={donor},{hydrogen}\n"
-                  f"d2: DISTANCE ATOMS={acceptor},{hydrogen}\n"
-                  f"z: COMBINE ARG=d1,d2 COEFFICIENTS=1,-1 PERIODIC=NO\n"
-                  f"{line}\n")
+            False, "z", 500, 15.0, 0.05, 20.0, kelvin, kt, 200
+        )
+        script = (
+            f"{plumed_units_header('plumed')}"
+            f"d1: DISTANCE ATOMS={donor},{hydrogen}\n"
+            f"d2: DISTANCE ATOMS={acceptor},{hydrogen}\n"
+            f"z: COMBINE ARG=d1,d2 COEFFICIENTS=1,-1 PERIODIC=NO\n"
+            f"{line}\n"
+        )
 
         assert "{" not in script and "}" not in script
         assert set(labels_of(script)) == {"d1", "d2", "z", "metad"}

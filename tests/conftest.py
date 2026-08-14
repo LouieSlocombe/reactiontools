@@ -117,13 +117,17 @@ def pt_atoms():
     collective-variable tests need. Built rather than committed, so there is
     no data file to keep in step with the tests.
     """
-    return Atoms("OHOCCC",
-                 positions=[[0.00, 0.00, 0.00],   # donor O
-                            [0.98, 0.00, 0.00],   # the shared proton
-                            [2.65, 0.00, 0.00],   # acceptor O
-                            [-0.65, 1.18, 0.00],  # backbone
-                            [0.10, 2.40, 0.00],
-                            [1.55, 2.35, 0.00]])
+    return Atoms(
+        "OHOCCC",
+        positions=[
+            [0.00, 0.00, 0.00],  # donor O
+            [0.98, 0.00, 0.00],  # the shared proton
+            [2.65, 0.00, 0.00],  # acceptor O
+            [-0.65, 1.18, 0.00],  # backbone
+            [0.10, 2.40, 0.00],
+            [1.55, 2.35, 0.00],
+        ],
+    )
 
 
 @pytest.fixture
@@ -147,6 +151,6 @@ def fes_file(tmp_path):
     """
     path = tmp_path / "fes.dat"
     cv = np.linspace(-1.0, 1.0, 21)
-    fes = cv ** 2  # a simple parabola, minimum of 0 eV at cv = 0
+    fes = cv**2  # a simple parabola, minimum of 0 eV at cv = 0
     np.savetxt(path, np.column_stack([cv, fes]))
     return path

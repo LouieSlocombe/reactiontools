@@ -6,17 +6,21 @@ from ase import Atoms
 from ase.build import molecule
 from ase.optimize import FIRE
 
-from reactiontools import (ConvergenceError,
-                           ConvergenceWarning,
-                           bonded_cluster_indices_no_anchor_hub,
-                           flip_and_face_bases,
-                           get_best_flip_and_face_bases,
-                           get_dimer_bonded_cluster_indices,
-                           optimize_with_fixed_anchors,
-                           swap_bonding_configuration)
-from reactiontools.tools_geometry import (_orient_normal_toward,
-                                          _pca_frame,
-                                          _rigid_transform)
+from reactiontools import (
+    ConvergenceError,
+    ConvergenceWarning,
+    bonded_cluster_indices_no_anchor_hub,
+    flip_and_face_bases,
+    get_best_flip_and_face_bases,
+    get_dimer_bonded_cluster_indices,
+    optimize_with_fixed_anchors,
+    swap_bonding_configuration,
+)
+from reactiontools.tools_geometry import (
+    _orient_normal_toward,
+    _pca_frame,
+    _rigid_transform,
+)
 
 
 @pytest.fixture
@@ -66,8 +70,10 @@ class TestGetDimerBondedClusterIndices:
     def test_merges_both_halves(self, dimer):
         both = get_dimer_bonded_cluster_indices(dimer, [0, 3])
 
-        assert set(both) == (set(bonded_cluster_indices_no_anchor_hub(dimer, 0))
-                             | set(bonded_cluster_indices_no_anchor_hub(dimer, 3)))
+        assert set(both) == (
+            set(bonded_cluster_indices_no_anchor_hub(dimer, 0))
+            | set(bonded_cluster_indices_no_anchor_hub(dimer, 3))
+        )
 
     def test_has_no_duplicates(self, dimer):
         both = get_dimer_bonded_cluster_indices(dimer, [0, 3])
@@ -108,8 +114,9 @@ class TestPcaFrame:
 
     def test_normal_is_perpendicular_to_a_planar_group(self):
         """For points in the xy-plane the smallest-variance axis is z."""
-        pts = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]])
+        pts = np.array(
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]]
+        )
 
         _origin, R = _pca_frame(pts)
 
@@ -194,8 +201,9 @@ class TestFlipAndFaceBases:
 
     def test_a_different_reflection_gives_a_different_structure(self, dimer):
         default = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3])
-        other = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3],
-                                    rot_matrix=[1.0, -1.0, -1.0])
+        other = flip_and_face_bases(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], rot_matrix=[1.0, -1.0, -1.0]
+        )
 
         assert default.positions != pytest.approx(other.positions)
 
@@ -210,22 +218,23 @@ class TestOptimizeWithFixedAnchors:
         """
         strained = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3])
 
-        relaxed = optimize_with_fixed_anchors(strained, [0, 1, 2], [3, 4, 5],
-                                              [0, 3], calc, fmax=0.5)
+        relaxed = optimize_with_fixed_anchors(
+            strained, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=0.5
+        )
 
         assert relaxed.positions != pytest.approx(strained.positions)
 
     def test_does_not_modify_the_input(self, calc, dimer):
         before = dimer.positions.copy()
 
-        optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5], [0, 3],
-                                    calc, fmax=0.5)
+        optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=0.5)
 
         assert dimer.positions == pytest.approx(before)
 
     def test_keeps_every_atom(self, calc, dimer):
-        relaxed = optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5],
-                                              [0, 3], calc, fmax=0.5)
+        relaxed = optimize_with_fixed_anchors(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=0.5
+        )
 
         assert len(relaxed) == len(dimer)
         assert relaxed.get_chemical_symbols() == dimer.get_chemical_symbols()
@@ -233,28 +242,32 @@ class TestOptimizeWithFixedAnchors:
     def test_leaves_atoms_outside_both_fragments_alone(self, calc, dimer):
         spectator = dimer + Atoms("He", positions=[[8.0, 8.0, 8.0]])
 
-        relaxed = optimize_with_fixed_anchors(spectator, [0, 1, 2], [3, 4, 5],
-                                              [0, 3], calc, fmax=0.5)
+        relaxed = optimize_with_fixed_anchors(
+            spectator, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=0.5
+        )
 
         assert relaxed.positions[6] == pytest.approx([8.0, 8.0, 8.0])
 
     def test_records_convergence_on_the_result(self, calc, dimer):
-        relaxed = optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5],
-                                              [0, 3], calc, fmax=0.5)
+        relaxed = optimize_with_fixed_anchors(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=0.5
+        )
 
         assert relaxed.info["converged"] is True
 
     def test_uses_the_optimiser_it_is_given(self, calc, dimer, capsys):
-        optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc,
-                                    fmax=0.5, optimiser=FIRE)
+        optimize_with_fixed_anchors(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=0.5, optimiser=FIRE
+        )
 
         log = capsys.readouterr().out
         assert "FIRE" in log
         assert "BFGS" not in log
 
     def test_no_logfile_silences_it(self, calc, dimer, capsys):
-        optimize_with_fixed_anchors(dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc,
-                                    fmax=0.5, logfile=None)
+        optimize_with_fixed_anchors(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=0.5, logfile=None
+        )
 
         assert capsys.readouterr().out == ""
 
@@ -262,9 +275,9 @@ class TestOptimizeWithFixedAnchors:
         strained = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3])
 
         with pytest.warns(ConvergenceWarning, match="Fixed-anchor relaxation"):
-            relaxed = optimize_with_fixed_anchors(strained, [0, 1, 2],
-                                                  [3, 4, 5], [0, 3], calc,
-                                                  fmax=1e-3, steps=2)
+            relaxed = optimize_with_fixed_anchors(
+                strained, [0, 1, 2], [3, 4, 5], [0, 3], calc, fmax=1e-3, steps=2
+            )
 
         assert relaxed.info["converged"] is False
 
@@ -272,15 +285,23 @@ class TestOptimizeWithFixedAnchors:
         strained = flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3])
 
         with pytest.raises(ConvergenceError):
-            optimize_with_fixed_anchors(strained, [0, 1, 2], [3, 4, 5], [0, 3],
-                                        calc, fmax=1e-3, steps=2,
-                                        raise_on_unconverged=True)
+            optimize_with_fixed_anchors(
+                strained,
+                [0, 1, 2],
+                [3, 4, 5],
+                [0, 3],
+                calc,
+                fmax=1e-3,
+                steps=2,
+                raise_on_unconverged=True,
+            )
 
 
 class TestGetBestFlipAndFaceBases:
     def test_returns_a_structure_without_optimising(self, dimer):
-        swapped = get_best_flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5],
-                                               [0, 3], optimise_after=False)
+        swapped = get_best_flip_and_face_bases(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], optimise_after=False
+        )
 
         assert len(swapped) == len(dimer)
 
@@ -288,33 +309,37 @@ class TestGetBestFlipAndFaceBases:
         """The search exists to beat the hard-coded default sign choice."""
         base_a, base_b = [0, 1, 2], [3, 4, 5]
 
-        best = get_best_flip_and_face_bases(dimer, base_a, base_b, [0, 3],
-                                            optimise_after=False)
+        best = get_best_flip_and_face_bases(
+            dimer, base_a, base_b, [0, 3], optimise_after=False
+        )
         default = flip_and_face_bases(dimer, base_a, base_b, [0, 3])
 
         def separation(atoms):
-            return np.linalg.norm(atoms[base_a].get_center_of_mass()
-                                  - atoms[base_b].get_center_of_mass())
+            return np.linalg.norm(
+                atoms[base_a].get_center_of_mass() - atoms[base_b].get_center_of_mass()
+            )
 
         assert separation(best) <= separation(default) + 1e-9
 
     def test_requires_a_calculator_when_optimising(self, dimer):
         with pytest.raises(ValueError, match="needs a calculator"):
-            get_best_flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3],
-                                         optimise_after=True)
+            get_best_flip_and_face_bases(
+                dimer, [0, 1, 2], [3, 4, 5], [0, 3], optimise_after=True
+            )
 
     def test_optimises_when_given_a_calculator(self, calc, dimer):
-        relaxed = get_best_flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5],
-                                               [0, 3], optimise_after=True,
-                                               calc=calc)
+        relaxed = get_best_flip_and_face_bases(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], optimise_after=True, calc=calc
+        )
 
         assert len(relaxed) == len(dimer)
 
     def test_does_not_modify_the_input(self, dimer):
         before = dimer.positions.copy()
 
-        get_best_flip_and_face_bases(dimer, [0, 1, 2], [3, 4, 5], [0, 3],
-                                     optimise_after=False)
+        get_best_flip_and_face_bases(
+            dimer, [0, 1, 2], [3, 4, 5], [0, 3], optimise_after=False
+        )
 
         assert dimer.positions == pytest.approx(before)
 
@@ -325,24 +350,26 @@ class TestSwapBondingConfiguration:
     @pytest.fixture
     def h_bond(self):
         """A collinear O-H...O along x, with O-H = 1.0 and O...O = 2.8."""
-        return Atoms("OHO", positions=[[0.0, 0.0, 0.0],
-                                       [1.0, 0.0, 0.0],
-                                       [2.8, 0.0, 0.0]])
+        return Atoms(
+            "OHO", positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.8, 0.0, 0.0]]
+        )
 
     def test_hydrogen_moves_to_the_acceptor(self, h_bond):
         swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
 
         # Was 1.0 from the donor; now 1.0 from the acceptor instead.
-        assert np.linalg.norm(swapped.positions[1] - swapped.positions[2]) \
-            == pytest.approx(1.0)
+        assert np.linalg.norm(
+            swapped.positions[1] - swapped.positions[2]
+        ) == pytest.approx(1.0)
 
     def test_the_new_bond_length_matches_the_old_one(self, h_bond):
         h_bond.positions[1] = [0.7, 0.0, 0.0]
 
         swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
 
-        assert np.linalg.norm(swapped.positions[1] - swapped.positions[2]) \
-            == pytest.approx(0.7)
+        assert np.linalg.norm(
+            swapped.positions[1] - swapped.positions[2]
+        ) == pytest.approx(0.7)
 
     def test_the_hydrogen_stays_between_the_heavy_atoms(self, h_bond):
         swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
@@ -369,5 +396,6 @@ class TestSwapBondingConfiguration:
 
         swapped = swap_bonding_configuration(h_bond, 0, 1, 2)
 
-        assert np.linalg.norm(swapped.positions[1] - swapped.positions[2]) \
-            == pytest.approx(1.0)
+        assert np.linalg.norm(
+            swapped.positions[1] - swapped.positions[2]
+        ) == pytest.approx(1.0)

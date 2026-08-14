@@ -33,7 +33,7 @@ conda activate reactiontools
 ```
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .
 ```
 
 See [build_tools/README.md](build_tools/README.md) for the full guide,
@@ -41,19 +41,17 @@ including building PLUMED with the OPES module.
 
 ### Dependencies
 
-Runtime requirements are `numpy`, `scipy`, `matplotlib`, `pandas`, `ase>=3.23`
-(the version where `NEB` moved to `ase.mep`) and
+Installed requirements include `numpy`, `scipy`, `matplotlib`, `pandas`,
+`ase>=3.23` (the version where `NEB` moved to `ase.mep`), `mdtraj`, Sella,
+pytest and Ruff, plus
 [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
 (installed from git, used by `prepare_neb`, `quick_guess_path` and
 `quick_guess_ts`).
 
-Five dependencies are external — none is pulled in by a plain `pip install`,
-and each is only needed by the functions named:
+Three dependencies remain external and are only needed by the functions named:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |
-| [`sella`](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` | Install with `pip install "reactiontools[ts]"`. Imported on first use, so the rest of the package works without it. |
-| `mdtraj` | `path_from_steered_md`, `estimate_path_lambda` | Install with `pip install "reactiontools[path]"`. Imported on first use; the frame-selection functions in `tools_path` are numpy only and work without it. |
 | `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. |
 | `py-plumed` | `plumed_calculator` | The Python bindings, `conda install -c conda-forge py-plumed`. Imported on first use; the input builder works without it. |
 | [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` | Licensed separately and installed by hand; point `ORCA_PATH` at the binary. See [build_tools/README.md](build_tools/README.md#orca). |
@@ -69,8 +67,13 @@ from ase.build import add_adsorbate, fcc100
 from ase.calculators.emt import EMT
 from ase.constraints import FixAtoms
 
-from reactiontools import (optimise_neb, optimise_reactant_product, plot_neb,
-                           prepare_neb, summarise_neb)
+from reactiontools import (
+    optimise_neb,
+    optimise_reactant_product,
+    plot_neb,
+    prepare_neb,
+    summarise_neb,
+)
 
 calc = EMT()
 
@@ -87,8 +90,9 @@ reactant, product = optimise_reactant_product(reactant, product, calc, fmax=0.05
 
 # rm_ro_trans=False: the slab is periodic and constrained, so the rigid-body
 # degrees of freedom are already pinned. See "Choosing NEB settings" below.
-neb = prepare_neb(reactant, product, calc, n_images=7,
-                  climb=True, rm_ro_trans=False, geo_int=False)
+neb = prepare_neb(
+    reactant, product, calc, n_images=7, climb=True, rm_ro_trans=False, geo_int=False
+)
 images = optimise_neb(neb, fmax=0.05, ts_traj="ts.traj")
 
 print(summarise_neb(images))
@@ -135,11 +139,11 @@ about:
 
 ```python
 summary = summarise_neb(images)
-summary.barrier           # forward, eV
-summary.reverse_barrier   # eV
-summary.reaction_energy   # product - reactant, eV; negative if exothermic
-summary.ts_index          # which image get_ts_image returns
-summary.energies          # absolute, per image, eV
+summary.barrier  # forward, eV
+summary.reverse_barrier  # eV
+summary.reaction_energy  # product - reactant, eV; negative if exothermic
+summary.ts_index  # which image get_ts_image returns
+summary.energies  # absolute, per image, eV
 ```
 
 The barrier is measured from the highest image, so it agrees with
@@ -188,7 +192,8 @@ structure, ask for an exception instead:
 
 ```python
 reactant, product = optimise_reactant_product(
-    reactant, product, calc, fmax=0.05, raise_on_unconverged=True)
+    reactant, product, calc, fmax=0.05, raise_on_unconverged=True
+)
 ```
 
 `raise_on_unconverged` is per call. To hold a whole script to it, promote the
@@ -331,7 +336,8 @@ stays running for every BFGS step instead of restarting on each one:
 
 ```python
 reactant, product = optimise_reactant_product(
-    reactant, product, calc, fmax=0.05, use_socket=True)
+    reactant, product, calc, fmax=0.05, use_socket=True
+)
 ```
 
 This needs a calculator ASE knows how to launch as an i-PI client — built-in
@@ -372,13 +378,14 @@ from ase.calculators.espresso import Espresso
 
 from reactiontools import get_ts_image, optimise_neb, prepare_parallel_neb
 
+
 def make_calc(index):
     # One directory per client: file-based codes write their input and output
     # relative to calc.directory, and clients sharing one overwrite each other.
     return Espresso(directory=f"image-{index}", pseudopotentials=...)
 
-with prepare_parallel_neb(reactant, product, make_calc,
-                          n_images=7, timeout=600) as neb:
+
+with prepare_parallel_neb(reactant, product, make_calc, n_images=7, timeout=600) as neb:
     images = optimise_neb(neb, fmax=0.05, ts_traj="ts.traj")
 
 # The sockets are shut by now, but the band read back from ts.traj carries its
@@ -416,9 +423,14 @@ rather than an external binary, pass `make_launcher` instead of `make_calc`:
 ```python
 from ase.calculators.socketio import PySocketIOClient
 
-with prepare_parallel_neb(reactant, product, None,
-                          make_launcher=lambda index: PySocketIOClient(MyMLIP),
-                          n_images=7, timeout=600) as neb:
+with prepare_parallel_neb(
+    reactant,
+    product,
+    None,
+    make_launcher=lambda index: PySocketIOClient(MyMLIP),
+    n_images=7,
+    timeout=600,
+) as neb:
     images = optimise_neb(neb, fmax=0.05)
 ```
 
@@ -441,8 +453,14 @@ checks that the result really is a saddle, and `optimise_irc` confirms it
 connects the two minima you meant:
 
 ```python
-from reactiontools import (get_ts_image, get_vibrations, optimise_irc,
-                           optimise_ts, plot_irc, stitch_path)
+from reactiontools import (
+    get_ts_image,
+    get_vibrations,
+    optimise_irc,
+    optimise_ts,
+    plot_irc,
+    stitch_path,
+)
 
 ts = optimise_ts(get_ts_image(images), calc, fmax=0.01)
 
@@ -456,9 +474,8 @@ forward, reverse = optimise_irc(ts, calc, dx=0.1)
 plot_irc(stitch_path(reverse, forward))
 ```
 
-These two need Sella, which is an optional dependency — install it with
-`pip install "reactiontools[ts]"`. They raise `ImportError` with that hint if
-it is missing; nothing else in the package is affected.
+These two use Sella, which is installed with `reactiontools` and imported only
+when a saddle-point calculation is requested.
 
 ### Building a flipped end state
 
@@ -470,15 +487,17 @@ convention that depends on how the fragments sit, so
 two centres of mass closest together:
 
 ```python
-from reactiontools import (bonded_cluster_indices_no_anchor_hub,
-                           get_best_flip_and_face_bases, prepare_neb)
+from reactiontools import (
+    bonded_cluster_indices_no_anchor_hub,
+    get_best_flip_and_face_bases,
+    prepare_neb,
+)
 
 anchors = [12, 37]  # one atom per half, where the two are joined
 base_a = bonded_cluster_indices_no_anchor_hub(atoms, anchors[0])
 base_b = bonded_cluster_indices_no_anchor_hub(atoms, anchors[1])
 
-product = get_best_flip_and_face_bases(atoms, base_a, base_b, anchors,
-                                       calc=calc)
+product = get_best_flip_and_face_bases(atoms, base_a, base_b, anchors, calc=calc)
 neb = prepare_neb(atoms, product, calc, n_images=7)
 ```
 
@@ -493,19 +512,30 @@ input, bias the dynamics with it, sum the hills.
 ```python
 from ase import units
 from ase.md.langevin import Langevin
-from reactiontools import (find_molecules, plot_plumed, plumed_calculator,
-                           plumed_metad_input, plumed_selection, run_sum_hills)
+from reactiontools import (
+    find_molecules,
+    plot_plumed,
+    plumed_calculator,
+    plumed_metad_input,
+    plumed_selection,
+    run_sum_hills,
+)
 
 solute, solvent = find_molecules(atoms)[:2]
 
 lines = plumed_metad_input(
-    cvs=[f"c1: COORDINATION GROUPA={plumed_selection(solute)} "
-         f"GROUPB={plumed_selection(solvent)} R_0=3.0"],
-    sigma=0.05, height=0.02, pace=100,
-    biasfactor=10, temperature=300)
+    cvs=[
+        f"c1: COORDINATION GROUPA={plumed_selection(solute)} "
+        f"GROUPB={plumed_selection(solvent)} R_0=3.0"
+    ],
+    sigma=0.05,
+    height=0.02,
+    pace=100,
+    biasfactor=10,
+    temperature=300,
+)
 
-with plumed_calculator(atoms, calc, lines, timestep=0.5 * units.fs,
-                       temperature=300):
+with plumed_calculator(atoms, calc, lines, timestep=0.5 * units.fs, temperature=300):
     Langevin(atoms, 0.5 * units.fs, temperature_K=300, friction=0.01).run(100000)
 
 run_sum_hills()
@@ -539,10 +569,15 @@ ones matter for a long run — and further actions through `extra`:
 
 ```python
 lines = plumed_metad_input(
-    cvs=["d1: DISTANCE ATOMS=1,2"], sigma=0.05, height=0.02, pace=100,
-    biasfactor=10, temperature=300,
+    cvs=["d1: DISTANCE ATOMS=1,2"],
+    sigma=0.05,
+    height=0.02,
+    pace=100,
+    biasfactor=10,
+    temperature=300,
     metad_extra="GRID_MIN=1.0 GRID_MAX=6.0 GRID_BIN=500",
-    extra=["UPPER_WALLS ARG=d1 AT=6.0 KAPPA=100.0"])
+    extra=["UPPER_WALLS ARG=d1 AT=6.0 KAPPA=100.0"],
+)
 ```
 
 CV lines go through untouched, so any PLUMED action works — and any mistake in
@@ -588,8 +623,9 @@ the collective variable — reading them off the plot is the point:
 ```python
 from reactiontools import summarise_fes
 
-print(summarise_fes("fes.dat", basin_a=(1.0, 2.0), basin_b=(3.0, 4.5),
-                    source_unit="eV"))
+print(
+    summarise_fes("fes.dat", basin_a=(1.0, 2.0), basin_b=(3.0, 4.5), source_unit="eV")
+)
 ```
 
 ```
@@ -610,8 +646,9 @@ each basin, which counts a wide basin as more probable than a narrow one of the
 same depth:
 
 ```python
-summarise_fes("fes.dat", basin_a=(1.0, 2.0), basin_b=(3.0, 4.5),
-              source_unit="eV", temperature=300)
+summarise_fes(
+    "fes.dat", basin_a=(1.0, 2.0), basin_b=(3.0, 4.5), source_unit="eV", temperature=300
+)
 ```
 
 The barriers are measured out of the bottom of each well either way, since that
@@ -626,13 +663,16 @@ other:
 ```python
 from reactiontools import plot_fes_1d, run_sum_hills, sum_hills_files
 
-run_sum_hills(stride=100, outfile="fes", grid_min=1.0, grid_max=6.0,
-              grid_bin=500)
+run_sum_hills(stride=100, outfile="fes", grid_min=1.0, grid_max=6.0, grid_bin=500)
 
 surfaces = sum_hills_files("fes")
-plot_fes_1d(surfaces, source_unit="eV", max_datasets=5,
-            labels=[(i + 1) * 100 for i in range(len(surfaces))],
-            label_template="{:g} hills")
+plot_fes_1d(
+    surfaces,
+    source_unit="eV",
+    max_datasets=5,
+    labels=[(i + 1) * 100 for i in range(len(surfaces))],
+    label_template="{:g} hills",
+)
 ```
 
 Set the grid explicitly for a series. Without it PLUMED picks bounds per
@@ -648,8 +688,14 @@ against time:
 from reactiontools import fes_convergence, plot_fes_convergence
 
 hills = [(i + 1) * 100 for i in range(len(surfaces))]
-plot_fes_convergence(surfaces, basin_a=(1.0, 2.0), basin_b=(3.0, 4.5),
-                     times=hills, source_unit="eV", filename="convergence")
+plot_fes_convergence(
+    surfaces,
+    basin_a=(1.0, 2.0),
+    basin_b=(3.0, 4.5),
+    times=hills,
+    source_unit="eV",
+    filename="convergence",
+)
 ```
 
 `fes_convergence` returns the underlying `FESSummary` per surface if you want
@@ -704,8 +750,8 @@ Anything without its own keyword goes through `extra`, for example
 | `summarise_neb(images, calc=None)` | Forward and reverse barriers, reaction energy and TS index, as a `NebSummary`. |
 | `NebSummary` | What `summarise_neb` returns: `barrier`, `reverse_barrier`, `reaction_energy`, `ts_index`, `energies`, `is_barrierless`. Prints as a short report. |
 | `get_fmax(atoms)` | Largest per-atom force, the quantity the optimisers converge against. |
-| `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1, logfile='-')` | Refine a TS guess to a true saddle point with Sella. Needs the `[ts]` extra. |
-| `optimise_irc(ts_image, calc, dx=0.1, ..., logfile='-')` | Follow the IRC downhill in both directions, returning `(forward, reverse)`. Needs the `[ts]` extra. |
+| `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1, logfile='-')` | Refine a TS guess to a true saddle point with Sella. |
+| `optimise_irc(ts_image, calc, dx=0.1, ..., logfile='-')` | Follow the IRC downhill in both directions, returning `(forward, reverse)`. |
 | `get_vibrations(atoms, calc)` | Finite-difference frequencies in cm⁻¹; one imaginary mode confirms a saddle. |
 | `quick_guess_path(reactant, product, n_images=25)` | Geodesic path guess, no optimisation. |
 | `quick_guess_ts(reactant, product, n_images=25)` | Midpoint of a geodesic guess, as a cheap TS starting structure. |
@@ -828,15 +874,29 @@ temperature, which is the pairing that goes wrong when the two are written
 separately.
 
 ```python
-from reactiontools import (plumed_angle_radians, plumed_bias_and_fes,
-                           plumed_one_based, plumed_temperature_pair,
-                           plumed_units_header)
+from reactiontools import (
+    plumed_angle_radians,
+    plumed_bias_and_fes,
+    plumed_one_based,
+    plumed_temperature_pair,
+    plumed_units_header,
+)
 
 n1, h1, o2 = plumed_one_based([30, 31, 44])
 kelvin, kt = plumed_temperature_pair(300.0, "plumed")
 metad_line, fes_command = plumed_bias_and_fes(
-    False, 'z', pace=500, height=15.0, sigma=0.05, bias=20.0,
-    temperature=kelvin, kt=kt, grid_bin=200, grid_min=-0.3, grid_max=0.3)
+    False,
+    "z",
+    pace=500,
+    height=15.0,
+    sigma=0.05,
+    bias=20.0,
+    temperature=kelvin,
+    kt=kt,
+    grid_bin=200,
+    grid_min=-0.3,
+    grid_max=0.3,
+)
 
 script = f"""{plumed_units_header("plumed")}n1_h1: DISTANCE ATOMS={n1},{h1}
 o2_h1: DISTANCE ATOMS={o2},{h1}
@@ -879,8 +939,8 @@ path in the full solvated environment rather than one interpolated in vacuum.
 answer for an ångström-based run is a hundred times smaller than for a
 nanometre-based one.
 
-Reading a trajectory needs mdtraj, the optional `[path]` extra. The three
-selection functions are numpy only and work without it.
+Trajectory readers use MDTraj, which is installed with `reactiontools` and
+imported only when needed. The three selection functions remain NumPy-only.
 
 ### `tools_io` — structure files
 

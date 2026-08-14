@@ -39,9 +39,11 @@ from .opes import script_path
 #: :func:`~reactiontools.plot_plumed` in particular, assume.
 PLUMED_ASE_UNITS = "UNITS ENERGY=eV LENGTH=A TIME=fs"
 
-_PLUMED_HINT = ("plumed_calculator needs the plumed Python module, which is "
-                "not installed. Install it with "
-                "`conda install -c conda-forge py-plumed`.")
+_PLUMED_HINT = (
+    "plumed_calculator needs the plumed Python module, which is "
+    "not installed. Install it with "
+    "`conda install -c conda-forge py-plumed`."
+)
 
 _CV_LABEL = re.compile(r"^\s*([A-Za-z_]\w*)\s*:")
 
@@ -93,8 +95,9 @@ def find_molecules(atoms):
         Atom-index arrays, one per connected component.
     """
     nl = build_neighbor_list(atoms, self_interaction=False, bothways=True)
-    n, labels = connected_components(nl.get_connectivity_matrix(sparse=True),
-                                     directed=False)
+    n, labels = connected_components(
+        nl.get_connectivity_matrix(sparse=True), directed=False
+    )
     return [np.where(labels == k)[0] for k in range(n)]
 
 
@@ -126,29 +129,33 @@ def _cv_labels(cvs):
         if match is None:
             raise ValueError(
                 f"Collective variable {line!r} has no label. PLUMED needs one "
-                f"to refer to it by, as in 'd1: DISTANCE ATOMS=1,2'.")
+                f"to refer to it by, as in 'd1: DISTANCE ATOMS=1,2'."
+            )
         labels.append(match.group(1))
 
     duplicates = {name for name in labels if labels.count(name) > 1}
     if duplicates:
         raise ValueError(
             f"Collective variable labels must be unique, got {sorted(duplicates)} "
-            f"more than once.")
+            f"more than once."
+        )
     return labels
 
 
-def plumed_metad_input(cvs,
-                       sigma,
-                       height,
-                       pace,
-                       biasfactor=None,
-                       temperature=None,
-                       hills="HILLS",
-                       colvar="COLVAR",
-                       stride=10,
-                       units=True,
-                       metad_extra=None,
-                       extra=None):
+def plumed_metad_input(
+    cvs,
+    sigma,
+    height,
+    pace,
+    biasfactor=None,
+    temperature=None,
+    hills="HILLS",
+    colvar="COLVAR",
+    stride=10,
+    units=True,
+    metad_extra=None,
+    extra=None,
+):
     """Build the PLUMED input for a metadynamics run.
 
     Assembles the lines :func:`plumed_calculator` takes: the units, the
@@ -231,28 +238,33 @@ def plumed_metad_input(cvs,
     if len(sigmas) != len(labels):
         raise ValueError(
             f"Got {len(sigmas)} sigmas for {len(labels)} collective "
-            f"variables; give one each, or one for all of them.")
+            f"variables; give one each, or one for all of them."
+        )
 
     if biasfactor is not None:
         if biasfactor <= 1:
             raise ValueError(
                 f"biasfactor must be greater than 1, got {biasfactor}. A bias "
                 f"factor of 1 is unbiased sampling; leave it out for "
-                f"non-well-tempered metadynamics.")
+                f"non-well-tempered metadynamics."
+            )
         if temperature is None:
             raise ValueError(
                 "Well-tempered metadynamics needs temperature, in kelvin, to "
-                "scale the deposited height by.")
+                "scale the deposited height by."
+            )
 
     arg = ",".join(labels)
     lines = [PLUMED_ASE_UNITS] if units else []
     lines.extend(cvs)
 
-    metad = [f"METAD ARG={arg}",
-             f"SIGMA={','.join(str(s) for s in sigmas)}",
-             f"HEIGHT={height}",
-             f"PACE={pace}",
-             f"FILE={hills}"]
+    metad = [
+        f"METAD ARG={arg}",
+        f"SIGMA={','.join(str(s) for s in sigmas)}",
+        f"HEIGHT={height}",
+        f"PACE={pace}",
+        f"FILE={hills}",
+    ]
     if biasfactor is not None:
         metad.append(f"BIASFACTOR={biasfactor}")
     if temperature is not None:
@@ -269,10 +281,9 @@ def plumed_metad_input(cvs,
 
 
 @contextmanager
-def plumed_calculator(atoms, calc, input_lines, timestep,
-                      temperature=None,
-                      log="",
-                      restart=False):
+def plumed_calculator(
+    atoms, calc, input_lines, timestep, temperature=None, log="", restart=False
+):
     """Bias an ASE calculator with PLUMED, for the length of the block.
 
     Wraps ``calc`` in an :class:`ase.calculators.plumed.Plumed` and hangs it
@@ -347,13 +358,15 @@ def plumed_calculator(atoms, calc, input_lines, timestep,
     # one and the block would restore nothing.
     previous = atoms.calc
     try:
-        biased = Plumed(calc=calc,
-                        input=list(input_lines),
-                        timestep=timestep,
-                        atoms=atoms,
-                        kT=kT,
-                        log=log,
-                        restart=restart)
+        biased = Plumed(
+            calc=calc,
+            input=list(input_lines),
+            timestep=timestep,
+            atoms=atoms,
+            kT=kT,
+            log=log,
+            restart=restart,
+        )
     except ImportError as exc:
         raise ImportError(_PLUMED_HINT) from exc
 
@@ -428,19 +441,21 @@ def sum_hills_files(outfile="fes.dat"):
     return [path for _, path in sorted(numbered)]
 
 
-def run_sum_hills(hills="HILLS",
-                  outfile="fes.dat",
-                  mintozero=True,
-                  stride=None,
-                  nohistory=False,
-                  grid_min=None,
-                  grid_max=None,
-                  grid_bin=None,
-                  idw=None,
-                  kt=None,
-                  negbias=False,
-                  extra=None,
-                  verbose=True):
+def run_sum_hills(
+    hills="HILLS",
+    outfile="fes.dat",
+    mintozero=True,
+    stride=None,
+    nohistory=False,
+    grid_min=None,
+    grid_max=None,
+    grid_bin=None,
+    idw=None,
+    kt=None,
+    negbias=False,
+    extra=None,
+    verbose=True,
+):
     """Run ``plumed sum_hills`` to build a free-energy surface from the hills.
 
     The paths are resolved by the plumed executable, so this acts on the
@@ -508,7 +523,8 @@ def run_sum_hills(hills="HILLS",
         raise ValueError(
             "kt only applies when idw names the variables to keep, since it "
             "is the temperature the others are integrated out at. Pass idw, "
-            "or leave kt out.")
+            "or leave kt out."
+        )
 
     cmd = ["plumed", "sum_hills", "--hills", str(hills), "--outfile", str(outfile)]
     if mintozero:
@@ -540,13 +556,15 @@ def run_sum_hills(hills="HILLS",
     return cmd_str
 
 
-def _opes_fes_command(state="STATE",
-                      outfile="fes.dat",
-                      grid_min=None,
-                      grid_max=None,
-                      grid_bin=None,
-                      kt=None,
-                      extra=None):
+def _opes_fes_command(
+    state="STATE",
+    outfile="fes.dat",
+    grid_min=None,
+    grid_max=None,
+    grid_bin=None,
+    kt=None,
+    extra=None,
+):
     """Build the command line that reconstructs a FES from an OPES state file.
 
     ``OPES_METAD`` does not deposit hills for ``plumed sum_hills`` to add up;
@@ -584,12 +602,19 @@ def _opes_fes_command(state="STATE",
     if (grid_min is None) != (grid_max is None):
         raise ValueError(
             "Give both grid_min and grid_max or neither; FES_from_State.py "
-            "needs the two bounds together to size its grid.")
+            "needs the two bounds together to size its grid."
+        )
 
     # sys.executable, not "python3": the scripts need this environment's
     # pandas, and whatever "python3" resolves to on PATH may not have it.
-    cmd = [sys.executable, str(script_path("FES_from_State.py")),
-           "--state", str(state), "--outfile", str(outfile)]
+    cmd = [
+        sys.executable,
+        str(script_path("FES_from_State.py")),
+        "--state",
+        str(state),
+        "--outfile",
+        str(outfile),
+    ]
     if grid_min is not None:
         cmd += ["--min", _grid_bound(grid_min), "--max", _grid_bound(grid_max)]
     if grid_bin is not None:
@@ -601,14 +626,16 @@ def _opes_fes_command(state="STATE",
     return cmd
 
 
-def run_opes_fes(state="STATE",
-                 outfile="fes.dat",
-                 grid_min=None,
-                 grid_max=None,
-                 grid_bin=None,
-                 kt=None,
-                 extra=None,
-                 verbose=True):
+def run_opes_fes(
+    state="STATE",
+    outfile="fes.dat",
+    grid_min=None,
+    grid_max=None,
+    grid_bin=None,
+    kt=None,
+    extra=None,
+    verbose=True,
+):
     """Rebuild a free-energy surface from an OPES state file.
 
     The ``OPES_METAD`` counterpart of :func:`run_sum_hills`, and the other half
@@ -652,9 +679,15 @@ def run_opes_fes(state="STATE",
     subprocess.CalledProcessError
         If the script exits non-zero.
     """
-    cmd = _opes_fes_command(state=state, outfile=outfile, grid_min=grid_min,
-                            grid_max=grid_max, grid_bin=grid_bin, kt=kt,
-                            extra=extra)
+    cmd = _opes_fes_command(
+        state=state,
+        outfile=outfile,
+        grid_min=grid_min,
+        grid_max=grid_max,
+        grid_bin=grid_bin,
+        kt=kt,
+        extra=extra,
+    )
     cmd_str = " ".join(cmd)
 
     if verbose:

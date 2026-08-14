@@ -131,12 +131,14 @@ def as_positions(source):
     # touches OpenMM never reaches the import and never needs it installed.
     if type(positions).__module__.split(".")[0] == "openmm":
         from openmm import unit as openmm_unit
+
         positions = positions.value_in_unit(openmm_unit.angstrom)
 
     positions = np.asarray(positions, dtype=float)
     if positions.ndim != 2 or positions.shape[1] != 3:
         raise ValueError(
-            f"Expected coordinates of shape (n_atoms, 3), got {positions.shape}.")
+            f"Expected coordinates of shape (n_atoms, 3), got {positions.shape}."
+        )
     return positions
 
 
@@ -162,7 +164,8 @@ def _check_units(units):
         raise ValueError(
             f"Unknown units {units!r}. Use 'plumed' for the nanometres and "
             f"kJ/mol an external PLUMED works in, or 'ase' for the angstrom "
-            f"and eV a run driven through plumed_calculator needs.")
+            f"and eV a run driven through plumed_calculator needs."
+        )
     return _LENGTH_SCALE[units]
 
 
@@ -276,9 +279,11 @@ def _pt_distances(positions, idx):
     r_dh, r_ah, r_da : float
         Donor-hydrogen, acceptor-hydrogen and donor-acceptor distances.
     """
-    return (_distance(positions, idx[0], idx[1]),
-            _distance(positions, idx[2], idx[1]),
-            _distance(positions, idx[0], idx[2]))
+    return (
+        _distance(positions, idx[0], idx[1]),
+        _distance(positions, idx[2], idx[1]),
+        _distance(positions, idx[0], idx[2]),
+    )
 
 
 def _size_r0(r_dh, r_ah, r_0):
@@ -390,9 +395,20 @@ def plumed_temperature_pair(temperature, units):
     return kelvin_value, thermal_energy(kelvin_value, _ENERGY_UNIT[units])
 
 
-def plumed_bias_and_fes(f_opes, arg, pace, height, sigma, bias, temperature,
-                          kt, grid_bin, grid_min=None, grid_max=None,
-                          label='metad:      '):
+def plumed_bias_and_fes(
+    f_opes,
+    arg,
+    pace,
+    height,
+    sigma,
+    bias,
+    temperature,
+    kt,
+    grid_bin,
+    grid_min=None,
+    grid_max=None,
+    label="metad:      ",
+):
     """
     Build the metadynamics bias line and the matching FES-reconstruction command.
 
@@ -433,25 +449,41 @@ def plumed_bias_and_fes(f_opes, arg, pace, height, sigma, bias, temperature,
         Shell command reconstructing the free-energy surface from it.
     """
     if f_opes:
-        metad_line = (f"{label}OPES_METAD ARG={arg} PACE={pace} BARRIER={height} "
-                      f"SIGMA={sigma} TEMP={temperature} "
-                      f"STATE_WFILE=STATE STATE_WSTRIDE={pace}")
-        fes_command = " ".join(_opes_fes_command(
-            state="STATE", outfile="fes.dat", grid_min=grid_min,
-            grid_max=grid_max, grid_bin=grid_bin, kt=kt))
+        metad_line = (
+            f"{label}OPES_METAD ARG={arg} PACE={pace} BARRIER={height} "
+            f"SIGMA={sigma} TEMP={temperature} "
+            f"STATE_WFILE=STATE STATE_WSTRIDE={pace}"
+        )
+        fes_command = " ".join(
+            _opes_fes_command(
+                state="STATE",
+                outfile="fes.dat",
+                grid_min=grid_min,
+                grid_max=grid_max,
+                grid_bin=grid_bin,
+                kt=kt,
+            )
+        )
     else:
-        metad_grid = (f" GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
-                      if grid_min is not None else '')
-        metad_line = (f"{label}METAD ARG={arg} PACE={pace} HEIGHT={height} "
-                      f"SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature} "
-                      f"FILE=HILLS{metad_grid}")
-        fes_grid = f' --min {grid_min} --max {grid_max}' if grid_min is not None else ''
-        fes_command = (f'plumed sum_hills --hills HILLS --outfile fes.dat'
-                       f'{fes_grid} --bin {grid_bin} --kt {kt:.6g}')
+        metad_grid = (
+            f" GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
+            if grid_min is not None
+            else ""
+        )
+        metad_line = (
+            f"{label}METAD ARG={arg} PACE={pace} HEIGHT={height} "
+            f"SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature} "
+            f"FILE=HILLS{metad_grid}"
+        )
+        fes_grid = f" --min {grid_min} --max {grid_max}" if grid_min is not None else ""
+        fes_command = (
+            f"plumed sum_hills --hills HILLS --outfile fes.dat"
+            f"{fes_grid} --bin {grid_bin} --kt {kt:.6g}"
+        )
     return metad_line, fes_command
 
 
-def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix='', pad=12):
+def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix="", pad=12):
     """
     Build the PLUMED lines defining one proton-transfer CV and its walls.
 
@@ -489,43 +521,49 @@ def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix='', pad=12):
     # conventions; both are in use in saved scripts, so they are preserved
     # rather than unified.
     if suffix:
-        c_d, c_a, cv = f'c_d{suffix}', f'c_a{suffix}', f'cv_diff{suffix}'
-        dist, u_wall = f'dist_da_{suffix}', f'u_wall_{suffix}'
-        ang, a_wall = f'ang_{suffix}', f'w_{suffix}'
+        c_d, c_a, cv = f"c_d{suffix}", f"c_a{suffix}", f"cv_diff{suffix}"
+        dist, u_wall = f"dist_da_{suffix}", f"u_wall_{suffix}"
+        ang, a_wall = f"ang_{suffix}", f"w_{suffix}"
     else:
-        c_d, c_a, cv = 'c_d', 'c_a', 'pt_cv'
-        dist, u_wall = 'dist_da', 'dist_wall'
-        ang, a_wall = 'ang_1', 'ang_wall'
+        c_d, c_a, cv = "c_d", "c_a", "pt_cv"
+        dist, u_wall = "dist_da", "dist_wall"
+        ang, a_wall = "ang_1", "ang_wall"
 
     def line(label, body):
         return f"{label + ':':<{pad}}{body}"
 
-    cv_lines = "\n".join([
-        line(c_d, f"COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}"),
-        line(c_a, f"COORDINATION GROUPA={idx[2]} GROUPB={idx[1]} R_0={r_0}"),
-        line(cv, f"COMBINE ARG={c_d},{c_a} COEFFICIENTS=1,-1 PERIODIC=NO"),
-    ])
-    wall_lines = "\n".join([
-        line(dist, f"DISTANCE ATOMS={idx[2]},{idx[0]}"),
-        line(u_wall, f"UPPER_WALLS ARG={dist} AT={wall} KAPPA={kappa}"),
-        line(ang, f"ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}"),
-        line(a_wall, f"LOWER_WALLS ARG={ang} AT={angle_lim} KAPPA={kappa}"),
-    ])
+    cv_lines = "\n".join(
+        [
+            line(c_d, f"COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}"),
+            line(c_a, f"COORDINATION GROUPA={idx[2]} GROUPB={idx[1]} R_0={r_0}"),
+            line(cv, f"COMBINE ARG={c_d},{c_a} COEFFICIENTS=1,-1 PERIODIC=NO"),
+        ]
+    )
+    wall_lines = "\n".join(
+        [
+            line(dist, f"DISTANCE ATOMS={idx[2]},{idx[0]}"),
+            line(u_wall, f"UPPER_WALLS ARG={dist} AT={wall} KAPPA={kappa}"),
+            line(ang, f"ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}"),
+            line(a_wall, f"LOWER_WALLS ARG={ang} AT={angle_lim} KAPPA={kappa}"),
+        ]
+    )
     return cv_lines, wall_lines
 
 
-def plumed_input_steered(cv_block,
-                         cv_start,
-                         cv_stop,
-                         steps,
-                         cv_name='cv',
-                         kappa=2000.0,
-                         stride=100,
-                         steps_equil=0,
-                         steps_relax=0,
-                         colvar_file='COLVAR_SMD',
-                         extra_lines=None,
-                         units="plumed"):
+def plumed_input_steered(
+    cv_block,
+    cv_start,
+    cv_stop,
+    steps,
+    cv_name="cv",
+    kappa=2000.0,
+    stride=100,
+    steps_equil=0,
+    steps_relax=0,
+    colvar_file="COLVAR_SMD",
+    extra_lines=None,
+    units="plumed",
+):
     """
     Build a PLUMED input that drags a collective variable (steered MD).
 
@@ -600,13 +638,15 @@ def plumed_input_steered(cv_block,
         step += steps_relax
         milestones.append((step, cv_stop))
 
-    schedule = " ".join(f"STEP{i}={at_step} AT{i}={at:.4f} KAPPA{i}={kappa}"
-                        for i, (at_step, at) in enumerate(milestones))
+    schedule = " ".join(
+        f"STEP{i}={at_step} AT{i}={at:.4f} KAPPA{i}={kappa}"
+        for i, (at_step, at) in enumerate(milestones)
+    )
 
     plumed_input = f"""
 {plumed_units_header(units)}# Collective variable
 {cv_block.strip()}
-{extra_lines.strip() if extra_lines else ''}
+{extra_lines.strip() if extra_lines else ""}
 # Steered MD: pull the CV from {cv_start:.4f} to {cv_stop:.4f}
 smd:        MOVINGRESTRAINT ARG={cv_name} {schedule}
 PRINT       ARG={cv_name},smd.{cv_name}_cntr,smd.work STRIDE={stride} FILE={colvar_file}
@@ -614,21 +654,23 @@ PRINT       ARG={cv_name},smd.{cv_name}_cntr,smd.work STRIDE={stride} FILE={colv
     return plumed_input, step
 
 
-def plumed_input_steered_pt(geometry,
-                            idx,
-                            steps,
-                            r_0=1.1,
-                            wall=1.5,
-                            angle_lim=130.0,
-                            kappa=2000.0,
-                            stride=100,
-                            cv_start=None,
-                            cv_stop=None,
-                            steps_equil=0,
-                            steps_relax=0,
-                            colvar_file='COLVAR_SMD',
-                            wall_kappa=500.0,
-                            units="plumed"):
+def plumed_input_steered_pt(
+    geometry,
+    idx,
+    steps,
+    r_0=1.1,
+    wall=1.5,
+    angle_lim=130.0,
+    kappa=2000.0,
+    stride=100,
+    cv_start=None,
+    cv_stop=None,
+    steps_equil=0,
+    steps_relax=0,
+    colvar_file="COLVAR_SMD",
+    wall_kappa=500.0,
+    units="plumed",
+):
     """
     Build a steered MD input that pulls a proton across a hydrogen bond.
 
@@ -689,47 +731,54 @@ def plumed_input_steered_pt(geometry,
     if cv_start is None:
         # What the CV is worth right now: bonded to the donor gives +1,
         # bonded to the acceptor gives -1
-        cv_start = np.round(switching_value(r_dh, r_0) - switching_value(r_ah, r_0),
-                            decimals=2)
+        cv_start = np.round(
+            switching_value(r_dh, r_0) - switching_value(r_ah, r_0), decimals=2
+        )
     if cv_stop is None:
         cv_stop = -cv_start
 
-    cv_lines, wall_lines = _pt_cv_block(plumed_one_based(idx),
-                                        r_0,
-                                        _wall_value(r_da, wall),
-                                        plumed_angle_radians(angle_lim),
-                                        wall_kappa)
+    cv_lines, wall_lines = _pt_cv_block(
+        plumed_one_based(idx),
+        r_0,
+        _wall_value(r_da, wall),
+        plumed_angle_radians(angle_lim),
+        wall_kappa,
+    )
 
-    return plumed_input_steered(cv_lines,
-                                cv_start,
-                                cv_stop,
-                                steps,
-                                cv_name='pt_cv',
-                                kappa=kappa,
-                                stride=stride,
-                                steps_equil=steps_equil,
-                                steps_relax=steps_relax,
-                                colvar_file=colvar_file,
-                                extra_lines=f"\n# Limits\n{wall_lines}\n",
-                                units=units)
+    return plumed_input_steered(
+        cv_lines,
+        cv_start,
+        cv_stop,
+        steps,
+        cv_name="pt_cv",
+        kappa=kappa,
+        stride=stride,
+        steps_equil=steps_equil,
+        steps_relax=steps_relax,
+        colvar_file=colvar_file,
+        extra_lines=f"\n# Limits\n{wall_lines}\n",
+        units=units,
+    )
 
 
-def plumed_input_1pt(geometry,
-                     idx,
-                     temperature,
-                     r_0=1.1,
-                     wall=1.5,
-                     angle_lim=130.0,
-                     pace=500,
-                     height=None,
-                     sigma=0.05,
-                     bias=20.0,
-                     grid_min=-1.1,
-                     grid_max=1.1,
-                     grid_bin=200,
-                     kappa=500.0,
-                     f_opes=False,
-                     units="plumed"):
+def plumed_input_1pt(
+    geometry,
+    idx,
+    temperature,
+    r_0=1.1,
+    wall=1.5,
+    angle_lim=130.0,
+    pace=500,
+    height=None,
+    sigma=0.05,
+    bias=20.0,
+    grid_min=-1.1,
+    grid_max=1.1,
+    grid_bin=200,
+    kappa=500.0,
+    f_opes=False,
+    units="plumed",
+):
     """
     Build a PLUMED input that biases a single proton transfer with metadynamics.
 
@@ -797,17 +846,29 @@ def plumed_input_1pt(geometry,
     positions = _geometry(geometry, units)
     r_dh, r_ah, r_da = _pt_distances(positions, idx)
 
-    cv_lines, wall_lines = _pt_cv_block(plumed_one_based(idx),
-                                        _size_r0(r_dh, r_ah, r_0),
-                                        _wall_value(r_da, wall),
-                                        plumed_angle_radians(angle_lim),
-                                        kappa)
+    cv_lines, wall_lines = _pt_cv_block(
+        plumed_one_based(idx),
+        _size_r0(r_dh, r_ah, r_0),
+        _wall_value(r_da, wall),
+        plumed_angle_radians(angle_lim),
+        kappa,
+    )
 
     height = _default_height(height, units)
     kelvin, kt = plumed_temperature_pair(temperature, units)
     metad_line, fes_command = plumed_bias_and_fes(
-        f_opes, 'pt_cv', pace, height, sigma, bias, kelvin, kt,
-        grid_bin, grid_min=grid_min, grid_max=grid_max)
+        f_opes,
+        "pt_cv",
+        pace,
+        height,
+        sigma,
+        bias,
+        kelvin,
+        kt,
+        grid_bin,
+        grid_min=grid_min,
+        grid_max=grid_max,
+    )
 
     plumed_input = f"""
 {plumed_units_header(units)}# Proton transfer
@@ -856,32 +917,40 @@ def _two_pt_body(geometry, idx1, idx2, r_0, wall, angle_lim, kappa, units):
     angle = plumed_angle_radians(angle_lim)
 
     blocks = []
-    for n, (idx, r_dh, r_ah) in enumerate(((idx1, r1_dh, r1_ah),
-                                           (idx2, r2_dh, r2_ah)), start=1):
-        cv_lines, wall_lines = _pt_cv_block(plumed_one_based(idx),
-                                            _size_r0(r_dh, r_ah, r_0),
-                                            at, angle, kappa, suffix=str(n))
+    for n, (idx, r_dh, r_ah) in enumerate(
+        ((idx1, r1_dh, r1_ah), (idx2, r2_dh, r2_ah)), start=1
+    ):
+        cv_lines, wall_lines = _pt_cv_block(
+            plumed_one_based(idx),
+            _size_r0(r_dh, r_ah, r_0),
+            at,
+            angle,
+            kappa,
+            suffix=str(n),
+        )
         blocks.append(f"# Proton transfer {n}\n{cv_lines}\n\n# Limits\n{wall_lines}")
     return "\n\n".join(blocks)
 
 
-def plumed_input_2pt_1d(geometry,
-                        idx1,
-                        idx2,
-                        temperature,
-                        r_0=1.1,
-                        wall=1.5,
-                        angle_lim=130.0,
-                        pace=500,
-                        height=None,
-                        sigma=0.05,
-                        bias=20.0,
-                        grid_min=-1.1,
-                        grid_max=1.1,
-                        grid_bin=200,
-                        kappa=500.0,
-                        f_opes=False,
-                        units="plumed"):
+def plumed_input_2pt_1d(
+    geometry,
+    idx1,
+    idx2,
+    temperature,
+    r_0=1.1,
+    wall=1.5,
+    angle_lim=130.0,
+    pace=500,
+    height=None,
+    sigma=0.05,
+    bias=20.0,
+    grid_min=-1.1,
+    grid_max=1.1,
+    grid_bin=200,
+    kappa=500.0,
+    f_opes=False,
+    units="plumed",
+):
     """
     Build a PLUMED input that biases two proton transfers along one coordinate.
 
@@ -950,8 +1019,18 @@ def plumed_input_2pt_1d(geometry,
     height = _default_height(height, units)
     kelvin, kt = plumed_temperature_pair(temperature, units)
     metad_line, fes_command = plumed_bias_and_fes(
-        f_opes, 'pt_cv', pace, height, sigma, bias, kelvin, kt,
-        grid_bin, grid_min=grid_min, grid_max=grid_max)
+        f_opes,
+        "pt_cv",
+        pace,
+        height,
+        sigma,
+        bias,
+        kelvin,
+        kt,
+        grid_bin,
+        grid_min=grid_min,
+        grid_max=grid_max,
+    )
 
     plumed_input = f"""
 {plumed_units_header(units)}{body}
@@ -966,23 +1045,25 @@ PRINT       ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
     return plumed_input, fes_command
 
 
-def plumed_input_2pt_2d(geometry,
-                        idx1,
-                        idx2,
-                        temperature,
-                        r_0=1.1,
-                        wall=1.5,
-                        angle_lim=130.0,
-                        pace=500,
-                        height=None,
-                        sigma=0.05,
-                        bias=20.0,
-                        grid_min=-1.1,
-                        grid_max=1.1,
-                        grid_bin=200,
-                        kappa=500.0,
-                        f_opes=False,
-                        units="plumed"):
+def plumed_input_2pt_2d(
+    geometry,
+    idx1,
+    idx2,
+    temperature,
+    r_0=1.1,
+    wall=1.5,
+    angle_lim=130.0,
+    pace=500,
+    height=None,
+    sigma=0.05,
+    bias=20.0,
+    grid_min=-1.1,
+    grid_max=1.1,
+    grid_bin=200,
+    kappa=500.0,
+    f_opes=False,
+    units="plumed",
+):
     """
     Build a PLUMED input that biases two proton transfers on a 2-D surface.
 
@@ -1054,9 +1135,18 @@ def plumed_input_2pt_2d(geometry,
     height = _default_height(height, units)
     kelvin, kt = plumed_temperature_pair(temperature, units)
     metad_line, fes_command = plumed_bias_and_fes(
-        f_opes, 'cv_diff1,cv_diff2', pace, height, f'{sigma},{sigma}', bias,
-        kelvin, kt, f'{grid_bin},{grid_bin}',
-        grid_min=f'{grid_min},{grid_min}', grid_max=f'{grid_max},{grid_max}')
+        f_opes,
+        "cv_diff1,cv_diff2",
+        pace,
+        height,
+        f"{sigma},{sigma}",
+        bias,
+        kelvin,
+        kt,
+        f"{grid_bin},{grid_bin}",
+        grid_min=f"{grid_min},{grid_min}",
+        grid_max=f"{grid_max},{grid_max}",
+    )
 
     plumed_input = f"""
 {plumed_units_header(units)}{body}
@@ -1068,20 +1158,22 @@ PRINT       ARG=cv_diff1,cv_diff2,metad.bias STRIDE={pace} FILE=COLVAR
     return plumed_input, fes_command
 
 
-def plumed_input_neb_path(temperature,
-                          wall=0.1,
-                          pace=500,
-                          height=None,
-                          sigma=0.1,
-                          bias=5.0,
-                          grid_min=0.0,
-                          grid_max=26.0,
-                          grid_bin=500,
-                          kappa=500.0,
-                          lambda_val=250.0,
-                          neigh_size=8,
-                          f_opes=False,
-                          units="plumed"):
+def plumed_input_neb_path(
+    temperature,
+    wall=0.1,
+    pace=500,
+    height=None,
+    sigma=0.1,
+    bias=5.0,
+    grid_min=0.0,
+    grid_max=26.0,
+    grid_bin=500,
+    kappa=500.0,
+    lambda_val=250.0,
+    neigh_size=8,
+    f_opes=False,
+    units="plumed",
+):
     """
     Build a PLUMED input that biases progress along a reference path.
 
@@ -1152,15 +1244,25 @@ def plumed_input_neb_path(temperature,
     height = _default_height(height, units)
     kelvin, kt = plumed_temperature_pair(temperature, units)
     metad_line, fes_command = plumed_bias_and_fes(
-        f_opes, 'path.sss', pace, height, sigma, bias, kelvin, kt,
-        grid_bin, grid_min=grid_min, grid_max=grid_max, label='metad: ')
+        f_opes,
+        "path.sss",
+        pace,
+        height,
+        sigma,
+        bias,
+        kelvin,
+        kt,
+        grid_bin,
+        grid_min=grid_min,
+        grid_max=grid_max,
+        label="metad: ",
+    )
 
-    plumed_input = f'''
+    plumed_input = f"""
 {plumed_units_header(units)}FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
 path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
 {metad_line}
 path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}
 PRINT ARG=path.sss,path.zzz,metad.bias STRIDE={pace} FILE=COLVAR
-        '''
+        """
     return plumed_input, fes_command
-

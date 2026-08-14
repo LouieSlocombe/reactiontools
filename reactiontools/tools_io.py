@@ -42,7 +42,7 @@ __all__ = [
 # Two-letter element symbols that are also common prefixes of hydrogen atom
 # names, e.g. "HG21" is a gamma hydrogen rather than mercury. These are only
 # consulted when a PDB line has no element column to fall back on.
-_HYDROGEN_LOOKALIKES = {'He', 'Hf', 'Hg', 'Ho', 'Hs'}
+_HYDROGEN_LOOKALIKES = {"He", "Hf", "Hg", "Ho", "Hs"}
 
 
 def element_from_pdb_line(line):
@@ -77,24 +77,24 @@ def element_from_pdb_line(line):
 
     # No element column, so fall back to the atom name
     name = line[12:16]
-    letters = ''.join(c for c in name if c.isalpha())
+    letters = "".join(c for c in name if c.isalpha())
     if not letters:
-        return 'X'
+        return "X"
 
     # A name indented or prefixed by a digit carries a one-character symbol
     if not name[:1].isalpha():
-        return letters[0] if letters[0] in chemical_symbols else 'X'
+        return letters[0] if letters[0] in chemical_symbols else "X"
 
     symbol = letters[:2].capitalize()
     if symbol in _HYDROGEN_LOOKALIKES:
-        return 'H'
+        return "H"
     if symbol in chemical_symbols:
         return symbol
     # Two-letter guess is not an element, so treat it as a single-letter symbol
-    return symbol[0] if symbol[0] in chemical_symbols else 'X'
+    return symbol[0] if symbol[0] in chemical_symbols else "X"
 
 
-def write_xyz_frame(fh, symbols, positions, comment=''):
+def write_xyz_frame(fh, symbols, positions, comment=""):
     """
     Write a single frame to an open XYZ file handle.
 
@@ -177,16 +177,18 @@ def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1)
     n_atoms = len(original_atoms)
 
     cutoffs = [c * cutoff_multiplier for c in natural_cutoffs(original_atoms)]
-    i, j = neighbor_list('ij', original_atoms, cutoffs)
+    i, j = neighbor_list("ij", original_atoms, cutoffs)
 
     adjacency_matrix = csr_matrix((np.ones_like(i), (i, j)), shape=(n_atoms, n_atoms))
     n_clusters, labels = connected_components(csgraph=adjacency_matrix, directed=False)
 
     # Group atoms by cluster, then order each cluster by the Hill system (C, H, others).
-    hill_priority = {'C': 0, 'H': 1}
+    hill_priority = {"C": 0, "H": 1}
     symbols = original_atoms.get_chemical_symbols()
-    order = sorted(range(n_atoms),
-                   key=lambda idx: (labels[idx], hill_priority.get(symbols[idx], 2), symbols[idx]))
+    order = sorted(
+        range(n_atoms),
+        key=lambda idx: (labels[idx], hill_priority.get(symbols[idx], 2), symbols[idx]),
+    )
 
     atoms = original_atoms[order]
     sorted_labels = [labels[idx] for idx in order]
@@ -209,13 +211,13 @@ def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1)
         resid = (cluster_idx // num_chains) + 1
 
         # Unique three-letter residue name (AAA, AAB, ..., AAZ, ABA, ..., ZZZ)
-        resname = ''.join(chr(65 + (cluster_idx // 26 ** p) % 26) for p in (2, 1, 0))
+        resname = "".join(chr(65 + (cluster_idx // 26**p) % 26) for p in (2, 1, 0))
 
         cluster_ids[lbl] = (chain, resid, resname)
 
     element_counts_per_cluster = defaultdict(int)
 
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         for idx, atom in enumerate(atoms):
             chain, resid, resname = cluster_ids[sorted_labels[idx]]
             sym = atom.symbol
@@ -223,10 +225,14 @@ def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1)
 
             # Atom names are made unique within each chain/residue combination
             element_counts_per_cluster[(chain, resid, sym)] += 1
-            name = format_pdb_atom_name(sym, element_counts_per_cluster[(chain, resid, sym)])
+            name = format_pdb_atom_name(
+                sym, element_counts_per_cluster[(chain, resid, sym)]
+            )
 
-            f.write(f"ATOM  {idx + 1:>5} {name} {resname:>3} {chain}{resid:>4}    "
-                    f"{x:>8.3f}{y:>8.3f}{z:>8.3f}  1.00  0.00          {sym:>2}\n")
+            f.write(
+                f"ATOM  {idx + 1:>5} {name} {resname:>3} {chain}{resid:>4}    "
+                f"{x:>8.3f}{y:>8.3f}{z:>8.3f}  1.00  0.00          {sym:>2}\n"
+            )
 
         conect_dict = defaultdict(list)
         for a1, a2 in zip(i, j):
@@ -237,7 +243,9 @@ def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1)
 
             # CONECT records hold at most four bonded partners each
             for chunk_start in range(0, len(bonded_atoms), 4):
-                chunk = ''.join(f"{b:>5}" for b in bonded_atoms[chunk_start:chunk_start + 4])
+                chunk = "".join(
+                    f"{b:>5}" for b in bonded_atoms[chunk_start : chunk_start + 4]
+                )
                 f.write(f"CONECT{atom_idx + 1:>5}{chunk}\n")
 
         f.write("END\n")
@@ -283,11 +291,13 @@ def convert_pdb_to_xyz(input_file, output_file, comment=None):
     symbols = []
     positions = []
 
-    with open(input_file, 'r') as f:
+    with open(input_file, "r") as f:
         for line in f:
             if line.startswith(("ATOM  ", "HETATM")):
                 symbols.append(element_from_pdb_line(line))
-                positions.append((float(line[30:38]), float(line[38:46]), float(line[46:54])))
+                positions.append(
+                    (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+                )
             elif line.startswith("ENDMDL") and symbols:
                 frames.append((symbols, positions))
                 symbols, positions = [], []
@@ -300,7 +310,7 @@ def convert_pdb_to_xyz(input_file, output_file, comment=None):
         raise ValueError(f"No ATOM or HETATM records found in {input_file!r}.")
 
     source = os.path.basename(input_file)
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         for frame_idx, (frame_symbols, frame_positions) in enumerate(frames, start=1):
             if comment is not None:
                 text = comment
@@ -314,7 +324,7 @@ def convert_pdb_to_xyz(input_file, output_file, comment=None):
     return len(frames)
 
 
-def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HETATM'):
+def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line="HETATM"):
     """
     Convert a reaction path from XYZ into the reference PLUMED's PATHMSD reads.
 
@@ -345,10 +355,11 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
     reactiontools.tools_path.path_from_steered_md : Builds the path from steered MD.
     estimate_path_lambda : Sizes the LAMBDA the reference should be given.
     """
-    with open(template_pdb, 'r') as f:
-        template_lines = [line for line in f if line.startswith(atom_line) or line.startswith('TER')]
+    atom_records = (atom_line,) if isinstance(atom_line, str) else tuple(atom_line)
+    with open(template_pdb, "r") as f:
+        template_lines = [line for line in f if line.startswith((*atom_records, "TER"))]
 
-    with open(xyz_file, 'r') as f:
+    with open(xyz_file, "r") as f:
         lines = f.readlines()
 
     if not lines:
@@ -357,10 +368,10 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
     num_atoms = int(lines[0].strip())
     frames = []
     for i in range(0, len(lines), num_atoms + 2):
-        frame_coords = lines[i + 2: i + num_atoms + 2]
+        frame_coords = lines[i + 2 : i + num_atoms + 2]
         frames.append([line.split()[1:] for line in frame_coords])
 
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         f.write("REMARK TYPE=MULTI-ST-PDB\n")
         f.write("REMARK ARG=path.s,path.z\n")
 
@@ -373,13 +384,15 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
             coord_idx = 0
 
             for t_line in template_lines:
-                if t_line.startswith('TER'):
+                if t_line.startswith("TER"):
                     f.write(t_line)
                 else:
                     coords = frame[coord_idx]
-                    new_line = (t_line[:30] +
-                                f"{float(coords[0]):8.3f}{float(coords[1]):8.3f}{float(coords[2]):8.3f}" +
-                                t_line[54:])
+                    new_line = (
+                        t_line[:30]
+                        + f"{float(coords[0]):8.3f}{float(coords[1]):8.3f}{float(coords[2]):8.3f}"
+                        + t_line[54:]
+                    )
                     f.write(new_line)
                     coord_idx += 1
 
@@ -405,7 +418,7 @@ def pdb_remove_ter_index(input_path, output_path):
     output_path : str
         Path to write the renumbered PDB to. May be the input path.
     """
-    with open(input_path, 'r') as f:
+    with open(input_path, "r") as f:
         lines = f.readlines()
 
     clean_lines = []
@@ -437,14 +450,14 @@ def pdb_remove_ter_index(input_path, output_path):
         elif line.startswith("CONECT"):
             new_conect = line[:6]
             for i in range(6, len(line.strip()), 5):
-                old_idx = line[i:i + 5].strip()
-                new_conect += index_map.get(old_idx, line[i:i + 5])
+                old_idx = line[i : i + 5].strip()
+                new_conect += index_map.get(old_idx, line[i : i + 5])
             clean_lines.append(new_conect.rstrip() + "\n")
 
         else:
             clean_lines.append(line)
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.writelines(clean_lines)
 
 
@@ -472,7 +485,7 @@ def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
     """
     keep = set() if keep is None else {i + 1 for i in keep}
 
-    with open(input_pdb, 'r') as fin, open(output_pdb, 'w') as fout:
+    with open(input_pdb, "r") as fin, open(output_pdb, "w") as fout:
         for line in fin:
             if not line.startswith(("ATOM", "HETATM")):
                 fout.write(line)
@@ -480,5 +493,5 @@ def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
 
             # Short-circuits, so a record that is not a hydrogen never has its
             # serial parsed and a malformed one cannot raise here.
-            if element_from_pdb_line(line) != 'H' or int(line[6:11].strip()) in keep:
+            if element_from_pdb_line(line) != "H" or int(line[6:11].strip()) in keep:
                 fout.write(line)

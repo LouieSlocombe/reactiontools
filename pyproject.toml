@@ -31,13 +31,17 @@ keywords = [
 ]
 
 dependencies = [
-  "numpy",
-  "scipy",
-  "matplotlib",
-  "pandas", 
   "ase>=3.23",
-  "sella @ git+https://github.com/LouieSlocombe/sella.git",
   "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
+  "matplotlib",
+  "mdtraj",
+  "numpy",
+  "pandas",
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "scipy",
+  "sella @ git+https://github.com/LouieSlocombe/sella.git",
 ]
 # ORCA is needed at runtime by reactiontools.tools_orca but is licensed
 # separately and cannot be installed from PyPI; see build_tools/README.md.
@@ -49,17 +53,6 @@ classifiers = [
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Physics",
-]
-
-[project.optional-dependencies]
-# Reading a steered-MD trajectory in reactiontools.tools_path needs mdtraj.
-# The frame-selection functions there are numpy only and work without it.
-path = [
-  "mdtraj",
-]
-dev = [
-  "pytest",
-  "pytest-cov",
 ]
 
 [project.urls]
@@ -82,3 +75,11 @@ addopts = "-ra"
 filterwarnings = [
   "ignore::DeprecationWarning:ase.*",
 ]
+
+[tool.ruff]
+target-version = "py311"
+# These are upstream command-line scripts retained with their original style.
+extend-exclude = ["reactiontools/opes/*.py"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

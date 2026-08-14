@@ -23,10 +23,9 @@ written with molecules wrapped into the periodic box, so a path spanning two
 molecules -- the two bases of a pair, say -- can have them wrapped to opposite
 sides of the box, which no amount of alignment repairs.
 
-Reading a trajectory needs mdtraj, which is the optional ``path`` extra:
-``pip install 'reactiontools[path]'``. The frame-selection functions
-(:func:`select_frames_by_cv`, :func:`select_frames_by_msd`,
-:func:`cv_from_colvar`) are numpy only and work without it.
+Trajectory readers use MDTraj, which is installed with the package and imported
+only when needed. The frame-selection functions (:func:`select_frames_by_cv`,
+:func:`select_frames_by_msd`, :func:`cv_from_colvar`) remain NumPy-only.
 """
 
 import os
@@ -44,9 +43,10 @@ __all__ = [
     "select_frames_by_msd",
 ]
 
-_MDTRAJ_HINT = ("{name} needs mdtraj to read the trajectory, which is not "
-                "installed. Install it with `pip install 'reactiontools[path]'` "
-                "or `conda install -c conda-forge mdtraj`.")
+_MDTRAJ_HINT = (
+    "{name} needs mdtraj to read the trajectory, which is not "
+    "installed. Reinstall reactiontools with its dependencies."
+)
 
 #: How many of mdtraj's nanometres go into one unit of each supported length.
 #: mdtraj always hands back nanometres, whatever the file said, so this is the
@@ -105,7 +105,8 @@ def _length_scale(length_unit):
         raise ValueError(
             f"Unknown length unit {length_unit!r}. PLUMED works in nanometres "
             f"when driven from OpenMM and angstrom when driven from ASE, so "
-            f"this is 'nm' or 'A'.")
+            f"this is 'nm' or 'A'."
+        )
     return _LENGTH_PER_NM[key]
 
 
@@ -161,7 +162,8 @@ def estimate_path_lambda(pdb_path, length_unit="nm"):
     if traj.n_frames < 2:
         raise ValueError(
             f"{pdb_path} holds {traj.n_frames} frame(s); LAMBDA is set from "
-            f"the spacing between frames, so there must be at least two.")
+            f"the spacing between frames, so there must be at least two."
+        )
     traj.superpose(traj[0])
 
     # mdtraj works in nanometres whatever the file said, so scale the
@@ -264,7 +266,9 @@ def _nearest_monotone(series, targets):
     series = np.asarray(series, dtype=float)
     n_targets = len(targets)
     if series.size < n_targets:
-        raise ValueError(f"Cannot pick {n_targets} frames from a series of {series.size}.")
+        raise ValueError(
+            f"Cannot pick {n_targets} frames from a series of {series.size}."
+        )
 
     picks = []
     low = 0
@@ -358,20 +362,22 @@ def _smooth_frames(xyz, picks, window):
     return smoothed
 
 
-def path_from_steered_md(traj_file,
-                         template_pdb='index_atoms.pdb',
-                         output_file='neb_path.pdb',
-                         colvar_file='COLVAR_SMD',
-                         cv_name=None,
-                         n_images=15,
-                         atom_indices=None,
-                         top=None,
-                         cv_start=None,
-                         cv_stop=None,
-                         smooth=0,
-                         align=True,
-                         atom_line='HETATM',
-                         length_unit="nm"):
+def path_from_steered_md(
+    traj_file,
+    template_pdb="index_atoms.pdb",
+    output_file="neb_path.pdb",
+    colvar_file="COLVAR_SMD",
+    cv_name=None,
+    n_images=15,
+    atom_indices=None,
+    top=None,
+    cv_start=None,
+    cv_stop=None,
+    smooth=0,
+    align=True,
+    atom_line="HETATM",
+    length_unit="nm",
+):
     """
     Estimate a path collective variable from a steered MD trajectory.
 
@@ -453,22 +459,28 @@ def path_from_steered_md(traj_file,
         atom_indices = np.asarray(sorted(atom_indices), dtype=int)
 
     # Only formats that carry no topology of their own accept `top`
-    load_kwargs = {'top': top} if top is not None else {}
+    load_kwargs = {"top": top} if top is not None else {}
     traj = md.load(traj_file, atom_indices=atom_indices, **load_kwargs)
     n_template = md.load(template_pdb).n_atoms
     if traj.n_atoms != n_template:
-        raise ValueError(f"Path has {traj.n_atoms} atoms but {template_pdb} has {n_template}. "
-                         "Pass the atom indices the template was written from.")
-    with open(template_pdb, 'r') as handle:
+        raise ValueError(
+            f"Path has {traj.n_atoms} atoms but {template_pdb} has {n_template}. "
+            "Pass the atom indices the template was written from."
+        )
+    with open(template_pdb, "r") as handle:
         n_records = sum(1 for line in handle if line.startswith(atom_line))
     if n_records != n_template:
         # Only lines of this record type make it into the output, so a
         # mismatch here would quietly write a path with atoms missing.
-        raise ValueError(f"{template_pdb} holds {n_template} atoms but {n_records} {atom_line} "
-                         "records. Set atom_line to the record type it uses.")
+        raise ValueError(
+            f"{template_pdb} holds {n_template} atoms but {n_records} {atom_line} "
+            "records. Set atom_line to the record type it uses."
+        )
     if traj.n_frames < n_images:
-        raise ValueError(f"Trajectory has {traj.n_frames} frames, too few for {n_images} images. "
-                         "Report the steered run more often, or ask for fewer images.")
+        raise ValueError(
+            f"Trajectory has {traj.n_frames} frames, too few for {n_images} images. "
+            "Report the steered run more often, or ask for fewer images."
+        )
 
     if align:
         traj.superpose(traj, 0)
@@ -483,12 +495,16 @@ def path_from_steered_md(traj_file,
     print(f"Selected frames {picks.tolist()} of {traj.n_frames}", flush=True)
     positions = _smooth_frames(traj.xyz, picks, smooth) * 10.0  # nm to angstrom
 
-    symbols = [atom.element.symbol if atom.element is not None else atom.name[:2]
-               for atom in traj.topology.atoms]
+    symbols = [
+        atom.element.symbol if atom.element is not None else atom.name[:2]
+        for atom in traj.topology.atoms
+    ]
     xyz_file = f"{os.path.splitext(output_file)[0]}.xyz"
-    with open(xyz_file, 'w') as handle:
+    with open(xyz_file, "w") as handle:
         for i, frame in enumerate(positions):
-            write_xyz_frame(handle, symbols, frame, comment=f"steered MD path image {i + 1}")
+            write_xyz_frame(
+                handle, symbols, frame, comment=f"steered MD path image {i + 1}"
+            )
 
     convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line=atom_line)
     print(f"Wrote {n_images} path images to {output_file}", flush=True)

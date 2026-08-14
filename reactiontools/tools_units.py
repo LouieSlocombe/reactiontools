@@ -76,7 +76,9 @@ def _normalise_unit(unit):
         return None
     key = str(unit).strip().lower().replace(" ", "")
     if key not in ENERGY_UNITS:
-        raise KeyError(f"Unknown energy unit {unit!r}. Known units: {sorted(ENERGY_UNITS)}")
+        raise KeyError(
+            f"Unknown energy unit {unit!r}. Known units: {sorted(ENERGY_UNITS)}"
+        )
     return key
 
 
@@ -146,6 +148,7 @@ def as_kelvin(temperature):
     """
     if type(temperature).__module__.split(".")[0] == "openmm":
         from openmm import unit as openmm_unit
+
         return float(temperature.value_in_unit(openmm_unit.kelvin))
     return float(temperature)
 
@@ -177,5 +180,6 @@ def thermal_energy(temperature, energy_unit=DEFAULT_ENERGY_UNIT):
     >>> round(float(thermal_energy(300.0)), 4)
     2.4943
     """
-    return float(convert_energy(kB * as_kelvin(temperature),
-                                source="eV", target=energy_unit))
+    return float(
+        convert_energy(kB * as_kelvin(temperature), source="eV", target=energy_unit)
+    )

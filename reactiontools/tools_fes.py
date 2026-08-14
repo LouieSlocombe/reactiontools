@@ -52,11 +52,13 @@ import numpy as np
 import pandas as pd
 
 from .tools_style import _finalise, _style_axes, ax_plot
-from .tools_units import (DEFAULT_ENERGY_UNIT,
-                          ENERGY_UNITS,
-                          convert_energy,
-                          thermal_energy,
-                          unit_label)
+from .tools_units import (
+    DEFAULT_ENERGY_UNIT,
+    ENERGY_UNITS,
+    convert_energy,
+    thermal_energy,
+    unit_label,
+)
 
 __all__ = [
     "DEFAULT_ENERGY_UNIT",
@@ -81,6 +83,7 @@ __all__ = [
     "summarise_fes",
     "unit_label",
 ]
+
 
 # ---------------------------------------------------------------------------
 # PLUMED file reading
@@ -128,7 +131,9 @@ class PlumedData:
         if isinstance(name, (int, np.integer)):
             index = int(name)
             if not -self.data.shape[1] <= index < self.data.shape[1]:
-                raise IndexError(f"Column {index} out of range for {self.data.shape[1]} columns")
+                raise IndexError(
+                    f"Column {index} out of range for {self.data.shape[1]} columns"
+                )
             return index % self.data.shape[1]
         if name not in self.fields:
             raise KeyError(f"Field {name!r} not found. Available fields: {self.fields}")
@@ -336,15 +341,25 @@ class FES:
             If the surface is not a 2-D surface on a regular grid.
         """
         if self.ndim != 2 or not self.regular:
-            raise ValueError("Slicing requires a 2-D free-energy surface on a regular grid")
+            raise ValueError(
+                "Slicing requires a 2-D free-energy surface on a regular grid"
+            )
 
         # Grids are stored as (n_cv2, n_cv1); axis 0 varies along the columns.
         axis_values = self.cvs[axis][0, :] if axis == 0 else self.cvs[axis][:, 0]
         index = int(np.argmin(np.abs(axis_values - value)))
         other = 1 - axis
         if axis == 0:
-            return self.cvs[other][:, index], self.energy[:, index], float(axis_values[index])
-        return self.cvs[other][index, :], self.energy[index, :], float(axis_values[index])
+            return (
+                self.cvs[other][:, index],
+                self.energy[:, index],
+                float(axis_values[index]),
+            )
+        return (
+            self.cvs[other][index, :],
+            self.energy[index, :],
+            float(axis_values[index]),
+        )
 
 
 def _grid_from_columns(x, y, z):
@@ -368,10 +383,12 @@ def _grid_from_columns(x, y, z):
         return x, y, z, False
 
     order = np.lexsort((x, y))
-    return (x[order].reshape(n_y, n_x),
-            y[order].reshape(n_y, n_x),
-            z[order].reshape(n_y, n_x),
-            True)
+    return (
+        x[order].reshape(n_y, n_x),
+        y[order].reshape(n_y, n_x),
+        z[order].reshape(n_y, n_x),
+        True,
+    )
 
 
 def _fes_from_plumed(path, columns=None, cv_labels=None, energy_label=None):
@@ -421,19 +438,23 @@ def _fes_from_plumed(path, columns=None, cv_labels=None, energy_label=None):
     if len(indices) == 2:
         x = plumed.data[:, indices[0]]
         order = np.argsort(x)
-        return FES(cvs=[x[order]],
-                   energy=energies[order],
-                   cv_labels=list(cv_labels) if cv_labels else labels[:1],
-                   energy_label=energy_label)
+        return FES(
+            cvs=[x[order]],
+            energy=energies[order],
+            cv_labels=list(cv_labels) if cv_labels else labels[:1],
+            energy_label=energy_label,
+        )
 
-    x, y, z, regular = _grid_from_columns(plumed.data[:, indices[0]],
-                                          plumed.data[:, indices[1]],
-                                          energies)
-    return FES(cvs=[x, y],
-               energy=z,
-               cv_labels=list(cv_labels) if cv_labels else labels[:2],
-               energy_label=energy_label,
-               regular=regular)
+    x, y, z, regular = _grid_from_columns(
+        plumed.data[:, indices[0]], plumed.data[:, indices[1]], energies
+    )
+    return FES(
+        cvs=[x, y],
+        energy=z,
+        cv_labels=list(cv_labels) if cv_labels else labels[:2],
+        energy_label=energy_label,
+        regular=regular,
+    )
 
 
 def _fes_from_array(source, cv_labels=None, energy_label=None):
@@ -478,7 +499,10 @@ def _fes_from_array(source, cv_labels=None, energy_label=None):
     # A sequence of separate arrays, e.g. (X, Y, Z) of matching shape.
     if isinstance(source, (list, tuple)) and len(source) in (2, 3):
         parts = [np.asarray(part, dtype=float) for part in source]
-        if all(part.ndim == parts[0].ndim and part.shape == parts[0].shape for part in parts):
+        if all(
+            part.ndim == parts[0].ndim and part.shape == parts[0].shape
+            for part in parts
+        ):
             source = np.stack(parts)
         else:
             raise ValueError("Sequence FES input requires arrays of identical shape")
@@ -487,11 +511,15 @@ def _fes_from_array(source, cv_labels=None, energy_label=None):
 
     if array.ndim == 3:
         if array.shape[0] != 3:
-            raise ValueError(f"3-D FES input must be stacked as (3, ny, nx), got {array.shape}")
-        return FES(cvs=[array[0], array[1]],
-                   energy=array[2],
-                   cv_labels=list(cv_labels) if cv_labels else [],
-                   energy_label=energy_label)
+            raise ValueError(
+                f"3-D FES input must be stacked as (3, ny, nx), got {array.shape}"
+            )
+        return FES(
+            cvs=[array[0], array[1]],
+            energy=array[2],
+            cv_labels=list(cv_labels) if cv_labels else [],
+            energy_label=energy_label,
+        )
 
     if array.ndim != 2:
         raise ValueError(f"Cannot interpret FES input with shape {array.shape}")
@@ -504,27 +532,33 @@ def _fes_from_array(source, cv_labels=None, energy_label=None):
 
     if array.shape[0] == 2:
         order = np.argsort(array[0])
-        return FES(cvs=[array[0][order]],
-                   energy=array[1][order],
-                   cv_labels=list(cv_labels) if cv_labels else [],
-                   energy_label=energy_label)
+        return FES(
+            cvs=[array[0][order]],
+            energy=array[1][order],
+            cv_labels=list(cv_labels) if cv_labels else [],
+            energy_label=energy_label,
+        )
 
     x, y, z, regular = _grid_from_columns(array[0], array[1], array[2])
-    return FES(cvs=[x, y],
-               energy=z,
-               cv_labels=list(cv_labels) if cv_labels else [],
-               energy_label=energy_label,
-               regular=regular)
+    return FES(
+        cvs=[x, y],
+        energy=z,
+        cv_labels=list(cv_labels) if cv_labels else [],
+        energy_label=energy_label,
+        regular=regular,
+    )
 
 
-def as_fes(source,
-           energy_unit=None,
-           source_unit=DEFAULT_ENERGY_UNIT,
-           shift_min_to_zero=True,
-           max_energy=None,
-           columns=None,
-           cv_labels=None,
-           energy_label=None):
+def as_fes(
+    source,
+    energy_unit=None,
+    source_unit=DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero=True,
+    max_energy=None,
+    columns=None,
+    cv_labels=None,
+    energy_label=None,
+):
     """Coerce anything FES-shaped into a prepared :class:`FES`.
 
     This is the single entry point used by every plotting function, so all
@@ -573,18 +607,22 @@ def as_fes(source,
         If either unit is not one of :data:`ENERGY_UNITS`.
     """
     if isinstance(source, FES):
-        fes = FES(cvs=list(source.cvs),
-                  energy=source.energy.copy(),
-                  cv_labels=list(source.cv_labels),
-                  energy_unit=source.energy_unit,
-                  energy_label=source.energy_label,
-                  regular=source.regular)
+        fes = FES(
+            cvs=list(source.cvs),
+            energy=source.energy.copy(),
+            cv_labels=list(source.cv_labels),
+            energy_unit=source.energy_unit,
+            energy_label=source.energy_label,
+            regular=source.regular,
+        )
         if cv_labels:
             fes.cv_labels = list(cv_labels)
         if energy_label:
             fes.energy_label = energy_label
     elif isinstance(source, (str, os.PathLike)):
-        fes = _fes_from_plumed(source, columns=columns, cv_labels=cv_labels, energy_label=energy_label)
+        fes = _fes_from_plumed(
+            source, columns=columns, cv_labels=cv_labels, energy_label=energy_label
+        )
     else:
         fes = _fes_from_array(source, cv_labels=cv_labels, energy_label=energy_label)
 
@@ -657,11 +695,13 @@ def fes_series_files(directory=".", pattern=r"^fes_?(\d+)\.dat$"):
     return [path for _, path in sorted(matches, key=lambda item: item[0])]
 
 
-def load_fes_series(directory=".",
-                    energy_unit="eV",
-                    source_unit=DEFAULT_ENERGY_UNIT,
-                    pattern=r"^fes_?(\d+)\.dat$",
-                    verbose=True):
+def load_fes_series(
+    directory=".",
+    energy_unit="eV",
+    source_unit=DEFAULT_ENERGY_UNIT,
+    pattern=r"^fes_?(\d+)\.dat$",
+    verbose=True,
+):
     r"""Load the numbered free-energy surfaces in a directory, in index order.
 
     :func:`fes_series_files` followed by :func:`as_fes` on each, so 1-D and
@@ -948,7 +988,8 @@ def _basin_mask(fes, basin, name):
         raise ValueError(
             f"{name}=({low:g}, {high:g}) holds no sampled grid point. The "
             f"collective variable runs from {np.min(cv):g} to {np.max(cv):g}, "
-            f"and unsampled bins do not count.")
+            f"and unsampled bins do not count."
+        )
     return inside
 
 
@@ -1018,11 +1059,13 @@ class FESSummary:
     def __str__(self):
         """Report the barriers, the basin difference and where they sit."""
         unit = f" {self.energy_unit}" if self.energy_unit else ""
-        return (f"Barrier A->B:  {_format_energy(self.forward_barrier)}{unit}\n"
-                f"Barrier B->A:  {_format_energy(self.reverse_barrier)}{unit}\n"
-                f"Delta F (B-A): {_format_energy(self.delta_f)}{unit}\n"
-                f"Minima at:     {self.minimum_a:g}, {self.minimum_b:g}\n"
-                f"Barrier at:    {self.barrier_position:g}")
+        return (
+            f"Barrier A->B:  {_format_energy(self.forward_barrier)}{unit}\n"
+            f"Barrier B->A:  {_format_energy(self.reverse_barrier)}{unit}\n"
+            f"Delta F (B-A): {_format_energy(self.delta_f)}{unit}\n"
+            f"Minima at:     {self.minimum_a:g}, {self.minimum_b:g}\n"
+            f"Barrier at:    {self.barrier_position:g}"
+        )
 
 
 def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
@@ -1082,14 +1125,16 @@ def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
         raise ValueError(
             f"summarise_fes reads a barrier off a 1-D profile, but this "
             f"surface has {fes.ndim} collective variables. Project it first "
-            f"with run_sum_hills(idw=...), or cut it with FES.slice_at.")
+            f"with run_sum_hills(idw=...), or cut it with FES.slice_at."
+        )
 
     kt = None
     if temperature is not None:
         if fes.energy_unit is None:
             raise ValueError(
                 "Cannot use temperature without knowing the surface's energy "
-                "unit; pass source_unit or energy_unit.")
+                "unit; pass source_unit or energy_unit."
+            )
         kt = thermal_energy(temperature, fes.energy_unit)
 
     cv = fes.cvs[0]
@@ -1101,7 +1146,8 @@ def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
     if low_a <= high_b and low_b <= high_a:
         raise ValueError(
             f"basin_a=({low_a:g}, {high_a:g}) and basin_b=({low_b:g}, "
-            f"{high_b:g}) overlap, so there is no barrier between them.")
+            f"{high_b:g}) overlap, so there is no barrier between them."
+        )
 
     inner_low, inner_high = (high_a, low_b) if high_a < low_b else (high_b, low_a)
     between = (cv > inner_low) & (cv < inner_high) & np.isfinite(fes.energy)
@@ -1110,7 +1156,8 @@ def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
             f"No sampled grid point lies between the basins, over "
             f"({inner_low:g}, {inner_high:g}), so there is no barrier to "
             f"measure. Widen the gap between them, or check the surface is "
-            f"sampled there.")
+            f"sampled there."
+        )
 
     index_a = np.flatnonzero(mask_a)[np.argmin(fes.energy[mask_a])]
     index_b = np.flatnonzero(mask_b)[np.argmin(fes.energy[mask_b])]
@@ -1129,7 +1176,8 @@ def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
         barrier_position=float(cv[top]),
         forward_barrier=float(fes.energy[top] - fes.energy[index_a]),
         reverse_barrier=float(fes.energy[top] - fes.energy[index_b]),
-        energy_unit=fes.energy_unit)
+        energy_unit=fes.energy_unit,
+    )
 
 
 def fes_convergence(sources, basin_a, basin_b, temperature=None, **kwargs):
@@ -1162,28 +1210,31 @@ def fes_convergence(sources, basin_a, basin_b, temperature=None, **kwargs):
     # max_energy and the unit conversion on top of themselves.
     if _is_single_source(sources):
         sources = [sources]
-    return [summarise_fes(source, basin_a, basin_b, temperature=temperature,
-                          **kwargs)
-            for source in sources]
+    return [
+        summarise_fes(source, basin_a, basin_b, temperature=temperature, **kwargs)
+        for source in sources
+    ]
 
 
-def plot_fes_1d(sources,
-                fig=None,
-                ax=None,
-                labels=None,
-                label_template=None,
-                max_datasets=None,
-                energy_unit=None,
-                source_unit=DEFAULT_ENERGY_UNIT,
-                shift_min_to_zero=True,
-                max_energy=None,
-                columns=None,
-                x_lab=None,
-                y_lab=None,
-                filename=None,
-                show=False,
-                fig_size=(8, 3),
-                **plot_kwargs):
+def plot_fes_1d(
+    sources,
+    fig=None,
+    ax=None,
+    labels=None,
+    label_template=None,
+    max_datasets=None,
+    energy_unit=None,
+    source_unit=DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero=True,
+    max_energy=None,
+    columns=None,
+    x_lab=None,
+    y_lab=None,
+    filename=None,
+    show=False,
+    fig_size=(8, 3),
+    **plot_kwargs,
+):
     """Plot one or more 1-D free-energy profiles on a single axes.
 
     This covers a single profile, a convergence series over time and a
@@ -1239,14 +1290,18 @@ def plot_fes_1d(sources,
     ValueError
         If any source is not a 1-D surface.
     """
-    fes_list = _as_fes_list(sources,
-                            energy_unit=energy_unit,
-                            source_unit=source_unit,
-                            shift_min_to_zero=shift_min_to_zero,
-                            max_energy=max_energy,
-                            columns=columns)
+    fes_list = _as_fes_list(
+        sources,
+        energy_unit=energy_unit,
+        source_unit=source_unit,
+        shift_min_to_zero=shift_min_to_zero,
+        max_energy=max_energy,
+        columns=columns,
+    )
     if any(fes.ndim != 1 for fes in fes_list):
-        raise ValueError("plot_fes_1d expects 1-D free-energy surfaces; use plot_fes_2d instead")
+        raise ValueError(
+            "plot_fes_1d expects 1-D free-energy surfaces; use plot_fes_2d instead"
+        )
 
     label_list = _resolve_labels(labels, len(fes_list), template=label_template)
     fes_list, label_list = _keep_last(fes_list, label_list, max_datasets)
@@ -1261,33 +1316,38 @@ def plot_fes_1d(sources,
         ax.legend(loc="best")
 
     reference = fes_list[0]
-    _style_axes(fig, ax,
-                x_lab if x_lab is not None else reference.cv_labels[0],
-                y_lab if y_lab is not None else reference.label)
+    _style_axes(
+        fig,
+        ax,
+        x_lab if x_lab is not None else reference.cv_labels[0],
+        y_lab if y_lab is not None else reference.label,
+    )
     _finalise(fig, filename=filename, show=show)
     return fig, ax
 
 
-def plot_fes_2d(sources,
-                fig=None,
-                ax=None,
-                labels=None,
-                label_template=None,
-                max_datasets=None,
-                energy_unit=None,
-                source_unit=DEFAULT_ENERGY_UNIT,
-                shift_min_to_zero=True,
-                max_energy=None,
-                columns=None,
-                levels=30,
-                cmap=None,
-                x_lab=None,
-                y_lab=None,
-                colorbar=True,
-                filename=None,
-                show=False,
-                fig_size=None,
-                **contour_kwargs):
+def plot_fes_2d(
+    sources,
+    fig=None,
+    ax=None,
+    labels=None,
+    label_template=None,
+    max_datasets=None,
+    energy_unit=None,
+    source_unit=DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero=True,
+    max_energy=None,
+    columns=None,
+    levels=30,
+    cmap=None,
+    x_lab=None,
+    y_lab=None,
+    colorbar=True,
+    filename=None,
+    show=False,
+    fig_size=None,
+    **contour_kwargs,
+):
     """Plot one or more 2-D free-energy surfaces as filled contours.
 
     A single surface gives one panel; several surfaces are drawn side by
@@ -1352,26 +1412,32 @@ def plot_fes_2d(sources,
         If any source is not a 2-D surface, or if the supplied axes do not
         match the number of surfaces.
     """
-    fes_list = _as_fes_list(sources,
-                            energy_unit=energy_unit,
-                            source_unit=source_unit,
-                            shift_min_to_zero=shift_min_to_zero,
-                            max_energy=max_energy,
-                            columns=columns)
+    fes_list = _as_fes_list(
+        sources,
+        energy_unit=energy_unit,
+        source_unit=source_unit,
+        shift_min_to_zero=shift_min_to_zero,
+        max_energy=max_energy,
+        columns=columns,
+    )
     if any(fes.ndim != 2 for fes in fes_list):
-        raise ValueError("plot_fes_2d expects 2-D free-energy surfaces; use plot_fes_1d instead")
+        raise ValueError(
+            "plot_fes_2d expects 2-D free-energy surfaces; use plot_fes_1d instead"
+        )
 
     label_list = _resolve_labels(labels, len(fes_list), template=label_template)
     fes_list, label_list = _keep_last(fes_list, label_list, max_datasets)
 
     n_panels = len(fes_list)
     if fig is None or ax is None:
-        fig, ax = plt.subplots(nrows=1,
-                               ncols=n_panels,
-                               figsize=_default_grid_size(n_panels, fig_size),
-                               sharex=True,
-                               sharey=True,
-                               constrained_layout=True)
+        fig, ax = plt.subplots(
+            nrows=1,
+            ncols=n_panels,
+            figsize=_default_grid_size(n_panels, fig_size),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
+        )
     axes = np.atleast_1d(ax).ravel()
     if axes.size < n_panels:
         raise ValueError(f"Got {axes.size} axes for {n_panels} surfaces")
@@ -1380,49 +1446,68 @@ def plot_fes_2d(sources,
     contours = []
     for axis, fes, label in zip(axes, fes_list, label_list):
         if fes.regular:
-            mappable = axis.contourf(fes.cvs[0], fes.cvs[1], fes.energy,
-                                     levels=shared_levels, cmap=cmap, **contour_kwargs)
+            mappable = axis.contourf(
+                fes.cvs[0],
+                fes.cvs[1],
+                fes.energy,
+                levels=shared_levels,
+                cmap=cmap,
+                **contour_kwargs,
+            )
         else:
             finite = np.isfinite(fes.energy)
-            mappable = axis.tricontourf(fes.cvs[0][finite], fes.cvs[1][finite], fes.energy[finite],
-                                        levels=shared_levels, cmap=cmap, **contour_kwargs)
+            mappable = axis.tricontourf(
+                fes.cvs[0][finite],
+                fes.cvs[1][finite],
+                fes.energy[finite],
+                levels=shared_levels,
+                cmap=cmap,
+                **contour_kwargs,
+            )
         contours.append(mappable)
         if label is not None and n_panels > 1:
             axis.set_title(label)
 
     reference = fes_list[0]
-    _style_axes(fig, axes[:n_panels],
-                x_lab if x_lab is not None else reference.cv_labels[0],
-                y_lab if y_lab is not None else reference.cv_labels[1])
+    _style_axes(
+        fig,
+        axes[:n_panels],
+        x_lab if x_lab is not None else reference.cv_labels[0],
+        y_lab if y_lab is not None else reference.cv_labels[1],
+    )
 
     if colorbar:
-        fig.colorbar(contours[-1],
-                     ax=list(axes[:n_panels]),
-                     orientation="vertical",
-                     label=reference.label)
+        fig.colorbar(
+            contours[-1],
+            ax=list(axes[:n_panels]),
+            orientation="vertical",
+            label=reference.label,
+        )
 
     _finalise(fig, filename=filename, show=show)
     return fig, axes[:n_panels]
 
 
-def plot_fes_2d_overlay(sources,
-                        fig=None,
-                        ax=None,
-                        labels=None,
-                        label_template=None,
-                        energy_unit=None,
-                        source_unit=DEFAULT_ENERGY_UNIT,
-                        shift_min_to_zero=True,
-                        max_energy=None,
-                        columns=None,
-                        levels=6,
-                        colors=None,
-                        x_lab=None,
-                        y_lab=None,
-                        filename=None,
-                        show=False,
-                        fig_size=(5, 4),
-                        **contour_kwargs):
+def plot_fes_2d_overlay(
+    sources,
+    fig=None,
+    ax=None,
+    labels=None,
+    label_template=None,
+    energy_unit=None,
+    source_unit=DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero=True,
+    max_energy=None,
+    columns=None,
+    levels=6,
+    colors=None,
+    x_lab=None,
+    y_lab=None,
+    filename=None,
+    show=False,
+    fig_size=(5, 4),
+    **contour_kwargs,
+):
     """Overlay the contour lines of several 2-D free-energy surfaces.
 
     Drawing the surfaces on the same axes in different colours makes small
@@ -1477,12 +1562,14 @@ def plot_fes_2d_overlay(sources,
     ValueError
         If any source is not a 2-D surface.
     """
-    fes_list = _as_fes_list(sources,
-                            energy_unit=energy_unit,
-                            source_unit=source_unit,
-                            shift_min_to_zero=shift_min_to_zero,
-                            max_energy=max_energy,
-                            columns=columns)
+    fes_list = _as_fes_list(
+        sources,
+        energy_unit=energy_unit,
+        source_unit=source_unit,
+        shift_min_to_zero=shift_min_to_zero,
+        max_energy=max_energy,
+        columns=columns,
+    )
     if any(fes.ndim != 2 for fes in fes_list):
         raise ValueError("plot_fes_2d_overlay expects 2-D free-energy surfaces")
 
@@ -1496,46 +1583,66 @@ def plot_fes_2d_overlay(sources,
     shared_levels = _shared_levels(fes_list, levels)
     for fes, color in zip(fes_list, colors):
         if fes.regular:
-            ax.contour(fes.cvs[0], fes.cvs[1], fes.energy,
-                       levels=shared_levels, colors=color, **contour_kwargs)
+            ax.contour(
+                fes.cvs[0],
+                fes.cvs[1],
+                fes.energy,
+                levels=shared_levels,
+                colors=color,
+                **contour_kwargs,
+            )
         else:
             finite = np.isfinite(fes.energy)
-            ax.tricontour(fes.cvs[0][finite], fes.cvs[1][finite], fes.energy[finite],
-                          levels=shared_levels, colors=color, **contour_kwargs)
+            ax.tricontour(
+                fes.cvs[0][finite],
+                fes.cvs[1][finite],
+                fes.energy[finite],
+                levels=shared_levels,
+                colors=color,
+                **contour_kwargs,
+            )
 
-    handles = [plt.Line2D([0], [0], color=color, label=label)
-               for color, label in zip(colors, label_list) if label is not None]
+    handles = [
+        plt.Line2D([0], [0], color=color, label=label)
+        for color, label in zip(colors, label_list)
+        if label is not None
+    ]
     if handles:
         ax.legend(handles=handles, loc="best")
 
     reference = fes_list[0]
-    _style_axes(fig, ax,
-                x_lab if x_lab is not None else reference.cv_labels[0],
-                y_lab if y_lab is not None else reference.cv_labels[1])
+    _style_axes(
+        fig,
+        ax,
+        x_lab if x_lab is not None else reference.cv_labels[0],
+        y_lab if y_lab is not None else reference.cv_labels[1],
+    )
     _finalise(fig, filename=filename, show=show)
     return fig, ax
 
 
-def plot_fes_slices(sources,
-                    at,
-                    axis=0,
-                    fig=None,
-                    ax=None,
-                    labels=None,
-                    energy_unit=None,
-                    source_unit=DEFAULT_ENERGY_UNIT,
-                    shift_min_to_zero=True,
-                    max_energy=None,
-                    columns=None,
-                    slice_format="{label}, {cv}$={value:.2f}$",
-                    colors=None,
-                    linestyles=("-", "--", ":", "-."),
-                    x_lab=None,
-                    y_lab=None,
-                    filename=None,
-                    show=False,
-                    fig_size=(8, 3),
-                    **plot_kwargs):
+def plot_fes_slices(
+    sources,
+    at,
+    axis=0,
+    fig=None,
+    ax=None,
+    labels=None,
+    energy_unit=None,
+    source_unit=DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero=True,
+    max_energy=None,
+    columns=None,
+    slice_format="{label}, {cv}$={value:.2f}$",
+    colors=None,
+    linestyles=("-", "--", ":", "-."),
+    x_lab=None,
+    y_lab=None,
+    filename=None,
+    show=False,
+    fig_size=(8, 3),
+    **plot_kwargs,
+):
     """Plot 1-D cuts through 2-D free-energy surfaces at fixed CV values.
 
     Each surface gets its own colour and each requested cut its own line
@@ -1596,12 +1703,14 @@ def plot_fes_slices(sources,
     ValueError
         If any source is not a 2-D surface on a regular grid.
     """
-    fes_list = _as_fes_list(sources,
-                            energy_unit=energy_unit,
-                            source_unit=source_unit,
-                            shift_min_to_zero=shift_min_to_zero,
-                            max_energy=max_energy,
-                            columns=columns)
+    fes_list = _as_fes_list(
+        sources,
+        energy_unit=energy_unit,
+        source_unit=source_unit,
+        shift_min_to_zero=shift_min_to_zero,
+        max_energy=max_energy,
+        columns=columns,
+    )
     if any(fes.ndim != 2 for fes in fes_list):
         raise ValueError("plot_fes_slices expects 2-D free-energy surfaces")
 
@@ -1617,18 +1726,26 @@ def plot_fes_slices(sources,
     for fes, color, label in zip(fes_list, colors, label_list):
         for j, value in enumerate(values):
             x, energy, used = fes.slice_at(value, axis=axis)
-            ax.plot(x, energy,
-                    color=color,
-                    linestyle=linestyles[j % len(linestyles)],
-                    label=slice_format.format(label=label if label is not None else "",
-                                              cv=fes.cv_labels[axis],
-                                              value=used).strip(", "),
-                    **plot_kwargs)
+            ax.plot(
+                x,
+                energy,
+                color=color,
+                linestyle=linestyles[j % len(linestyles)],
+                label=slice_format.format(
+                    label=label if label is not None else "",
+                    cv=fes.cv_labels[axis],
+                    value=used,
+                ).strip(", "),
+                **plot_kwargs,
+            )
 
     ax.legend(loc="best", fontsize=9, ncols=max(1, len(fes_list)))
-    _style_axes(fig, ax,
-                x_lab if x_lab is not None else reference.cv_labels[1 - axis],
-                y_lab if y_lab is not None else reference.label)
+    _style_axes(
+        fig,
+        ax,
+        x_lab if x_lab is not None else reference.cv_labels[1 - axis],
+        y_lab if y_lab is not None else reference.label,
+    )
     _finalise(fig, filename=filename, show=show)
     return fig, ax
 
@@ -1638,8 +1755,15 @@ def plot_fes_slices(sources,
 _2D_ONLY_KWARGS = ("levels", "cmap", "colorbar")
 
 #: Options consumed while turning a source into an :class:`FES`.
-_PREPARE_KWARGS = ("energy_unit", "source_unit", "shift_min_to_zero", "max_energy",
-                   "columns", "cv_labels", "energy_label")
+_PREPARE_KWARGS = (
+    "energy_unit",
+    "source_unit",
+    "shift_min_to_zero",
+    "max_energy",
+    "columns",
+    "cv_labels",
+    "energy_label",
+)
 
 
 def plot_fes(sources, **kwargs):
@@ -1674,11 +1798,7 @@ def plot_fes(sources, **kwargs):
     return plot_fes_2d(fes_list, **kwargs)
 
 
-def plot_plumed_fes(path,
-                    ax=None,
-                    shift_min_to_zero=True,
-                    levels=30,
-                    **kwargs):
+def plot_plumed_fes(path, ax=None, shift_min_to_zero=True, levels=30, **kwargs):
     """Plot a PLUMED free-energy surface from a data file.
 
     Thin wrapper around :func:`plot_fes` kept for the example and test
@@ -1706,24 +1826,28 @@ def plot_plumed_fes(path,
     tuple
         ``(fig, ax)``, with *ax* an array of axes when several were drawn.
     """
-    fig, axes = plot_fes(path,
-                         fig=ax.figure if ax is not None else None,
-                         ax=ax,
-                         shift_min_to_zero=shift_min_to_zero,
-                         levels=levels,
-                         **kwargs)
+    fig, axes = plot_fes(
+        path,
+        fig=ax.figure if ax is not None else None,
+        ax=ax,
+        shift_min_to_zero=shift_min_to_zero,
+        levels=levels,
+        **kwargs,
+    )
     axes = np.atleast_1d(axes)
     return fig, axes[0] if axes.size == 1 else axes
 
 
-def plot_plumed_colvar(path,
-                       x_axis="time",
-                       columns=None,
-                       fig=None,
-                       axes=None,
-                       filename=None,
-                       show=False,
-                       figsize=(10, 8)):
+def plot_plumed_colvar(
+    path,
+    x_axis="time",
+    columns=None,
+    fig=None,
+    axes=None,
+    filename=None,
+    show=False,
+    figsize=(10, 8),
+):
     """Plot collective variables from a PLUMED COLVAR file.
 
     Reads the ``#! FIELDS`` header to determine the column names and creates
@@ -1764,8 +1888,10 @@ def plot_plumed_colvar(path,
     """
     plumed = read_plumed_file(path, drop_der=False)
     if not plumed.fields:
-        raise ValueError(f"Could not find a usable '#! FIELDS' header in {path}. "
-                         "Ensure it is a valid PLUMED file.")
+        raise ValueError(
+            f"Could not find a usable '#! FIELDS' header in {path}. "
+            "Ensure it is a valid PLUMED file."
+        )
 
     data = plumed.to_dataframe()
     if x_axis in data.columns:
@@ -1776,16 +1902,21 @@ def plot_plumed_colvar(path,
         x_data = data.index
         x_label = "Step (index)"
 
-    plot_cols = list(columns) if columns else [col for col in data.columns if col != x_axis]
+    plot_cols = (
+        list(columns) if columns else [col for col in data.columns if col != x_axis]
+    )
     missing = [col for col in plot_cols if col not in data.columns]
     if missing:
-        raise ValueError(f"Columns {missing} not found in {path}. Available: {list(data.columns)}")
+        raise ValueError(
+            f"Columns {missing} not found in {path}. Available: {list(data.columns)}"
+        )
     if not plot_cols:
         raise ValueError(f"No variables to plot in {path}")
 
     if fig is None or axes is None:
-        fig, axes = plt.subplots(len(plot_cols), 1, figsize=figsize, sharex=True,
-                                 constrained_layout=True)
+        fig, axes = plt.subplots(
+            len(plot_cols), 1, figsize=figsize, sharex=True, constrained_layout=True
+        )
     axes = np.atleast_1d(axes).ravel()
     if axes.size < len(plot_cols):
         raise ValueError(f"Got {axes.size} axes for {len(plot_cols)} columns")
@@ -1797,22 +1928,24 @@ def plot_plumed_colvar(path,
 
     axes[len(plot_cols) - 1].set_xlabel(x_label)
     _finalise(fig, filename=filename, show=show)
-    return fig, axes[:len(plot_cols)]
+    return fig, axes[: len(plot_cols)]
 
 
-def plot_fes_convergence(sources,
-                         basin_a,
-                         basin_b,
-                         times=None,
-                         temperature=None,
-                         fig=None,
-                         ax=None,
-                         x_lab=None,
-                         y_lab=None,
-                         filename=None,
-                         show=False,
-                         fig_size=(8, 3),
-                         **kwargs):
+def plot_fes_convergence(
+    sources,
+    basin_a,
+    basin_b,
+    times=None,
+    temperature=None,
+    fig=None,
+    ax=None,
+    x_lab=None,
+    y_lab=None,
+    filename=None,
+    show=False,
+    fig_size=(8, 3),
+    **kwargs,
+):
     """Plot how the barrier and the basin difference settle over a series.
 
     The convergence test that matters: a run is done when these two numbers
@@ -1858,26 +1991,27 @@ def plot_fes_convergence(sources,
     ValueError
         If *times* does not have one value per surface.
     """
-    summaries = fes_convergence(sources, basin_a, basin_b,
-                                temperature=temperature, **kwargs)
+    summaries = fes_convergence(
+        sources, basin_a, basin_b, temperature=temperature, **kwargs
+    )
     if times is None:
         times = np.arange(1, len(summaries) + 1)
     elif len(times) != len(summaries):
-        raise ValueError(
-            f"Got {len(times)} times for {len(summaries)} surfaces.")
+        raise ValueError(f"Got {len(times)} times for {len(summaries)} surfaces.")
 
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
 
-    ax.plot(times, [s.forward_barrier for s in summaries], "o-",
-            label="Barrier A→B")
+    ax.plot(times, [s.forward_barrier for s in summaries], "o-", label="Barrier A→B")
     ax.plot(times, [s.delta_f for s in summaries], "s-", label="ΔF (B−A)")
     ax.legend(loc="best")
 
     unit = summaries[0].energy_unit
-    _style_axes(fig, ax,
-                x_lab if x_lab is not None else
-                ("Surface" if times is None else "Time"),
-                y_lab if y_lab is not None else unit_label(unit))
+    _style_axes(
+        fig,
+        ax,
+        x_lab if x_lab is not None else ("Surface" if times is None else "Time"),
+        y_lab if y_lab is not None else unit_label(unit),
+    )
     _finalise(fig, filename=filename, show=show)
     return fig, ax
