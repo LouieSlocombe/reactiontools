@@ -103,6 +103,41 @@ def md_trajectory(tmp_path):
     return path
 
 
+# Donor oxygen, the proton it shares, and the acceptor oxygen, as indexed by
+# the `pt_atoms` fixture below.
+PT_DONOR, PT_HYDROGEN, PT_ACCEPTOR = 0, 1, 2
+
+
+@pytest.fixture
+def pt_atoms():
+    """A hydrogen-bonded triad with a carbon backbone, as ASE atoms.
+
+    Malonaldehyde-like without being malonaldehyde: the proton sits on the
+    donor oxygen and points at the acceptor, which is all the path and
+    collective-variable tests need. Built rather than committed, so there is
+    no data file to keep in step with the tests.
+    """
+    return Atoms("OHOCCC",
+                 positions=[[0.00, 0.00, 0.00],   # donor O
+                            [0.98, 0.00, 0.00],   # the shared proton
+                            [2.65, 0.00, 0.00],   # acceptor O
+                            [-0.65, 1.18, 0.00],  # backbone
+                            [0.10, 2.40, 0.00],
+                            [1.55, 2.35, 0.00]])
+
+
+@pytest.fixture
+def pt_pdb(pt_atoms, tmp_path):
+    """The `pt_atoms` triad written as a PDB, and its path.
+
+    ASE writes ``ATOM`` records, so anything reading this back wants
+    ``atom_line="ATOM"`` rather than the ``HETATM`` OpenMM produces.
+    """
+    path = tmp_path / "index_atoms.pdb"
+    write(path, pt_atoms, format="proteindatabank")
+    return path
+
+
 @pytest.fixture
 def fes_file(tmp_path):
     """Write a minimal PLUMED ``fes.dat`` and return its path.

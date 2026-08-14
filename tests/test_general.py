@@ -14,7 +14,11 @@ _PACKAGE = Path(reactiontools.__file__).resolve().parent
 #: obvious place to reach for the unit conversions -- imports pyplot at module
 #: scope. Keeping the edge out is what lets ``tools_style`` and
 #: ``tools_units`` exist as separate modules at all.
-_PLOT_FREE = {"tools_units", "tools_plumed", "tools_cv", "tools_io", "tools_path"}
+#:
+#: ``tools_path`` is deliberately not in this set: it reads COLVAR files
+#: through ``read_plumed_file``, so it depends on ``tools_fes`` by rights, and
+#: it needs mdtraj anyway -- a heavier import than matplotlib.
+_PLOT_FREE = {"tools_units", "tools_plumed", "tools_cv", "tools_io"}
 
 
 def _module_imports(name):

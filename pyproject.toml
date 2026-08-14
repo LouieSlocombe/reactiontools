@@ -52,6 +52,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# Reading a steered-MD trajectory in reactiontools.tools_path needs mdtraj.
+# The frame-selection functions there are numpy only and work without it.
+path = [
+  "mdtraj",
+]
 dev = [
   "pytest",
   "pytest-cov",

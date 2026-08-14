@@ -1,6 +1,6 @@
 """Tools for transition-state, NEB and metadynamics calculations.
 
-The package is organised into eight modules, all of which are re-exported here:
+The package is organised into nine modules, all of which are re-exported here:
 
 ``tools_reaction``
     Build, optimise and post-process nudged elastic band (NEB) paths, either
@@ -21,6 +21,10 @@ The package is organised into eight modules, all of which are re-exported here:
     Read and write the structure files a reaction path passes through -- XYZ,
     PDB, and the multi-model reference a ``PATHMSD`` collective variable is
     built from.
+``tools_path``
+    Turn a steered-MD trajectory into that reference path, by picking frames
+    evenly spaced along a collective variable, and size the ``LAMBDA`` it
+    should be biased with.
 ``tools_plumed``
     Prepare PLUMED input, bias an ASE dynamics run with it, and turn the
     metadynamics hills that come out into a free-energy surface.
@@ -44,11 +48,13 @@ criterion in ``info["converged"]`` on the structures it returns, and warns
 a ``ConvergenceError`` instead, or promote every one of them at once with
 ``warnings.simplefilter("error", ConvergenceWarning)``.
 
-Two dependencies are needed only by part of the package. The saddle-point
+Three dependencies are needed only by part of the package. The saddle-point
 searches (``optimise_ts`` and ``optimise_irc``) are built on sella, an optional
-extra: install it with ``pip install 'reactiontools[ts]'``. The ``tools_orca``
-functions shell out to ORCA, which is licensed separately and installed by
-hand; see ``build_tools/README.md``. Everything else works without either.
+extra: install it with ``pip install 'reactiontools[ts]'``. Reading a
+steered-MD trajectory in ``tools_path`` needs mdtraj, the ``path`` extra:
+``pip install 'reactiontools[path]'``. The ``tools_orca`` functions shell out
+to ORCA, which is licensed separately and installed by hand; see
+``build_tools/README.md``. Everything else works without any of them.
 """
 
 from .tools_fes import (FES,
@@ -88,6 +94,11 @@ from .tools_orca import (orca_calc_preset,
                          orca_preset_dft_gold,
                          orca_preset_mp2_gold,
                          orca_preset_xtb)
+from .tools_path import (cv_from_colvar,
+                         estimate_path_lambda,
+                         path_from_steered_md,
+                         select_frames_by_cv,
+                         select_frames_by_msd)
 from .tools_plotting import (show_atoms,
                              plot_images,
                              plot_neb,
@@ -167,6 +178,12 @@ __all__ = [
     "orca_preset_xtb",
     "orca_preset_mp2_gold",
     "orca_preset_ccsd_gold",
+    # tools_path
+    "cv_from_colvar",
+    "estimate_path_lambda",
+    "path_from_steered_md",
+    "select_frames_by_cv",
+    "select_frames_by_msd",
     # tools_geometry
     "bonded_cluster_indices_no_anchor_hub",
     "get_dimer_bonded_cluster_indices",
