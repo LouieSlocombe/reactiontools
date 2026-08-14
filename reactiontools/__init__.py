@@ -1,6 +1,6 @@
 """Tools for transition-state, NEB and metadynamics calculations.
 
-The package is organised into seven modules, all of which are re-exported here:
+The package is organised into eight modules, all of which are re-exported here:
 
 ``tools_reaction``
     Build, optimise and post-process nudged elastic band (NEB) paths, either
@@ -17,6 +17,10 @@ The package is organised into seven modules, all of which are re-exported here:
     Work out which atoms make up each half of a stacked dimer and swap those
     halves over, or move a hydrogen across a hydrogen bond, to build a product
     end state for a band.
+``tools_io``
+    Read and write the structure files a reaction path passes through -- XYZ,
+    PDB, and the multi-model reference a ``PATHMSD`` collective variable is
+    built from.
 ``tools_plumed``
     Prepare PLUMED input, bias an ASE dynamics run with it, and turn the
     metadynamics hills that come out into a free-energy surface.
@@ -68,6 +72,14 @@ from .tools_geometry import (bonded_cluster_indices_no_anchor_hub,
                              optimize_with_fixed_anchors,
                              get_best_flip_and_face_bases,
                              swap_bonding_configuration)
+from .tools_io import (convert_pdb_to_xyz,
+                       convert_xyz_to_pdb,
+                       convert_xyz_to_plumed_ref,
+                       element_from_pdb_line,
+                       format_pdb_atom_name,
+                       pdb_remove_ter_index,
+                       strip_hydrogens_keep_indices,
+                       write_xyz_frame)
 from .tools_orca import (orca_calc_preset,
                          orca_calculate_goat,
                          orca_optimise_atoms,
@@ -162,6 +174,15 @@ __all__ = [
     "optimize_with_fixed_anchors",
     "get_best_flip_and_face_bases",
     "swap_bonding_configuration",
+    # tools_io
+    "convert_pdb_to_xyz",
+    "convert_xyz_to_pdb",
+    "convert_xyz_to_plumed_ref",
+    "element_from_pdb_line",
+    "format_pdb_atom_name",
+    "pdb_remove_ter_index",
+    "strip_hydrogens_keep_indices",
+    "write_xyz_frame",
     # tools_plumed
     "PLUMED_ASE_UNITS",
     "plumed_selection",
