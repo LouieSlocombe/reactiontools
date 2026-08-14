@@ -800,6 +800,26 @@ through to ORCA and so runs *canonical* CCSD(T). Pass `calc_type='CCSD'`
 instead for the linear-scaling `DLPNO-CCSD(T)` approximation, which is the only
 tractable option beyond a handful of atoms.
 
+#### Tiered calculators
+
+Beyond the presets sit three tiers of increasing cost, for taking a system
+from a first screen to a publishable number: screen cheaply, refine the
+mechanism at wB97M-V/def2-TZVPD, then put a CCSD(T)/CBS energy on the
+stationary points. Every function in this module finds the binary through the
+same resolver, which takes `orca_path=` explicitly or the `ORCA_PATH`
+environment variable — naming either the executable or its install
+directory — and refuses look-alikes such as the GNOME screen reader that
+ships as `/usr/bin/orca` on many Linux systems.
+
+| Function | Description |
+| --- | --- |
+| `orca_cheap_calculator(method='gfn2-xtb', charge=0, multiplicity=1, solvent=None, native='auto', ...)` | Screening calculator: GFN-FF/GFN1/GFN2-xTB — ORCA's native xTB by default, the external `xtb` binary (`$XTBEXE`) otherwise — and the Grimme "3c" composites. `CHEAP_METHODS` lists the aliases, `NATIVE_XTB_METHODS` the native keywords. Solvation defaults to ALPB for xTB and CPCM otherwise. |
+| `orca_calculator(charge=0, multiplicity=1, task='engrad', ...)` | OMol25-level wB97M-V/def2-TZVPD calculator for mechanism work. `task` picks sp/engrad/opt/optts/neb-ts/irc/freq/scan and builds the matching `%geom`/`%neb`/`%irc`/`%freq` blocks; `'engrad'` is the only task ASE reads forces from. |
+| `sella_ts_search(atoms, charge=0, multiplicity=1, fmax=0.02, ...)` | Saddle search with Sella over `orca_calculator` gradients, avoiding the 6N-gradient numerical Hessian that ORCA's own OptTS would trigger. |
+| `orca_gold_standard(atoms, directory='orca_gold', ...)` | Compound CCSD(T)/CBS focal-point job: an optional geometry + frequency stage, MP2/CBS extrapolation and a DLPNO-CCSD(T) delta, with finished stages reused across reruns. |
+| `GoldStandard` | Its result dataclass: `e_hf_cbs`, `e_corr_cbs`, `e_total`, ZPE and thermal corrections, `energy`/`enthalpy`/`gibbs` properties and a `summary()` report. |
+| `reaction_energy(reactants, products, thermo='gibbs')` | Difference two lists of `GoldStandard` results, in kcal/mol. |
+
 ### `tools_geometry` — building product end states
 
 A NEB needs a product as well as a reactant, and the product is usually the
@@ -1078,7 +1098,7 @@ the codes it wraps you actually exercised — all in
 | `Slocombe_reactiontools` | `reactiontools` itself | always |
 | `larsen2017atomic` | [ASE](https://wiki.fysik.dtu.dk/ase/) | NEB, optimisation and I/O throughout |
 | `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts` |
-| `hermes2022sella` | [Sella](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc` |
+| `hermes2022sella` | [Sella](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc`, `sella_ts_search` |
 | `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills`, `plumed_calculator` |
 | `laio2002escaping` | The metadynamics method | `plumed_metad_input` |
 | `barducci2008well` | Well-tempered metadynamics | `plumed_metad_input(biasfactor=...)` |
@@ -1087,11 +1107,14 @@ the codes it wraps you actually exercised — all in
 | `nocedal2006numerical` | BFGS | every `optimise_*` that is not Sella |
 | `neese2012orca`, `neese2022orca5`, `neese2025orca6` | [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` |
 | `desouza2025goat` | The GOAT conformer search | `orca_calculate_goat` |
-| `grimme2021r2scan3c`, `furness2020r2scan` | The default `r2SCAN-3c` functional | `orca_calc_preset`, `orca_optimise_atoms` |
+| `grimme2021r2scan3c`, `furness2020r2scan` | The default `r2SCAN-3c` functional | `orca_calc_preset`, `orca_optimise_atoms`, `orca_gold_standard(opt_method=...)` |
 | `caldeweyher2019d4` | D4 dispersion | `f_disp=True` |
-| `barone1998cpcm`, `marenich2009smd` | CPCM/SMD implicit solvation | `f_solv` |
-| `riplinger2013efficient`, `riplinger2013natural`, `pinski2015sparse` | DLPNO-MP2 and DLPNO-CCSD(T) | `calc_type='MP2'`, `calc_type='CCSD'` |
-| `bannwarth2019gfn2` | GFN2-xTB | `calc_type='QM/XTB2'` |
+| `barone1998cpcm`, `marenich2009smd` | CPCM/SMD implicit solvation | `f_solv`, `solvent=` |
+| `riplinger2013efficient`, `riplinger2013natural`, `pinski2015sparse` | DLPNO-MP2 and DLPNO-CCSD(T) | `calc_type='MP2'`, `calc_type='CCSD'`, `orca_gold_standard` |
+| `bannwarth2019gfn2` | GFN2-xTB | `calc_type='QM/XTB2'`, `orca_cheap_calculator` |
+| `spicher2020gfnff` | GFN-FF | `orca_cheap_calculator(method='gfn-ff')` |
+| `ehlert2021alpb` | ALPB implicit solvation | `orca_cheap_calculator(solvent=...)` at the xTB levels |
+| `mardirossian2016wb97mv` | The wB97M-V functional | `orca_calculator`, `sella_ts_search` |
 
 ## License
 

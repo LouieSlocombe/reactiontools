@@ -12,7 +12,11 @@ The package is organised into ten modules, all of which are re-exported here:
 ``tools_orca``
     Build ASE ORCA calculators from a few presets -- named levels of theory in
     the ``orca_preset_*`` dictionaries -- optimise a geometry with ORCA's own
-    driver, and run a GOAT conformer search.
+    driver, and run a GOAT conformer search. Beyond the presets sit three
+    tiers of increasing cost: cheap xTB / "3c" screening calculators, an
+    OMol25-level DFT calculator for mechanism work with a Sella saddle search
+    driven by it, and compound CCSD(T)/CBS "gold standard" energies with a
+    reaction-energy helper over the results.
 ``tools_geometry``
     Work out which atoms make up each half of a stacked dimer and swap those
     halves over, or move a hydrogen across a hydrogen bond, to build a product
@@ -110,14 +114,22 @@ from .tools_io import (
     write_xyz_frame,
 )
 from .tools_orca import (
+    CHEAP_METHODS,
+    NATIVE_XTB_METHODS,
+    GoldStandard,
     orca_calc_preset,
     orca_calculate_goat,
+    orca_calculator,
+    orca_cheap_calculator,
+    orca_gold_standard,
     orca_optimise_atoms,
     orca_preset_ccsd_gold,
     orca_preset_dft_cheap,
     orca_preset_dft_gold,
     orca_preset_mp2_gold,
     orca_preset_xtb,
+    reaction_energy,
+    sella_ts_search,
 )
 from .tools_path import (
     cv_from_colvar,
@@ -180,7 +192,7 @@ from .tools_units import (
     unit_label,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # tools_reaction
@@ -215,6 +227,14 @@ __all__ = [
     "orca_preset_xtb",
     "orca_preset_mp2_gold",
     "orca_preset_ccsd_gold",
+    "orca_cheap_calculator",
+    "CHEAP_METHODS",
+    "NATIVE_XTB_METHODS",
+    "orca_calculator",
+    "sella_ts_search",
+    "orca_gold_standard",
+    "GoldStandard",
+    "reaction_energy",
     # tools_path
     "cv_from_colvar",
     "estimate_path_lambda",
