@@ -21,6 +21,25 @@ _PACKAGE = Path(reactiontools.__file__).resolve().parent
 _PLOT_FREE = {"tools_units", "tools_plumed", "tools_cv", "tools_io"}
 
 
+def _source_of(name):
+    """Path of a sibling module, whether it is a file or a package.
+
+    Parameters
+    ----------
+    name : str
+        Module name within the package, without the ``reactiontools.`` prefix.
+
+    Returns
+    -------
+    pathlib.Path or None
+        Its source file, or None if there is no such module.
+    """
+    for candidate in (_PACKAGE / f"{name}.py", _PACKAGE / name / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _module_imports(name):
     """Intra-package and third-party top-level imports of one module.
 
@@ -40,7 +59,10 @@ def _module_imports(name):
     external : set of str
         Top-level names of everything else imported.
     """
-    tree = ast.parse((_PACKAGE / f"{name}.py").read_text())
+    source = _source_of(name)
+    if source is None:
+        return set(), set()
+    tree = ast.parse(source.read_text())
     local, external = set(), set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -89,7 +111,7 @@ def test_no_module_imports_itself_in_a_cycle(name):
 
 @pytest.mark.parametrize("name", sorted(_PLOT_FREE))
 def test_the_plot_free_modules_stay_plot_free(name):
-    if not (_PACKAGE / f"{name}.py").exists():
+    if _source_of(name) is None:
         pytest.skip(f"{name} does not exist yet")
 
     _, external = _reachable(name)

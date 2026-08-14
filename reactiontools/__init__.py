@@ -112,6 +112,7 @@ from .tools_plumed import (PLUMED_ASE_UNITS,
                            plumed_metad_input,
                            plumed_calculator,
                            find_molecules,
+                           run_opes_fes,
                            run_sum_hills,
                            sum_hills_files)
 from .tools_reaction import (ConvergenceError,
@@ -206,6 +207,7 @@ __all__ = [
     "plumed_metad_input",
     "plumed_calculator",
     "find_molecules",
+    "run_opes_fes",
     "run_sum_hills",
     "sum_hills_files",
     # tools_fes

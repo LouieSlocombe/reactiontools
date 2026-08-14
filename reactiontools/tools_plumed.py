@@ -8,6 +8,11 @@ wraps an ASE calculator in that bias so an ordinary ASE molecular-dynamics run
 becomes a biased one, and :func:`run_sum_hills` turns the hills it deposited
 into a free-energy surface for :mod:`reactiontools.tools_fes` to plot.
 
+:func:`run_opes_fes` is the ``OPES_METAD`` counterpart of
+:func:`run_sum_hills`. OPES deposits no hills to add up, writing a running
+estimate of the bias to a ``STATE`` file instead, so the surface is read back
+out of that by one of the scripts bundled in :mod:`reactiontools.opes`.
+
 Only :func:`plumed_calculator` needs the plumed Python module; only
 :func:`run_sum_hills` needs the ``plumed`` executable. The rest is string
 handling and works without either.
@@ -15,6 +20,7 @@ handling and works without either.
 
 import re
 import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -23,6 +29,8 @@ from ase.calculators.plumed import Plumed
 from ase.neighborlist import build_neighbor_list
 from ase.units import kB
 from scipy.sparse.csgraph import connected_components
+
+from .opes import script_path
 
 #: PLUMED reads and writes its own units unless the input says otherwise, and
 #: they are not ASE's: without this line a run driven from ASE reports lengths
@@ -523,6 +531,130 @@ def run_sum_hills(hills="HILLS",
         cmd.append("--negbias")
     if extra:
         cmd += [str(item) for item in extra]
+    cmd_str = " ".join(cmd)
+
+    if verbose:
+        print(f"Running: {cmd_str}", flush=True)
+
+    subprocess.run(cmd, check=True)
+    return cmd_str
+
+
+def _opes_fes_command(state="STATE",
+                      outfile="fes.dat",
+                      grid_min=None,
+                      grid_max=None,
+                      grid_bin=None,
+                      kt=None,
+                      extra=None):
+    """Build the command line that reconstructs a FES from an OPES state file.
+
+    ``OPES_METAD`` does not deposit hills for ``plumed sum_hills`` to add up;
+    it writes a running estimate of the bias to a ``STATE`` file instead, and
+    the surface is read back out of that by the bundled ``FES_from_State.py``.
+
+    Parameters
+    ----------
+    state : str or path-like, optional
+        State file written by the ``OPES_METAD`` action's ``STATE_WFILE``.
+    outfile : str or path-like, optional
+        Free-energy surface file to write.
+    grid_min, grid_max : float or sequence of float, optional
+        Bounds of the output grid, one per collective variable. Both must be
+        given together, or neither.
+    grid_bin : int or sequence of int, optional
+        Number of bins per collective variable.
+    kt : float or None, optional
+        Thermal energy in the energy units of the state file -- kJ/mol for a
+        run driven from OpenMM, which is what
+        :func:`~reactiontools.tools_units.thermal_energy` returns by default.
+    extra : sequence of str, optional
+        Further arguments appended to the command line.
+
+    Returns
+    -------
+    list of str
+        The command, as an argument list.
+
+    Raises
+    ------
+    ValueError
+        If only one of *grid_min* and *grid_max* is given.
+    """
+    if (grid_min is None) != (grid_max is None):
+        raise ValueError(
+            "Give both grid_min and grid_max or neither; FES_from_State.py "
+            "needs the two bounds together to size its grid.")
+
+    # sys.executable, not "python3": the scripts need this environment's
+    # pandas, and whatever "python3" resolves to on PATH may not have it.
+    cmd = [sys.executable, str(script_path("FES_from_State.py")),
+           "--state", str(state), "--outfile", str(outfile)]
+    if grid_min is not None:
+        cmd += ["--min", _grid_bound(grid_min), "--max", _grid_bound(grid_max)]
+    if grid_bin is not None:
+        cmd += ["--bin", _grid_bound(grid_bin)]
+    if kt is not None:
+        cmd += ["--kt", f"{float(kt):.6g}"]
+    if extra:
+        cmd += [str(item) for item in extra]
+    return cmd
+
+
+def run_opes_fes(state="STATE",
+                 outfile="fes.dat",
+                 grid_min=None,
+                 grid_max=None,
+                 grid_bin=None,
+                 kt=None,
+                 extra=None,
+                 verbose=True):
+    """Rebuild a free-energy surface from an OPES state file.
+
+    The ``OPES_METAD`` counterpart of :func:`run_sum_hills`, and the other half
+    of what the ``f_opes`` switch on the
+    :mod:`reactiontools.tools_cv` builders selects: they emit the bias action,
+    this reads the surface back out of what it wrote.
+
+    Paths are resolved by the script, so this acts on the current working
+    directory unless absolute paths are given.
+
+    Parameters
+    ----------
+    state : str or path-like, optional
+        State file written by the ``OPES_METAD`` action's ``STATE_WFILE``.
+    outfile : str or path-like, optional
+        Free-energy surface file to write, as read by
+        :func:`~reactiontools.as_fes`.
+    grid_min, grid_max : float or sequence of float, optional
+        Bounds of the output grid, one per collective variable.
+    grid_bin : int or sequence of int, optional
+        Number of bins per collective variable.
+    kt : float or None, optional
+        Thermal energy in the energy units of the state file. See
+        :func:`~reactiontools.tools_units.thermal_energy`.
+    extra : sequence of str, optional
+        Further arguments appended to the command line, for the options
+        without their own keyword here -- ``--deltaFat``, ``--all_stored``,
+        ``--der`` and the rest.
+    verbose : bool, optional
+        Print the command being run.
+
+    Returns
+    -------
+    str
+        The command line that was run.
+
+    Raises
+    ------
+    ValueError
+        If only one of *grid_min* and *grid_max* is given.
+    subprocess.CalledProcessError
+        If the script exits non-zero.
+    """
+    cmd = _opes_fes_command(state=state, outfile=outfile, grid_min=grid_min,
+                            grid_max=grid_max, grid_bin=grid_bin, kt=kt,
+                            extra=extra)
     cmd_str = " ".join(cmd)
 
     if verbose:
