@@ -4,15 +4,19 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase.build import molecule
+from ase.constraints import FixAtoms
 from ase.optimize import FIRE
 
 from reactiontools import (
     ConvergenceError,
     ConvergenceWarning,
+    align_atom_sets,
+    atom_set_rmsd,
     bonded_cluster_indices_no_anchor_hub,
     flip_and_face_bases,
     get_best_flip_and_face_bases,
     get_dimer_bonded_cluster_indices,
+    kabsch_transform,
     optimize_with_fixed_anchors,
     swap_bonding_configuration,
 )
@@ -34,6 +38,273 @@ def dimer():
     upper = molecule("H2O")
     upper.translate([0.0, 0.0, 3.0])
     return lower + upper
+
+
+@pytest.fixture
+def rigid_pair():
+    """A non-degenerate structure and an exact rigidly transformed copy."""
+    mobile = Atoms(
+        "CHNO",
+        positions=[
+            [0.0, 0.0, 0.0],
+            [1.2, 0.1, -0.2],
+            [-0.3, 1.1, 0.4],
+            [0.2, -0.4, 1.3],
+        ],
+    )
+    rotation = np.array(
+        [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    translation = np.array([3.0, -2.0, 0.7])
+    reference = mobile.copy()
+    reference.set_positions(mobile.positions @ rotation + translation)
+    return mobile, reference, rotation, translation
+
+
+class TestKabschTransform:
+    def test_recovers_an_exact_rigid_transform(self, rigid_pair):
+        mobile, reference, expected_rotation, expected_translation = rigid_pair
+
+        rotation, translation = kabsch_transform(
+            mobile.positions, reference.positions
+        )
+
+        assert rotation == pytest.approx(expected_rotation, abs=1e-12)
+        assert translation == pytest.approx(expected_translation, abs=1e-12)
+
+    def test_returns_a_proper_orthogonal_rotation(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        rotation, _translation = kabsch_transform(
+            mobile.positions, reference.positions
+        )
+
+        assert rotation.T @ rotation == pytest.approx(np.eye(3), abs=1e-12)
+        assert np.linalg.det(rotation) == pytest.approx(1.0)
+
+    def test_does_not_use_a_reflection(self):
+        mobile = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 2.0, 0.0],
+                [0.0, 0.0, 3.0],
+            ]
+        )
+        reflected = mobile.copy()
+        reflected[:, 0] *= -1.0
+
+        rotation, _translation = kabsch_transform(mobile, reflected)
+
+        assert np.linalg.det(rotation) == pytest.approx(1.0)
+
+    def test_supports_a_single_point_translation(self):
+        rotation, translation = kabsch_transform([[1, 2, 3]], [[4, 6, 8]])
+
+        assert np.array([[1, 2, 3]]) @ rotation + translation == pytest.approx(
+            np.array([[4, 6, 8]])
+        )
+
+    def test_supports_zero_weight_correspondences(self):
+        mobile = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [50.0, 0.0, 0.0]])
+        reference = np.array([[2.0, 1.0, 0.0], [3.0, 1.0, 0.0], [-50.0, 0.0, 0.0]])
+
+        rotation, translation = kabsch_transform(
+            mobile, reference, weights=[1.0, 1.0, 0.0]
+        )
+        fitted = mobile @ rotation + translation
+
+        assert fitted[:2] == pytest.approx(reference[:2], abs=1e-12)
+
+    @pytest.mark.parametrize(
+        ("mobile", "reference", "message"),
+        [
+            ([], [], "shape"),
+            ([[0.0, 0.0]], [[0.0, 0.0]], "shape"),
+            ([[0.0, 0.0, 0.0]], np.zeros((2, 3)), "same shape"),
+            ([[np.nan, 0.0, 0.0]], [[0.0, 0.0, 0.0]], "finite"),
+        ],
+    )
+    def test_rejects_invalid_positions(self, mobile, reference, message):
+        with pytest.raises(ValueError, match=message):
+            kabsch_transform(mobile, reference)
+
+    @pytest.mark.parametrize(
+        ("weights", "message"),
+        [
+            ([1.0], "shape"),
+            ([1.0, -1.0], "negative"),
+            ([0.0, 0.0], "greater than zero"),
+            ([1.0, np.inf], "finite"),
+        ],
+    )
+    def test_rejects_invalid_weights(self, weights, message):
+        positions = np.zeros((2, 3))
+
+        with pytest.raises(ValueError, match=message):
+            kabsch_transform(positions, positions, weights=weights)
+
+
+class TestAlignAtomSets:
+    def test_superposes_an_exact_rigid_copy(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        aligned = align_atom_sets(mobile, reference)
+
+        assert aligned.positions == pytest.approx(reference.positions, abs=1e-12)
+
+    def test_does_not_modify_either_input(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+        mobile_before = mobile.positions.copy()
+        reference_before = reference.positions.copy()
+
+        align_atom_sets(mobile, reference)
+
+        assert mobile.positions == pytest.approx(mobile_before)
+        assert reference.positions == pytest.approx(reference_before)
+
+    def test_moves_the_whole_structure_when_fitting_a_subset(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        aligned = align_atom_sets(
+            mobile,
+            reference,
+            mobile_indices=[0, 1, 2],
+            reference_indices=[0, 1, 2],
+        )
+
+        assert aligned.positions == pytest.approx(reference.positions, abs=1e-12)
+
+    def test_accepts_different_corresponding_index_orders(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+        reordered_reference = reference[[3, 1, 0, 2]]
+
+        aligned = align_atom_sets(
+            mobile,
+            reordered_reference,
+            mobile_indices=[0, 1, 2, 3],
+            reference_indices=[2, 1, 3, 0],
+        )
+
+        assert aligned.positions == pytest.approx(reference.positions, abs=1e-12)
+
+    def test_preserves_all_internal_distances(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        aligned = align_atom_sets(mobile, reference, weights="masses")
+
+        assert aligned.get_all_distances() == pytest.approx(
+            mobile.get_all_distances(), abs=1e-12
+        )
+
+    def test_constraints_do_not_block_the_coordinate_frame_change(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+        mobile.set_constraint(FixAtoms(indices=[0]))
+
+        aligned = align_atom_sets(mobile, reference)
+
+        assert aligned.positions == pytest.approx(reference.positions, abs=1e-12)
+        assert len(aligned.constraints) == 1
+
+    def test_rejects_selections_of_different_lengths(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        with pytest.raises(ValueError, match="same number"):
+            align_atom_sets(
+                mobile,
+                reference,
+                mobile_indices=[0, 1],
+                reference_indices=[0],
+            )
+
+    @pytest.mark.parametrize(
+        ("indices", "exception", "message"),
+        [
+            ([], ValueError, "must not be empty"),
+            ([0, 0], ValueError, "repeated"),
+            ([True], TypeError, "integer"),
+            ([0.5], TypeError, "integer"),
+            ([99], IndexError, "out of range"),
+        ],
+    )
+    def test_rejects_invalid_indices(self, rigid_pair, indices, exception, message):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        with pytest.raises(exception, match=message):
+            align_atom_sets(
+                mobile,
+                reference,
+                mobile_indices=indices,
+                reference_indices=list(range(len(indices))),
+            )
+
+    def test_rejects_empty_atom_sets(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            align_atom_sets(Atoms(), Atoms())
+
+    def test_requires_ase_atoms(self, rigid_pair):
+        _mobile, reference, _rotation, _translation = rigid_pair
+
+        with pytest.raises(TypeError, match="ase.Atoms"):
+            align_atom_sets(np.zeros((4, 3)), reference)
+
+    def test_rejects_an_unknown_weight_mode(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        with pytest.raises(ValueError, match="masses"):
+            align_atom_sets(mobile, reference, weights="heavy")
+
+
+class TestAtomSetRmsd:
+    def test_reports_displacement_without_alignment(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+        expected = np.sqrt(np.mean(np.sum((mobile.positions - reference.positions) ** 2, axis=1)))
+
+        result = atom_set_rmsd(mobile, reference)
+
+        assert result == pytest.approx(expected)
+
+    def test_removes_rigid_motion_when_asked(self, rigid_pair):
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        result = atom_set_rmsd(mobile, reference, align=True)
+
+        assert result == pytest.approx(0.0, abs=1e-12)
+
+    def test_calculates_a_weighted_rmsd(self):
+        mobile = Atoms("HH", positions=[[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+        reference = Atoms("HH", positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+
+        result = atom_set_rmsd(mobile, reference, weights=[3.0, 1.0])
+
+        assert result == pytest.approx(1.0)
+
+    def test_supports_mass_weighting(self):
+        mobile = Atoms("HO", positions=[[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+        reference = Atoms("HO", positions=np.zeros((2, 3)))
+        masses = mobile.get_masses()
+        expected = np.sqrt((masses[0] + 4.0 * masses[1]) / masses.sum())
+
+        result = atom_set_rmsd(mobile, reference, weights="masses")
+
+        assert result == pytest.approx(expected)
+
+    def test_uses_only_the_selected_correspondences(self):
+        mobile = Atoms("HHH", positions=[[0, 0, 0], [2, 0, 0], [100, 0, 0]])
+        reference = Atoms("HHH", positions=[[0, 0, 0], [1, 0, 0], [-100, 0, 0]])
+
+        result = atom_set_rmsd(
+            mobile,
+            reference,
+            mobile_indices=[0, 1],
+            reference_indices=[0, 1],
+        )
+
+        assert result == pytest.approx(np.sqrt(0.5))
 
 
 class TestBondedClusterIndices:

@@ -823,11 +823,15 @@ ships as `/usr/bin/orca` on many Linux systems.
 ### `tools_geometry` — building product end states
 
 A NEB needs a product as well as a reactant, and the product is usually the
-awkward one to draw by hand. These build it: for a stacked dimer, find the two
-halves and swap them over; for a proton transfer, move the hydrogen across.
+awkward one to draw by hand. These build it: superpose corresponding structures,
+for a stacked dimer find the two halves and swap them over, or for a proton
+transfer move the hydrogen across.
 
 | Function | Description |
 | --- | --- |
+| `kabsch_transform(mobile_positions, reference_positions, weights=None)` | Optimal proper rotation and translation between corresponding `(n, 3)` point sets. |
+| `align_atom_sets(mobile, reference, mobile_indices=None, reference_indices=None, weights=None)` | Fit corresponding atoms and return a rigidly transformed copy of the whole mobile structure. Supports uniform, atomic-mass or custom weighting. |
+| `atom_set_rmsd(mobile, reference, mobile_indices=None, reference_indices=None, weights=None, align=False)` | RMSD of corresponding selections in their current frames or after an optimal rigid fit. |
 | `bonded_cluster_indices_no_anchor_hub(atoms, anchor, mult=1.0, multi_h=1.3)` | Atoms bonded to an anchor, without the walk routing back through it. |
 | `get_dimer_bonded_cluster_indices(atoms, anchors, mults=None, multi_h=1.3)` | Union of the two clusters, one per anchor. |
 | `flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, rot_matrix=None)` | Swap two fragments over, each landing on the other's anchor and facing it. |

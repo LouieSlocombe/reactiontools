@@ -97,10 +97,13 @@ from .tools_fes import (
     summarise_fes,
 )
 from .tools_geometry import (
+    align_atom_sets,
+    atom_set_rmsd,
     bonded_cluster_indices_no_anchor_hub,
     flip_and_face_bases,
     get_best_flip_and_face_bases,
     get_dimer_bonded_cluster_indices,
+    kabsch_transform,
     optimize_with_fixed_anchors,
     swap_bonding_configuration,
 )
@@ -243,8 +246,11 @@ __all__ = [
     "select_frames_by_cv",
     "select_frames_by_msd",
     # tools_geometry
+    "align_atom_sets",
+    "atom_set_rmsd",
     "bonded_cluster_indices_no_anchor_hub",
     "get_dimer_bonded_cluster_indices",
+    "kabsch_transform",
     "flip_and_face_bases",
     "optimize_with_fixed_anchors",
     "get_best_flip_and_face_bases",

@@ -9,7 +9,10 @@ flipped structure, ready to pass to
 :func:`~reactiontools.tools_reaction.prepare_neb`.
 
 :func:`swap_bonding_configuration` does the same job for proton transfers,
-moving one or more hydrogens across their hydrogen bonds.
+moving one or more hydrogens across their hydrogen bonds. For structures that
+already describe the same atoms, :func:`align_atom_sets` superposes one on the
+other with the optimal rigid Kabsch transform, and :func:`atom_set_rmsd`
+measures what remains.
 """
 
 from itertools import permutations
@@ -23,6 +26,277 @@ from ase.neighborlist import NeighborList, natural_cutoffs
 from ase.optimize import BFGS
 
 from .tools_reaction import _check_converged
+
+
+def _alignment_positions(points, name):
+    """Return a validated ``(n, 3)`` floating-point coordinate array."""
+    try:
+        positions = np.asarray(points, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be an array-like collection of positions.") from exc
+
+    if positions.ndim != 2 or positions.shape[1:] != (3,):
+        raise ValueError(f"{name} must have shape (n, 3); got {positions.shape}.")
+    if len(positions) == 0:
+        raise ValueError(f"{name} must contain at least one position.")
+    if not np.all(np.isfinite(positions)):
+        raise ValueError(f"{name} must contain only finite coordinates.")
+    return positions
+
+
+def _alignment_weights(weights, count):
+    """Return validated weights for a rigid fit or RMSD calculation."""
+    if weights is None:
+        return np.ones(count, dtype=float)
+
+    try:
+        weights = np.asarray(weights, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("weights must be an array-like collection of numbers.") from exc
+
+    if weights.shape != (count,):
+        raise ValueError(f"weights must have shape ({count},); got {weights.shape}.")
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("weights must contain only finite values.")
+    if np.any(weights < 0.0):
+        raise ValueError("weights must not contain negative values.")
+    if not np.any(weights > 0.0):
+        raise ValueError("at least one weight must be greater than zero.")
+    return weights
+
+
+def kabsch_transform(mobile_positions, reference_positions, weights=None):
+    """Find the best proper rigid transform from one point set to another.
+
+    The points correspond by row. The returned transform uses NumPy's row
+    vector convention, so it is applied as
+    ``mobile_positions @ rotation + translation``. Reflections are excluded:
+    the rotation is always right-handed, even when a reflected fit would have
+    a lower residual.
+
+    Parameters
+    ----------
+    mobile_positions, reference_positions : array_like
+        Corresponding Cartesian coordinates, each with shape ``(n, 3)``.
+    weights : array_like, optional
+        One non-negative weight per correspondence. At least one must be
+        positive. By default every point has equal weight.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(rotation, translation)`` with shapes ``(3, 3)`` and ``(3,)``.
+
+    Raises
+    ------
+    TypeError
+        If positions or weights cannot be converted to numeric arrays.
+    ValueError
+        If the coordinate shapes differ, no positions are supplied, a value
+        is non-finite, or the weights are invalid.
+    """
+    mobile = _alignment_positions(mobile_positions, "mobile_positions")
+    reference = _alignment_positions(reference_positions, "reference_positions")
+    if mobile.shape != reference.shape:
+        raise ValueError(
+            "mobile_positions and reference_positions must have the same shape; "
+            f"got {mobile.shape} and {reference.shape}."
+        )
+
+    fit_weights = _alignment_weights(weights, len(mobile))
+    mobile_centre = np.average(mobile, axis=0, weights=fit_weights)
+    reference_centre = np.average(reference, axis=0, weights=fit_weights)
+    mobile_centred = mobile - mobile_centre
+    reference_centred = reference - reference_centre
+
+    covariance = (mobile_centred * fit_weights[:, None]).T @ reference_centred
+    left, _singular_values, right_transpose = np.linalg.svd(covariance)
+    rotation = left @ right_transpose
+
+    # Kabsch's unconstrained orthogonal fit may be a reflection. Negating one
+    # singular vector chooses the best proper rotation instead.
+    if np.linalg.det(rotation) < 0.0:
+        left[:, -1] *= -1.0
+        rotation = left @ right_transpose
+
+    translation = reference_centre - mobile_centre @ rotation
+    return rotation, translation
+
+
+def _atom_indices(atoms, indices, name):
+    """Validate an alignment selection and return it as an integer array."""
+    if indices is None:
+        if len(atoms) == 0:
+            raise ValueError(f"{name} must not be empty.")
+        return np.arange(len(atoms), dtype=int)
+
+    if isinstance(indices, Integral) and not isinstance(indices, bool):
+        raw_indices = [indices]
+    else:
+        try:
+            raw_indices = list(indices)
+        except TypeError as exc:
+            raise TypeError(f"{name} must contain integer atom indices.") from exc
+
+    if not raw_indices:
+        raise ValueError(f"{name} must not be empty.")
+    if any(
+        not isinstance(index, Integral) or isinstance(index, bool)
+        for index in raw_indices
+    ):
+        raise TypeError(f"{name} must contain only integer atom indices.")
+
+    selected = np.asarray(raw_indices, dtype=int)
+    if len(np.unique(selected)) != len(selected):
+        raise ValueError(f"{name} must not contain repeated atom indices.")
+    if np.any(selected < 0) or np.any(selected >= len(atoms)):
+        raise IndexError(f"{name} contains an index out of range for {len(atoms)} atoms.")
+    return selected
+
+
+def _atom_alignment_data(
+    mobile, reference, mobile_indices, reference_indices, weights
+):
+    """Resolve atom selections and weights shared by alignment operations."""
+    if not isinstance(mobile, Atoms) or not isinstance(reference, Atoms):
+        raise TypeError("mobile and reference must both be ase.Atoms objects.")
+
+    mobile_selection = _atom_indices(mobile, mobile_indices, "mobile_indices")
+    reference_selection = _atom_indices(
+        reference, reference_indices, "reference_indices"
+    )
+    if len(mobile_selection) != len(reference_selection):
+        raise ValueError(
+            "mobile_indices and reference_indices must select the same number "
+            f"of atoms; got {len(mobile_selection)} and {len(reference_selection)}."
+        )
+
+    if isinstance(weights, str):
+        if weights != "masses":
+            raise ValueError("weights must be None, 'masses', or a numeric sequence.")
+        weights = mobile.get_masses()[mobile_selection]
+
+    fit_weights = _alignment_weights(weights, len(mobile_selection))
+    return (
+        _alignment_positions(
+            mobile.positions[mobile_selection], "selected mobile positions"
+        ),
+        _alignment_positions(
+            reference.positions[reference_selection], "selected reference positions"
+        ),
+        fit_weights,
+    )
+
+
+def align_atom_sets(
+    mobile: Atoms,
+    reference: Atoms,
+    mobile_indices=None,
+    reference_indices=None,
+    weights=None,
+) -> Atoms:
+    """Rigidly superpose one atom set on a corresponding reference set.
+
+    The selected atoms determine the least-squares Kabsch fit, while the
+    resulting rotation and translation are applied to every atom in
+    ``mobile``. This keeps the mobile structure internally rigid and makes it
+    possible to fit on a stable substructure while carrying spectators or a
+    flexible region along with it. Neither input is modified.
+
+    Correspondence is positional: the first mobile selection index is matched
+    to the first reference selection index, and so on. Atom identities are not
+    automatically matched or reordered.
+
+    Parameters
+    ----------
+    mobile, reference : ase.Atoms
+        Structure to move and structure to fit it onto.
+    mobile_indices, reference_indices : int or iterable of int, optional
+        Corresponding selections used for the fit. Each defaults to every atom
+        in its structure and the selections must have equal length.
+    weights : {None, "masses"} or array_like, optional
+        Fit weights. ``None`` gives every correspondence equal influence;
+        ``"masses"`` uses the selected mobile atoms' masses; a numeric
+        sequence supplies one non-negative weight per correspondence.
+
+    Returns
+    -------
+    ase.Atoms
+        A copy of ``mobile`` with every position transformed into the
+        reference frame.
+
+    Raises
+    ------
+    TypeError
+        If either structure is not an :class:`ase.Atoms`, or selections or
+        weights have the wrong type.
+    ValueError
+        If the selections differ in length, are empty or repeated, or weights
+        are invalid.
+    IndexError
+        If a selection contains an atom index outside its structure.
+    """
+    mobile_fit, reference_fit, fit_weights = _atom_alignment_data(
+        mobile, reference, mobile_indices, reference_indices, weights
+    )
+    rotation, translation = kabsch_transform(
+        mobile_fit, reference_fit, weights=fit_weights
+    )
+
+    aligned = mobile.copy()
+    # Alignment changes the coordinate frame, so positional constraints must
+    # not suppress part of the rigid transform. The constraints themselves
+    # remain attached to the returned copy.
+    aligned.set_positions(
+        mobile.positions @ rotation + translation, apply_constraint=False
+    )
+    return aligned
+
+
+def atom_set_rmsd(
+    mobile: Atoms,
+    reference: Atoms,
+    mobile_indices=None,
+    reference_indices=None,
+    weights=None,
+    align: bool = False,
+) -> float:
+    """Calculate the RMSD between corresponding atoms, optionally after fitting.
+
+    Parameters are the same as :func:`align_atom_sets`. When ``align`` is
+    ``True``, the optimal rigid transform is applied to the selected mobile
+    coordinates before the RMSD is measured; the input structures still are
+    not modified.
+
+    Parameters
+    ----------
+    mobile, reference : ase.Atoms
+        Structures whose corresponding positions are compared.
+    mobile_indices, reference_indices : int or iterable of int, optional
+        Corresponding selections to compare. Each defaults to every atom.
+    weights : {None, "masses"} or array_like, optional
+        RMSD and fit weights, interpreted as in :func:`align_atom_sets`.
+    align : bool, optional
+        Remove the best rigid rotation and translation before measuring.
+        Defaults to ``False`` so the function can also report displacement in
+        the current coordinate frame.
+
+    Returns
+    -------
+    float
+        Root-mean-square Cartesian distance in Å.
+    """
+    mobile_fit, reference_fit, fit_weights = _atom_alignment_data(
+        mobile, reference, mobile_indices, reference_indices, weights
+    )
+    if align:
+        rotation, translation = kabsch_transform(
+            mobile_fit, reference_fit, weights=fit_weights
+        )
+        mobile_fit = mobile_fit @ rotation + translation
+
+    squared_distances = np.sum((mobile_fit - reference_fit) ** 2, axis=1)
+    return float(np.sqrt(np.average(squared_distances, weights=fit_weights)))
 
 
 def bonded_cluster_indices_no_anchor_hub(
