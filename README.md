@@ -833,7 +833,7 @@ halves and swap them over; for a proton transfer, move the hydrogen across.
 | `flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, rot_matrix=None)` | Swap two fragments over, each landing on the other's anchor and facing it. |
 | `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05, steps=1000, optimiser=BFGS, logfile='-')` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
 | `get_best_flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, optimise_after=True, calc=None)` | Search the reflection signs and keep whichever leaves the fragment centres of mass closest. |
-| `swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index)` | Turn O-H...O into O...H-O, keeping the O-H length, to make the product of a proton transfer. |
+| `swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index)` | Turn one or more donor-H...acceptor bonds into donor...H-acceptor, keeping each original donor-H length. Scalar donor/acceptor indices are shared; iterables pair one-to-one with the hydrogen indices. |
 
 ### `tools_plumed` — metadynamics support
 

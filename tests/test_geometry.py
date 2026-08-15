@@ -399,3 +399,99 @@ class TestSwapBondingConfiguration:
         assert np.linalg.norm(
             swapped.positions[1] - swapped.positions[2]
         ) == pytest.approx(1.0)
+
+    def test_moves_multiple_protons_in_one_call(self):
+        double_h_bond = Atoms(
+            "OHOOHO",
+            positions=[
+                [0.0, 0.0, 0.0],
+                [0.8, 0.0, 0.0],
+                [2.8, 0.0, 0.0],
+                [0.0, 4.0, 0.0],
+                [0.0, 5.1, 0.0],
+                [0.0, 7.0, 0.0],
+            ],
+        )
+
+        swapped = swap_bonding_configuration(
+            double_h_bond, [0, 3], [1, 4], [2, 5]
+        )
+
+        assert swapped.get_distance(1, 2) == pytest.approx(0.8)
+        assert swapped.get_distance(4, 5) == pytest.approx(1.1)
+        assert swapped.positions[1] == pytest.approx([2.0, 0.0, 0.0])
+        assert swapped.positions[4] == pytest.approx([0.0, 5.9, 0.0])
+
+    def test_a_scalar_donor_is_shared_by_multiple_protons(self):
+        branched_h_bonds = Atoms(
+            "OHOHO",
+            positions=[
+                [0.0, 0.0, 0.0],
+                [0.9, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [0.0, 1.1, 0.0],
+                [0.0, 3.0, 0.0],
+            ],
+        )
+
+        swapped = swap_bonding_configuration(
+            branched_h_bonds, 0, np.array([1, 3]), (2, 4)
+        )
+
+        assert swapped.get_distance(1, 2) == pytest.approx(0.9)
+        assert swapped.get_distance(3, 4) == pytest.approx(1.1)
+
+    def test_multiple_protons_do_not_modify_the_input(self):
+        double_h_bond = Atoms(
+            "OHOOHO",
+            positions=[
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [2.8, 0.0, 0.0],
+                [0.0, 4.0, 0.0],
+                [0.0, 5.0, 0.0],
+                [0.0, 6.8, 0.0],
+            ],
+        )
+        before = double_h_bond.positions.copy()
+
+        swap_bonding_configuration(double_h_bond, [0, 3], [1, 4], [2, 5])
+
+        assert double_h_bond.positions == pytest.approx(before)
+
+    def test_rejects_a_donor_count_that_does_not_match_the_protons(self):
+        atoms = Atoms("OHOHOHO", positions=np.zeros((7, 3)))
+
+        with pytest.raises(ValueError, match="one index per hydrogen"):
+            swap_bonding_configuration(atoms, [0, 2], [1, 3, 5], 6)
+
+    def test_rejects_a_repeated_hydrogen(self, h_bond):
+        with pytest.raises(ValueError, match="repeated"):
+            swap_bonding_configuration(h_bond, 0, [1, 1], 2)
+
+    @pytest.mark.parametrize("invalid", [1.0, None, [1.0], [True]])
+    def test_rejects_non_integer_hydrogen_indices(self, h_bond, invalid):
+        with pytest.raises(TypeError, match="integer"):
+            swap_bonding_configuration(h_bond, 0, invalid, 2)
+
+    def test_rejects_an_empty_hydrogen_list(self, h_bond):
+        with pytest.raises(ValueError, match="must not be empty"):
+            swap_bonding_configuration(h_bond, 0, [], 2)
+
+    def test_rejects_an_out_of_range_index(self, h_bond):
+        with pytest.raises(IndexError, match="out of range"):
+            swap_bonding_configuration(h_bond, 0, 1, len(h_bond))
+
+    def test_rejects_reusing_an_atom_within_a_transfer(self, h_bond):
+        with pytest.raises(ValueError, match="distinct"):
+            swap_bonding_configuration(h_bond, 0, 1, 0)
+
+    def test_rejects_a_non_hydrogen_index(self, h_bond):
+        with pytest.raises(ValueError, match="not H"):
+            swap_bonding_configuration(h_bond, 1, 0, 2)
+
+    def test_rejects_coincident_donor_and_acceptor_positions(self, h_bond):
+        h_bond.positions[2] = h_bond.positions[0]
+
+        with pytest.raises(ValueError, match="positions must be different"):
+            swap_bonding_configuration(h_bond, 0, 1, 2)

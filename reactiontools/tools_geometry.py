@@ -8,11 +8,12 @@ works out which atoms form each half of a stacked dimer, and
 flipped structure, ready to pass to
 :func:`~reactiontools.tools_reaction.prepare_neb`.
 
-:func:`swap_bonding_configuration` does the same job for the much smaller case
-of a proton transfer, moving one hydrogen across a hydrogen bond.
+:func:`swap_bonding_configuration` does the same job for proton transfers,
+moving one or more hydrogens across their hydrogen bonds.
 """
 
 from itertools import permutations
+from numbers import Integral
 
 import numpy as np
 from ase import Atoms
@@ -527,40 +528,124 @@ def get_best_flip_and_face_bases(
 
 
 def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index):
-    """Swap an O-H...O hydrogen bond over to O...H-O.
+    """Swap one or more donor-H...acceptor bonds to donor...H-acceptor.
 
-    Builds the product end state of a proton transfer: the hydrogen is moved
-    to the acceptor side of the hydrogen bond, keeping the same bond length it
-    had to the donor, so the result is a sensible starting geometry for
+    Builds the product end state of one or more proton transfers. Each hydrogen
+    is moved to the acceptor side of its hydrogen bond, keeping the bond length
+    it had to its donor, so the result is a sensible starting geometry for
     :func:`~reactiontools.tools_reaction.optimise_geom` and then a band.
+
+    A scalar donor or acceptor index is shared by all the hydrogens. Otherwise,
+    donor and acceptor iterables must contain one index per hydrogen.
 
     Parameters
     ----------
     atoms : ase.Atoms
         Structure holding the hydrogen bond. Not modified; a copy is returned.
-    donor_index : int
-        Index of the donor oxygen.
-    hydrogen_index : int
-        Index of the hydrogen being moved.
-    acceptor_index : int
-        Index of the acceptor oxygen.
+    donor_index : int or iterable of int
+        Index of a shared donor atom, or one donor index per hydrogen.
+    hydrogen_index : int or iterable of int
+        Index or indices of the hydrogens being moved.
+    acceptor_index : int or iterable of int
+        Index of a shared acceptor atom, or one acceptor index per hydrogen.
 
     Returns
     -------
     ase.Atoms
-        Copy of ``atoms`` with the hydrogen on the acceptor side.
-    """
-    atoms = atoms.copy()
-    donor_pos = atoms.positions[donor_index]
-    hydrogen_pos = atoms.positions[hydrogen_index]
-    acceptor_pos = atoms.positions[acceptor_index]
+        Copy of ``atoms`` with each hydrogen on its acceptor side.
 
-    direction = acceptor_pos - donor_pos
-    direction /= np.linalg.norm(direction)
-    new_hydrogen_pos = acceptor_pos - direction * np.linalg.norm(
-        hydrogen_pos - donor_pos
+    Raises
+    ------
+    TypeError
+        If an index argument is neither an integer nor an iterable of integers.
+    ValueError
+        If no hydrogen is supplied, donor or acceptor counts do not match the
+        hydrogen count, a hydrogen is repeated, a transfer reuses an atom in
+        more than one role, or a donor and acceptor occupy the same position.
+    IndexError
+        If an atom index is out of range.
+    """
+    def as_indices(value, name):
+        if isinstance(value, Integral) and not isinstance(value, bool):
+            return [int(value)]
+
+        try:
+            indices = list(value)
+        except TypeError as exc:
+            raise TypeError(
+                f"{name} must be an integer or iterable of integers."
+            ) from exc
+
+        if not indices:
+            raise ValueError(f"{name} must not be empty.")
+        if any(
+            not isinstance(index, Integral) or isinstance(index, bool)
+            for index in indices
+        ):
+            raise TypeError(f"{name} must contain only integers.")
+        return [int(index) for index in indices]
+
+    donors = as_indices(donor_index, "donor_index")
+    hydrogens = as_indices(hydrogen_index, "hydrogen_index")
+    acceptors = as_indices(acceptor_index, "acceptor_index")
+    transfer_count = len(hydrogens)
+
+    def one_per_hydrogen(indices, name):
+        if len(indices) == 1:
+            return indices * transfer_count
+        if len(indices) != transfer_count:
+            raise ValueError(
+                f"{name} must contain one index or one index per hydrogen "
+                f"({transfer_count}); got {len(indices)}."
+            )
+        return indices
+
+    donors = one_per_hydrogen(donors, "donor_index")
+    acceptors = one_per_hydrogen(acceptors, "acceptor_index")
+
+    if len(set(hydrogens)) != transfer_count:
+        raise ValueError("hydrogen_index must not contain repeated indices.")
+
+    atom_count = len(atoms)
+    for name, indices in (
+        ("donor_index", donors),
+        ("hydrogen_index", hydrogens),
+        ("acceptor_index", acceptors),
+    ):
+        for index in indices:
+            if not 0 <= index < atom_count:
+                raise IndexError(
+                    f"{name} contains index {index}, which is out of range for "
+                    f"{atom_count} atoms."
+                )
+
+    for donor, hydrogen, acceptor in zip(donors, hydrogens, acceptors):
+        if len({donor, hydrogen, acceptor}) != 3:
+            raise ValueError(
+                "Each transfer needs distinct donor, hydrogen, and acceptor indices."
+            )
+        if atoms[hydrogen].symbol != "H":
+            raise ValueError(
+                f"hydrogen_index contains index {hydrogen}, whose element is "
+                f"{atoms[hydrogen].symbol}, not H."
+            )
+
+    donor_positions = atoms.positions[donors]
+    hydrogen_positions = atoms.positions[hydrogens]
+    acceptor_positions = atoms.positions[acceptors]
+    directions = acceptor_positions - donor_positions
+    donor_acceptor_distances = np.linalg.norm(directions, axis=1)
+    if np.any(donor_acceptor_distances == 0):
+        raise ValueError("Donor and acceptor positions must be different.")
+
+    directions /= donor_acceptor_distances[:, np.newaxis]
+    donor_hydrogen_distances = np.linalg.norm(
+        hydrogen_positions - donor_positions, axis=1
+    )
+    new_hydrogen_positions = (
+        acceptor_positions - directions * donor_hydrogen_distances[:, np.newaxis]
     )
 
-    atoms.positions[hydrogen_index] = new_hydrogen_pos
-
-    return atoms
+    swapped = atoms.copy()
+    swapped.positions[hydrogens] = new_hydrogen_positions
+    return swapped
