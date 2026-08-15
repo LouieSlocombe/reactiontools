@@ -999,6 +999,7 @@ call.
 | `plot_fes(sources, **kwargs)` | Plot, dispatching on dimensionality. |
 | `plot_fes_1d(sources, labels=None, energy_unit=None, ...)` | One or many 1-D profiles on one axes. |
 | `plot_fes_2d(sources, levels=30, cmap=None, ...)` | Filled contours, one panel per surface. |
+| `plot_fes_path(source, path, path_columns=None, ...)` | A trajectory or reaction path through CV space over a filled 2-D surface. |
 | `plot_fes_2d_overlay(sources, ...)` | Several 2-D surfaces as contour lines on shared axes. |
 | `plot_fes_slices(sources, ...)` | 1-D cuts through a 2-D surface. |
 | `plot_plumed_fes(path, ...)` | Convenience wrapper over `plot_fes` for a single file. |
@@ -1008,6 +1009,23 @@ Energies are read as kJ/mol unless `source_unit` says otherwise, because that
 is what PLUMED writes when driven from OpenMM. `max_energy` masks poorly
 sampled regions rather than letting them dominate the colour scale, and
 `filename=None` means write nothing.
+
+Overlay the CV history from a PLUMED trajectory on its reconstructed surface:
+
+```python
+from reactiontools import plot_fes_path
+
+plot_fes_path(
+    "fes.dat",
+    "COLVAR",
+    path_label="MD trajectory",
+    filename="fes-path",
+)
+```
+
+When the `COLVAR` fields match the FES axes they are selected automatically;
+otherwise pass `path_columns=("cv1", "cv2")`. An `(n_points, 2)` array can be
+used in place of the file for a NEB or other precomputed path.
 
 ### `tools_units` — energy units and kBT
 

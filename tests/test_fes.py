@@ -22,6 +22,7 @@ from reactiontools.tools_fes import (
     plot_fes_2d,
     plot_fes_2d_overlay,
     plot_fes_convergence,
+    plot_fes_path,
     plot_fes_slices,
     plot_plumed_colvar,
     plot_plumed_fes,
@@ -82,6 +83,17 @@ def write_colvar(path, n_rows=100):
         for i in range(n_rows):
             time = i * 0.002
             handle.write(f"{time:.4f} {np.sin(time):.6f} {0.1 * i:.6f}\n")
+
+
+def write_path_colvar(path, n_rows=25):
+    """Write a trajectory through both CVs, with unrelated columns around it."""
+    cv1 = np.linspace(-1.5, 1.5, n_rows)
+    cv2 = 1.5 + 0.4 * np.sin(np.linspace(0.0, np.pi, n_rows))
+    with open(path, "w") as handle:
+        handle.write("#! FIELDS time cv_diff1 cv_diff2 metad.bias\n")
+        for i, (x, y) in enumerate(zip(cv1, cv2, strict=True)):
+            handle.write(f"{i * 0.002:.4f} {x:.6f} {y:.6f} {0.1 * i:.6f}\n")
+    return cv1, cv2
 
 
 @pytest.fixture
@@ -337,6 +349,56 @@ def test_plot_fes_2d_overlay_labels_each_surface(fes_2d_file):
         [fes_2d_file, fes_2d_file], labels=["MD", "PIMD"], levels=5
     )
     assert [text.get_text() for text in ax.get_legend().get_texts()] == ["MD", "PIMD"]
+
+
+def test_plot_fes_path_matches_colvar_fields_to_fes_axes(fes_2d_file, tmp_path):
+    path_file = tmp_path / "COLVAR"
+    cv1, cv2 = write_path_colvar(path_file)
+
+    fig, ax = plot_fes_path(fes_2d_file, path_file, path_label="MD trajectory")
+
+    assert len(fig.axes) == 2  # FES panel and colour bar
+    assert np.allclose(ax.lines[0].get_xdata(), cv1)
+    assert np.allclose(ax.lines[0].get_ydata(), cv2)
+    assert ax.lines[0].get_color() == "white"
+    assert [text.get_text() for text in ax.get_legend().get_texts()] == [
+        "MD trajectory"
+    ]
+
+
+def test_plot_fes_path_accepts_coordinate_arrays_and_custom_style(fes_2d_file):
+    path = np.column_stack((np.linspace(-1.0, 1.0, 8), np.linspace(0.5, 2.5, 8)))
+
+    _, ax = plot_fes_path(
+        fes_2d_file,
+        path,
+        colorbar=False,
+        path_label=None,
+        path_kwargs={"color": "black", "marker": "o"},
+    )
+
+    assert ax.lines[0].get_color() == "black"
+    assert ax.lines[0].get_marker() == "o"
+    assert ax.get_legend() is None
+
+
+def test_plot_fes_path_can_select_named_path_columns(fes_2d_file, tmp_path):
+    path_file = tmp_path / "COLVAR"
+    cv1, _ = write_path_colvar(path_file)
+
+    _, ax = plot_fes_path(
+        fes_2d_file,
+        path_file,
+        path_columns=("cv_diff2", "cv_diff1"),
+        colorbar=False,
+    )
+
+    assert np.allclose(ax.lines[0].get_ydata(), cv1)
+
+
+def test_plot_fes_path_rejects_1d_surface(fes_1d_file):
+    with pytest.raises(ValueError, match="2-D free-energy surface"):
+        plot_fes_path(fes_1d_file, np.zeros((5, 2)))
 
 
 # ---------------------------------------------------------------------------

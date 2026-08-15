@@ -13,10 +13,10 @@ into a free-energy surface can be plotted by the same handful of functions:
    stacked ``(3, ny, nx)`` array, a ``(x, y, Z)`` tuple or scattered
    ``(N, 3)`` columns -- is accepted by :func:`as_fes`.
 3. **Plotters** -- :func:`plot_fes_1d`, :func:`plot_fes_2d`,
-   :func:`plot_fes_2d_overlay` and :func:`plot_fes_slices` each take *one or
-   many* FES sources, so a single surface, a convergence series and a
-   MD/PIMD comparison are all the same call. :func:`plot_fes` dispatches on
-   dimensionality when the caller does not care.
+   :func:`plot_fes_path`, :func:`plot_fes_2d_overlay` and
+   :func:`plot_fes_slices` cover profiles, surfaces, paths through CV space
+   and comparisons. :func:`plot_fes` dispatches on dimensionality when the
+   caller does not care.
 
 Every plotting function shares the same conventions:
 
@@ -75,6 +75,7 @@ __all__ = [
     "plot_fes_1d",
     "plot_fes_2d",
     "plot_fes_2d_overlay",
+    "plot_fes_path",
     "plot_fes_convergence",
     "plot_fes_slices",
     "plot_plumed_colvar",
@@ -1486,6 +1487,202 @@ def plot_fes_2d(
 
     _finalise(fig, filename=filename, show=show)
     return fig, axes[:n_panels]
+
+
+def _path_coordinates(source, columns=None, cv_labels=None):
+    """Read the two CV coordinates of a path.
+
+    Parameters
+    ----------
+    source : str, path-like, PlumedData or array_like
+        A PLUMED ``COLVAR``-style file/container or coordinates shaped
+        ``(n_points, 2)``, ``(2, n_points)`` or ``(x, y)``.
+    columns : sequence of (str or int), optional
+        The two columns to use for PLUMED data. When omitted, fields matching
+        *cv_labels* are preferred, then the first two fields other than
+        ``time`` are used.
+    cv_labels : sequence of str, optional
+        FES axis labels to match against a PLUMED header.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        The finite x and y coordinates in path order.
+
+    Raises
+    ------
+    ValueError
+        If two path coordinates cannot be identified or no finite points
+        remain.
+    """
+    if isinstance(source, (str, os.PathLike)):
+        source = read_plumed_file(source, drop_der=False)
+
+    if isinstance(source, PlumedData):
+        if columns is None:
+            labels = list(cv_labels or [])
+            if len(labels) == 2 and all(label in source.fields for label in labels):
+                columns = labels
+            else:
+                candidates = [
+                    i
+                    for i, field_name in enumerate(source.fields)
+                    if field_name.lower() != "time"
+                ]
+                if not source.fields:
+                    candidates = list(range(source.data.shape[1]))
+                if len(candidates) < 2:
+                    raise ValueError("Path data must contain two CV columns")
+                columns = candidates[:2]
+        columns = list(columns)
+        if len(columns) != 2:
+            raise ValueError(f"path_columns must select 2 fields, got {len(columns)}")
+        x, y = (source.column(column) for column in columns)
+    else:
+        if columns is not None:
+            raise ValueError("path_columns is only meaningful for PLUMED path data")
+        if isinstance(source, (list, tuple)) and len(source) == 2:
+            parts = [np.asarray(part, dtype=float) for part in source]
+            if all(part.ndim == 1 and part.shape == parts[0].shape for part in parts):
+                x, y = parts
+            else:
+                array = np.asarray(source, dtype=float)
+                if array.ndim != 2 or 2 not in array.shape:
+                    raise ValueError(
+                        "Path coordinates must have shape (n_points, 2) or "
+                        "(2, n_points)"
+                    )
+                x, y = array if array.shape[0] == 2 else array.T
+        else:
+            array = np.asarray(source, dtype=float)
+            if array.ndim != 2 or 2 not in array.shape:
+                raise ValueError(
+                    "Path coordinates must have shape (n_points, 2) or (2, n_points)"
+                )
+            # For the ambiguous (2, 2) case, treat rows as path points.
+            x, y = array.T if array.shape[1] == 2 else array
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    if not finite.any():
+        raise ValueError("Path contains no finite CV coordinates")
+    return x[finite], y[finite]
+
+
+def plot_fes_path(
+    source,
+    path,
+    fig=None,
+    ax=None,
+    energy_unit=None,
+    source_unit=DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero=True,
+    max_energy=None,
+    columns=None,
+    path_columns=None,
+    levels=30,
+    cmap=None,
+    x_lab=None,
+    y_lab=None,
+    colorbar=True,
+    path_label="Path",
+    path_kwargs=None,
+    filename=None,
+    show=False,
+    fig_size=(6, 5),
+    **contour_kwargs,
+):
+    """Plot a path through collective-variable space over a 2-D FES.
+
+    The path can come straight from a PLUMED ``COLVAR`` file. If its header
+    contains fields with the same names as the FES axes, those fields are
+    selected automatically, so a leading ``time`` column and trailing bias
+    columns are ignored. Raw ``(n_points, 2)`` and ``(2, n_points)`` arrays
+    are also accepted.
+
+    Parameters
+    ----------
+    source : FES source
+        One 2-D surface accepted by :func:`as_fes`.
+    path : str, path-like, PlumedData or array_like
+        Ordered CV coordinates, or a PLUMED file containing them.
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on.
+    energy_unit, source_unit, shift_min_to_zero, max_energy, columns
+        FES preparation options; see :func:`plot_fes_2d`.
+    path_columns : sequence of (str or int), optional
+        Two path columns, ordered ``(cv1, cv2)``. Field names matching the FES
+        axes are used automatically when this is omitted.
+    levels, cmap, x_lab, y_lab, colorbar
+        Surface appearance options; see :func:`plot_fes_2d`.
+    path_label : str or None, optional
+        Legend label for the path. ``None`` suppresses the legend.
+    path_kwargs : mapping, optional
+        Appearance options forwarded to ``Axes.plot``. Defaults to a
+        semi-transparent white line like the conventional trajectory-on-FES
+        plot.
+    filename : str, optional
+        Output path; ``None``, the default, writes nothing.
+    show : bool, optional
+        Whether to display the figure.
+    fig_size : tuple, optional
+        Figure size in inches.
+    **contour_kwargs
+        Extra keyword arguments forwarded to ``contourf``/``tricontourf``.
+
+    Returns
+    -------
+    tuple
+        ``(fig, ax)`` containing the matplotlib figure and axes.
+
+    Raises
+    ------
+    ValueError
+        If *source* is not one 2-D FES or *path* does not contain two CVs.
+    """
+    fes = as_fes(
+        source,
+        energy_unit=energy_unit,
+        source_unit=source_unit,
+        shift_min_to_zero=shift_min_to_zero,
+        max_energy=max_energy,
+        columns=columns,
+    )
+    if fes.ndim != 2:
+        raise ValueError("plot_fes_path expects a 2-D free-energy surface")
+
+    x_path, y_path = _path_coordinates(
+        path, columns=path_columns, cv_labels=fes.cv_labels
+    )
+    fig, axes = plot_fes_2d(
+        fes,
+        fig=fig,
+        ax=ax,
+        shift_min_to_zero=False,
+        levels=levels,
+        cmap=cmap,
+        x_lab=x_lab,
+        y_lab=y_lab,
+        colorbar=colorbar,
+        filename=None,
+        show=False,
+        fig_size=fig_size,
+        **contour_kwargs,
+    )
+    ax = axes[0]
+
+    style = {"color": "white", "alpha": 0.7, "linewidth": 1.5, "zorder": 3}
+    if path_kwargs is not None:
+        style.update(path_kwargs)
+    ax.plot(x_path, y_path, label=path_label, **style)
+    if path_label is not None:
+        ax.legend(loc="best")
+
+    _finalise(fig, filename=filename, show=show)
+    return fig, ax
 
 
 def plot_fes_2d_overlay(
