@@ -75,8 +75,8 @@ __all__ = [
     "plot_fes_1d",
     "plot_fes_2d",
     "plot_fes_2d_overlay",
-    "plot_fes_path",
     "plot_fes_convergence",
+    "plot_fes_path",
     "plot_fes_slices",
     "plot_plumed_colvar",
     "plot_plumed_fes",
@@ -289,11 +289,35 @@ class FES:
     regular: bool = True
 
     def __post_init__(self):
-        """Coerce the arrays to floats and name any unlabelled variables."""
+        """Coerce and validate the arrays, then name unlabelled variables."""
         self.cvs = [np.asarray(cv, dtype=float) for cv in self.cvs]
         self.energy = np.asarray(self.energy, dtype=float)
+        if len(self.cvs) not in (1, 2):
+            raise ValueError(f"FES requires one or two CVs, got {len(self.cvs)}")
+        if self.energy.size == 0:
+            raise ValueError("FES energy data cannot be empty")
+        if any(cv.shape != self.energy.shape for cv in self.cvs):
+            shapes = [cv.shape for cv in self.cvs]
+            raise ValueError(
+                f"CV shapes {shapes} must match energy shape {self.energy.shape}"
+            )
+
+        expected_ndim = 1 if len(self.cvs) == 1 or not self.regular else 2
+        if self.energy.ndim != expected_ndim:
+            layout = "a regular grid" if self.regular else "scattered points"
+            raise ValueError(
+                f"A {len(self.cvs)}-D FES on {layout} needs {expected_ndim}-D "
+                f"arrays, got shape {self.energy.shape}"
+            )
+
         if not self.cv_labels:
             self.cv_labels = [f"CV{i + 1}" for i in range(len(self.cvs))]
+        else:
+            self.cv_labels = list(self.cv_labels)
+            if len(self.cv_labels) != len(self.cvs):
+                raise ValueError(
+                    f"Got {len(self.cv_labels)} CV labels for {len(self.cvs)} CVs"
+                )
 
     @property
     def ndim(self):
@@ -345,6 +369,8 @@ class FES:
             raise ValueError(
                 "Slicing requires a 2-D free-energy surface on a regular grid"
             )
+        if axis not in (0, 1):
+            raise ValueError(f"axis must be 0 or 1, got {axis!r}")
 
         # Grids are stored as (n_cv2, n_cv1); axis 0 varies along the columns.
         axis_values = self.cvs[axis][0, :] if axis == 0 else self.cvs[axis][:, 0]
@@ -755,7 +781,10 @@ def _as_fes_list(sources, **kwargs):
     """
     if _is_single_source(sources):
         sources = [sources]
-    return [as_fes(source, **kwargs) for source in sources]
+    fes_list = [as_fes(source, **kwargs) for source in sources]
+    if not fes_list:
+        raise ValueError("At least one free-energy surface is required")
+    return fes_list
 
 
 def _looks_like_fes_array(array):
@@ -786,12 +815,11 @@ def _looks_like_fes_array(array):
 def _is_single_source(source):
     """Return True when *source* is one FES rather than a collection of them.
 
-    A list or tuple is read as a single surface only when its elements are
-    plain coordinate/value arrays -- ``(x, F)``, ``(x, y, z)`` columns or
-    ``(X, Y, Z)`` grids. As soon as an element could itself be a complete
-    free-energy surface the sequence is treated as a collection, so
-    ``[fes_a, fes_b]`` behaves as expected. Stack genuinely ambiguous
-    grids with :func:`numpy.stack` to force the single-surface reading.
+    A tuple of matching coordinate/value arrays is one surface -- ``(x, F)``,
+    ``(x, y, z)`` or ``(X, Y, Z)``. A list whose entries are themselves
+    FES-shaped arrays is a collection, so ``[fes_a, fes_b]`` behaves as
+    expected. This tuple/list distinction resolves small grids whose shape
+    can otherwise look exactly like a collection of curves.
 
     Parameters
     ----------
@@ -805,7 +833,14 @@ def _is_single_source(source):
     """
     if isinstance(source, (FES, str, os.PathLike, np.ndarray)):
         return True
-    if isinstance(source, (list, tuple)):
+    if isinstance(source, tuple):
+        if len(source) not in (2, 3):
+            return False
+        return all(
+            isinstance(part, np.ndarray) and part.shape == source[0].shape
+            for part in source
+        )
+    if isinstance(source, list):
         if len(source) not in (2, 3):
             return False
         parts = [part for part in source if isinstance(part, np.ndarray)]
@@ -879,6 +914,13 @@ def _keep_last(fes_list, label_list, max_datasets):
     tuple of list
         ``(fes_list, label_list)``, trimmed together.
     """
+    if max_datasets is not None:
+        if isinstance(max_datasets, bool) or not isinstance(
+            max_datasets, (int, np.integer)
+        ):
+            raise ValueError("max_datasets must be a positive integer or None")
+        if max_datasets < 1:
+            raise ValueError("max_datasets must be a positive integer or None")
     if max_datasets is not None and len(fes_list) > max_datasets:
         return fes_list[-max_datasets:], label_list[-max_datasets:]
     return fes_list, label_list
@@ -901,6 +943,30 @@ def _default_colors(count):
     return [cycle[i % len(cycle)] for i in range(count)]
 
 
+def _resolve_colors(colors, count):
+    """Return exactly one colour per dataset, rejecting silent truncation."""
+    if colors is None:
+        return _default_colors(count)
+    if isinstance(colors, str):
+        colors = [colors]
+    colors = list(colors)
+    if len(colors) != count:
+        raise ValueError(f"Got {len(colors)} colors for {count} surfaces")
+    return colors
+
+
+def _figure_from_axes(fig, axes):
+    """Resolve and validate the figure which owns supplied axes."""
+    axes = np.atleast_1d(axes).ravel()
+    owners = {axis.figure for axis in axes}
+    if len(owners) != 1:
+        raise ValueError("All supplied axes must belong to the same figure")
+    owner = owners.pop()
+    if fig is not None and fig is not owner:
+        raise ValueError("The supplied figure does not own the supplied axes")
+    return owner
+
+
 def _shared_levels(fes_list, levels):
     """Build contour levels spanning every surface in *fes_list*.
 
@@ -921,14 +987,50 @@ def _shared_levels(fes_list, levels):
         The contour levels.
     """
     if not np.isscalar(levels):
-        return np.asarray(levels, dtype=float)
+        levels = np.asarray(levels, dtype=float)
+        if (
+            levels.ndim != 1
+            or levels.size < 2
+            or not np.isfinite(levels).all()
+            or np.any(np.diff(levels) <= 0)
+        ):
+            raise ValueError("levels must be a strictly increasing finite sequence")
+        return levels
 
-    lows, highs = zip(*(fes.finite_range() for fes in fes_list))
-    low = np.nanmin(lows)
-    high = np.nanmax(highs)
-    if not np.isfinite(low) or not np.isfinite(high) or high <= low:
-        return int(levels)
-    return np.linspace(low, high, int(levels))
+    try:
+        count = int(levels)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("levels must be an integer of at least 2") from exc
+    if isinstance(levels, (bool, np.bool_)) or count != levels or count < 2:
+        raise ValueError("levels must be an integer of at least 2")
+    levels = count
+
+    ranges = [fes.finite_range() for fes in fes_list]
+    if any(not np.isfinite(bounds).all() for bounds in ranges):
+        raise ValueError("Cannot contour a surface with no finite energies")
+    lows, highs = zip(*ranges)
+    low = min(lows)
+    high = max(highs)
+    if high <= low:
+        return levels
+    return np.linspace(low, high, levels)
+
+
+def _draw_fes_contour(axis, fes, filled, **kwargs):
+    """Draw one regular or triangulated FES with a common validation path."""
+    method = "contourf" if filled else "contour"
+    if fes.regular:
+        if any(not np.isfinite(cv).all() for cv in fes.cvs):
+            raise ValueError("Regular FES grids must have finite CV coordinates")
+        return getattr(axis, method)(fes.cvs[0], fes.cvs[1], fes.energy, **kwargs)
+
+    finite = np.isfinite(fes.energy)
+    finite &= np.isfinite(fes.cvs[0]) & np.isfinite(fes.cvs[1])
+    if np.count_nonzero(finite) < 3:
+        raise ValueError("A scattered FES needs at least three finite points")
+    return getattr(axis, f"tri{method}")(
+        fes.cvs[0][finite], fes.cvs[1][finite], fes.energy[finite], **kwargs
+    )
 
 
 def _default_grid_size(n_panels, fig_size):
@@ -1211,10 +1313,13 @@ def fes_convergence(sources, basin_a, basin_b, temperature=None, **kwargs):
     # max_energy and the unit conversion on top of themselves.
     if _is_single_source(sources):
         sources = [sources]
-    return [
+    summaries = [
         summarise_fes(source, basin_a, basin_b, temperature=temperature, **kwargs)
         for source in sources
     ]
+    if not summaries:
+        raise ValueError("At least one free-energy surface is required")
+    return summaries
 
 
 def plot_fes_1d(
@@ -1246,8 +1351,7 @@ def plot_fes_1d(
     sources : FES source or sequence of FES sources
         Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on. A new one is created when either *fig* or *ax*
-        is None.
+        Figure to draw on. Inferred from *ax* when omitted.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on.
     labels : sequence, optional
@@ -1307,8 +1411,10 @@ def plot_fes_1d(
     label_list = _resolve_labels(labels, len(fes_list), template=label_template)
     fes_list, label_list = _keep_last(fes_list, label_list, max_datasets)
 
-    if fig is None or ax is None:
+    if ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+    else:
+        fig = _figure_from_axes(fig, ax)
 
     for fes, label in zip(fes_list, label_list):
         ax.plot(fes.cvs[0], fes.energy, label=label, **plot_kwargs)
@@ -1360,8 +1466,7 @@ def plot_fes_2d(
     sources : FES source or sequence of FES sources
         Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on. A new one is created when either *fig* or *ax*
-        is None.
+        Figure to draw on. Inferred from *ax* when omitted.
     ax : matplotlib.axes.Axes or sequence of Axes, optional
         Axes to draw on; must provide one per surface.
     labels : sequence, optional
@@ -1430,7 +1535,7 @@ def plot_fes_2d(
     fes_list, label_list = _keep_last(fes_list, label_list, max_datasets)
 
     n_panels = len(fes_list)
-    if fig is None or ax is None:
+    if ax is None:
         fig, ax = plt.subplots(
             nrows=1,
             ncols=n_panels,
@@ -1439,6 +1544,8 @@ def plot_fes_2d(
             sharey=True,
             constrained_layout=True,
         )
+    else:
+        fig = _figure_from_axes(fig, ax)
     axes = np.atleast_1d(ax).ravel()
     if axes.size < n_panels:
         raise ValueError(f"Got {axes.size} axes for {n_panels} surfaces")
@@ -1446,25 +1553,14 @@ def plot_fes_2d(
     shared_levels = _shared_levels(fes_list, levels)
     contours = []
     for axis, fes, label in zip(axes, fes_list, label_list):
-        if fes.regular:
-            mappable = axis.contourf(
-                fes.cvs[0],
-                fes.cvs[1],
-                fes.energy,
-                levels=shared_levels,
-                cmap=cmap,
-                **contour_kwargs,
-            )
-        else:
-            finite = np.isfinite(fes.energy)
-            mappable = axis.tricontourf(
-                fes.cvs[0][finite],
-                fes.cvs[1][finite],
-                fes.energy[finite],
-                levels=shared_levels,
-                cmap=cmap,
-                **contour_kwargs,
-            )
+        mappable = _draw_fes_contour(
+            axis,
+            fes,
+            filled=True,
+            levels=shared_levels,
+            cmap=cmap,
+            **contour_kwargs,
+        )
         contours.append(mappable)
         if label is not None and n_panels > 1:
             axis.set_title(label)
@@ -1507,7 +1603,9 @@ def _path_coordinates(source, columns=None, cv_labels=None):
     Returns
     -------
     tuple of numpy.ndarray
-        The finite x and y coordinates in path order.
+        The x and y coordinates in path order. Non-finite coordinate pairs
+        are retained as NaNs so they break the plotted line instead of
+        joining unrelated path segments.
 
     Raises
     ------
@@ -1537,37 +1635,32 @@ def _path_coordinates(source, columns=None, cv_labels=None):
         columns = list(columns)
         if len(columns) != 2:
             raise ValueError(f"path_columns must select 2 fields, got {len(columns)}")
-        x, y = (source.column(column) for column in columns)
+        coordinates = np.column_stack([source.column(column) for column in columns])
     else:
         if columns is not None:
             raise ValueError("path_columns is only meaningful for PLUMED path data")
         if isinstance(source, (list, tuple)) and len(source) == 2:
             parts = [np.asarray(part, dtype=float) for part in source]
             if all(part.ndim == 1 and part.shape == parts[0].shape for part in parts):
-                x, y = parts
+                coordinates = np.column_stack(parts)
             else:
-                array = np.asarray(source, dtype=float)
-                if array.ndim != 2 or 2 not in array.shape:
-                    raise ValueError(
-                        "Path coordinates must have shape (n_points, 2) or "
-                        "(2, n_points)"
-                    )
-                x, y = array if array.shape[0] == 2 else array.T
+                coordinates = np.asarray(source, dtype=float)
         else:
-            array = np.asarray(source, dtype=float)
-            if array.ndim != 2 or 2 not in array.shape:
-                raise ValueError(
-                    "Path coordinates must have shape (n_points, 2) or (2, n_points)"
-                )
-            # For the ambiguous (2, 2) case, treat rows as path points.
-            x, y = array.T if array.shape[1] == 2 else array
+            coordinates = np.asarray(source, dtype=float)
 
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
+        if coordinates.ndim != 2 or 2 not in coordinates.shape:
+            raise ValueError(
+                "Path coordinates must have shape (n_points, 2) or (2, n_points)"
+            )
+        # For the ambiguous (2, 2) case, treat rows as path points.
+        if coordinates.shape[1] != 2:
+            coordinates = coordinates.T
+
+    x, y = np.asarray(coordinates, dtype=float).T
     finite = np.isfinite(x) & np.isfinite(y)
     if not finite.any():
         raise ValueError("Path contains no finite CV coordinates")
-    return x[finite], y[finite]
+    return np.where(finite, x, np.nan), np.where(finite, y, np.nan)
 
 
 def plot_fes_path(
@@ -1608,7 +1701,7 @@ def plot_fes_path(
     path : str, path-like, PlumedData or array_like
         Ordered CV coordinates, or a PLUMED file containing them.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on.
+        Figure to draw on. Inferred from *ax* when omitted.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on.
     energy_unit, source_unit, shift_min_to_zero, max_energy, columns
@@ -1716,7 +1809,7 @@ def plot_fes_2d_overlay(
     sources : sequence of FES sources
         Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on.
+        Figure to draw on. Inferred from *ax* when omitted.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on.
     labels : sequence, optional
@@ -1771,33 +1864,23 @@ def plot_fes_2d_overlay(
         raise ValueError("plot_fes_2d_overlay expects 2-D free-energy surfaces")
 
     label_list = _resolve_labels(labels, len(fes_list), template=label_template)
-    if colors is None:
-        colors = _default_colors(len(fes_list))
+    colors = _resolve_colors(colors, len(fes_list))
 
-    if fig is None or ax is None:
+    if ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+    else:
+        fig = _figure_from_axes(fig, ax)
 
     shared_levels = _shared_levels(fes_list, levels)
     for fes, color in zip(fes_list, colors):
-        if fes.regular:
-            ax.contour(
-                fes.cvs[0],
-                fes.cvs[1],
-                fes.energy,
-                levels=shared_levels,
-                colors=color,
-                **contour_kwargs,
-            )
-        else:
-            finite = np.isfinite(fes.energy)
-            ax.tricontour(
-                fes.cvs[0][finite],
-                fes.cvs[1][finite],
-                fes.energy[finite],
-                levels=shared_levels,
-                colors=color,
-                **contour_kwargs,
-            )
+        _draw_fes_contour(
+            ax,
+            fes,
+            filled=False,
+            levels=shared_levels,
+            colors=color,
+            **contour_kwargs,
+        )
 
     handles = [
         plt.Line2D([0], [0], color=color, label=label)
@@ -1857,7 +1940,7 @@ def plot_fes_slices(
         Index of the collective variable held fixed, so the default cuts
         along CV2.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on.
+        Figure to draw on. Inferred from *ax* when omitted.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on.
     labels : sequence, optional
@@ -1912,12 +1995,17 @@ def plot_fes_slices(
         raise ValueError("plot_fes_slices expects 2-D free-energy surfaces")
 
     values = np.atleast_1d(np.asarray(at, dtype=float))
+    if values.size == 0 or not np.isfinite(values).all():
+        raise ValueError("at must contain at least one finite CV value")
     label_list = _resolve_labels(labels, len(fes_list))
-    if colors is None:
-        colors = _default_colors(len(fes_list))
+    colors = _resolve_colors(colors, len(fes_list))
+    if not linestyles:
+        raise ValueError("linestyles must contain at least one style")
 
-    if fig is None or ax is None:
+    if ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+    else:
+        fig = _figure_from_axes(fig, ax)
 
     reference = fes_list[0]
     for fes, color, label in zip(fes_list, colors, label_list):
@@ -2061,8 +2149,7 @@ def plot_plumed_colvar(
         Restrict the plot to these columns. By default every column other
         than *x_axis* is plotted.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on. A new one is created when either *fig* or
-        *axes* is None.
+        Figure to draw on. Inferred from *axes* when omitted.
     axes : sequence of matplotlib.axes.Axes, optional
         Axes to draw on; must provide one per plotted column.
     filename : str, optional
@@ -2110,10 +2197,12 @@ def plot_plumed_colvar(
     if not plot_cols:
         raise ValueError(f"No variables to plot in {path}")
 
-    if fig is None or axes is None:
+    if axes is None:
         fig, axes = plt.subplots(
             len(plot_cols), 1, figsize=figsize, sharex=True, constrained_layout=True
         )
+    else:
+        fig = _figure_from_axes(fig, axes)
     axes = np.atleast_1d(axes).ravel()
     if axes.size < len(plot_cols):
         raise ValueError(f"Got {axes.size} axes for {len(plot_cols)} columns")
@@ -2161,8 +2250,7 @@ def plot_fes_convergence(
     temperature : float or None, optional
         See :func:`summarise_fes`.
     fig : matplotlib.figure.Figure, optional
-        Figure to draw on. A new one is created when either *fig* or *ax*
-        is None.
+        Figure to draw on. Inferred from *ax* when omitted.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on.
     x_lab, y_lab : str, optional
@@ -2191,13 +2279,16 @@ def plot_fes_convergence(
     summaries = fes_convergence(
         sources, basin_a, basin_b, temperature=temperature, **kwargs
     )
+    default_x_lab = "Surface" if times is None else "Time"
     if times is None:
         times = np.arange(1, len(summaries) + 1)
     elif len(times) != len(summaries):
         raise ValueError(f"Got {len(times)} times for {len(summaries)} surfaces.")
 
-    if fig is None or ax is None:
+    if ax is None:
         fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+    else:
+        fig = _figure_from_axes(fig, ax)
 
     ax.plot(times, [s.forward_barrier for s in summaries], "o-", label="Barrier A→B")
     ax.plot(times, [s.delta_f for s in summaries], "s-", label="ΔF (B−A)")
@@ -2207,7 +2298,7 @@ def plot_fes_convergence(
     _style_axes(
         fig,
         ax,
-        x_lab if x_lab is not None else ("Surface" if times is None else "Time"),
+        x_lab if x_lab is not None else default_x_lab,
         y_lab if y_lab is not None else unit_label(unit),
     )
     _finalise(fig, filename=filename, show=show)

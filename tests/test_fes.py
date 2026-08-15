@@ -256,6 +256,16 @@ def test_lists_of_surfaces_are_not_mistaken_for_one_surface(fes_2d_file):
     assert np.atleast_1d(ax).size == 1
 
 
+def test_small_coordinate_grid_tuple_is_one_surface():
+    """Two grid rows must not make an ``(X, Y, F)`` tuple look like curves."""
+    grid_x, grid_y = np.meshgrid(np.linspace(-1.0, 1.0, 5), [0.0, 1.0])
+    free = grid_x**2 + grid_y
+
+    _, axes = plot_fes_2d((grid_x, grid_y, free), colorbar=False)
+
+    assert axes.size == 1
+
+
 # ---------------------------------------------------------------------------
 # Units
 # ---------------------------------------------------------------------------
@@ -302,6 +312,11 @@ def test_plot_fes_1d_max_datasets_keeps_the_last_ones(fes_1d_file):
     assert [text.get_text() for text in ax.get_legend().get_texts()] == ["3", "4"]
 
 
+def test_plot_fes_1d_rejects_non_positive_max_datasets(fes_1d_file):
+    with pytest.raises(ValueError, match="positive integer"):
+        plot_fes_1d(fes_1d_file, max_datasets=0)
+
+
 def test_plot_fes_1d_rejects_2d_input(fes_2d_file):
     with pytest.raises(ValueError, match="1-D free-energy surfaces"):
         plot_fes_1d(fes_2d_file)
@@ -310,6 +325,15 @@ def test_plot_fes_1d_rejects_2d_input(fes_2d_file):
 def test_plot_fes_1d_checks_label_count(fes_1d_file):
     with pytest.raises(ValueError, match="labels for"):
         plot_fes_1d(fes_1d_file, labels=["a", "b"])
+
+
+def test_plot_fes_1d_infers_figure_from_axes(fes_1d_file):
+    fig, ax = plt.subplots()
+
+    returned_fig, returned_ax = plot_fes_1d(fes_1d_file, ax=ax)
+
+    assert returned_fig is fig
+    assert returned_ax is ax
 
 
 # ---------------------------------------------------------------------------
@@ -344,11 +368,31 @@ def test_plot_fes_2d_checks_axes_count(fes_2d_file):
         plot_fes_2d([fes_2d_file] * 3, fig=fig, ax=ax)
 
 
+def test_plot_fes_2d_validates_levels(fes_2d_file):
+    with pytest.raises(ValueError, match="at least 2"):
+        plot_fes_2d(fes_2d_file, levels=1)
+    with pytest.raises(ValueError, match="strictly increasing"):
+        plot_fes_2d(fes_2d_file, levels=[0.0, 2.0, 1.0])
+
+
+def test_plot_fes_2d_rejects_an_entirely_masked_surface():
+    grid_x, grid_y = np.meshgrid(np.linspace(-1.0, 1.0, 5), np.linspace(0.0, 1.0, 4))
+    fes = FES(cvs=[grid_x, grid_y], energy=np.full_like(grid_x, np.nan))
+
+    with pytest.raises(ValueError, match="no finite energies"):
+        plot_fes_2d(fes)
+
+
 def test_plot_fes_2d_overlay_labels_each_surface(fes_2d_file):
     _, ax = plot_fes_2d_overlay(
         [fes_2d_file, fes_2d_file], labels=["MD", "PIMD"], levels=5
     )
     assert [text.get_text() for text in ax.get_legend().get_texts()] == ["MD", "PIMD"]
+
+
+def test_plot_fes_2d_overlay_checks_color_count(fes_2d_file):
+    with pytest.raises(ValueError, match="1 colors for 2 surfaces"):
+        plot_fes_2d_overlay([fes_2d_file, fes_2d_file], colors=["black"])
 
 
 def test_plot_fes_path_matches_colvar_fields_to_fes_axes(fes_2d_file, tmp_path):
@@ -380,6 +424,15 @@ def test_plot_fes_path_accepts_coordinate_arrays_and_custom_style(fes_2d_file):
     assert ax.lines[0].get_color() == "black"
     assert ax.lines[0].get_marker() == "o"
     assert ax.get_legend() is None
+
+
+def test_plot_fes_path_keeps_non_finite_points_as_line_breaks(fes_2d_file):
+    path = np.array([[-1.0, 0.5], [np.nan, 1.5], [1.0, 2.5]])
+
+    _, ax = plot_fes_path(fes_2d_file, path, colorbar=False)
+
+    assert np.isnan(ax.lines[0].get_xdata()[1])
+    assert np.isnan(ax.lines[0].get_ydata()[1])
 
 
 def test_plot_fes_path_can_select_named_path_columns(fes_2d_file, tmp_path):
@@ -440,6 +493,16 @@ def test_slice_at_rejects_1d_surfaces(fes_1d_file):
         as_fes(fes_1d_file).slice_at(0.0)
 
 
+def test_slice_at_rejects_an_invalid_axis(fes_2d_file):
+    with pytest.raises(ValueError, match="axis must be 0 or 1"):
+        as_fes(fes_2d_file).slice_at(0.0, axis=2)
+
+
+def test_plot_fes_slices_needs_a_finite_slice(fes_2d_file):
+    with pytest.raises(ValueError, match="at least one finite"):
+        plot_fes_slices(fes_2d_file, at=[])
+
+
 # ---------------------------------------------------------------------------
 # Dispatch and saving
 # ---------------------------------------------------------------------------
@@ -448,6 +511,14 @@ def test_plot_fes_dispatches_on_dimensionality(fes_1d_file, fes_2d_file):
     assert isinstance(ax, plt.Axes)
     _, axes = plot_fes(fes_2d_file)
     assert np.atleast_1d(axes).size == 1
+
+
+@pytest.mark.parametrize(
+    "plotter", [plot_fes, plot_fes_1d, plot_fes_2d, plot_fes_2d_overlay]
+)
+def test_fes_plotters_reject_an_empty_source_list(plotter):
+    with pytest.raises(ValueError, match="At least one free-energy surface"):
+        plotter([])
 
 
 def test_plot_plumed_fes_returns_a_single_axes(fes_1d_file, fes_2d_file):
@@ -510,6 +581,15 @@ def test_plot_plumed_colvar_falls_back_to_the_index(colvar_file):
     assert axes[-1].get_xlabel() == "Step (index)"
 
 
+def test_plot_plumed_colvar_infers_figure_from_axes(colvar_file):
+    fig, axes = plt.subplots(2, 1)
+
+    returned_fig, returned_axes = plot_plumed_colvar(colvar_file, axes=axes)
+
+    assert returned_fig is fig
+    assert all(returned is supplied for returned, supplied in zip(returned_axes, axes))
+
+
 def test_plot_plumed_colvar_needs_a_header(tmp_path):
     path = tmp_path / "bare.dat"
     path.write_text("0.0 1.0\n1.0 2.0\n")
@@ -525,6 +605,24 @@ def test_fes_defaults_and_range():
     assert fes.cv_labels == ["CV1"]  # generated when nothing better is known
     assert fes.label == r"$F$"
     assert fes.finite_range() == (0.0, 2.0)
+
+
+@pytest.mark.parametrize(
+    ("cvs", "energy", "message"),
+    [
+        ([], np.ones(3), "one or two CVs"),
+        ([np.ones(2)], np.ones(3), "must match energy shape"),
+        ([np.ones((2, 2))], np.ones((2, 2)), "needs 1-D arrays"),
+    ],
+)
+def test_fes_validates_its_layout(cvs, energy, message):
+    with pytest.raises(ValueError, match=message):
+        FES(cvs=cvs, energy=energy)
+
+
+def test_fes_validates_label_count():
+    with pytest.raises(ValueError, match="2 CV labels for 1 CVs"):
+        FES(cvs=[np.ones(3)], energy=np.ones(3), cv_labels=["one", "two"])
 
 
 # ---------------------------------------------------------------------------
@@ -723,6 +821,7 @@ class TestPlotFesConvergence:
         _, ax = plot_fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
         assert list(ax.lines[0].get_xdata()) == [1, 2, 3, 4]
+        assert ax.get_xlabel() == "Surface"
 
     def test_uses_the_times_it_is_given(self, series):
         _, ax = plot_fes_convergence(
@@ -730,6 +829,7 @@ class TestPlotFesConvergence:
         )
 
         assert list(ax.lines[0].get_xdata()) == [25, 50, 75, 100]
+        assert ax.get_xlabel() == "Time"
 
     def test_the_barrier_curve_matches_the_summaries(self, series):
         summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
