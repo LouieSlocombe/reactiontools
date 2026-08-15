@@ -132,6 +132,11 @@ def test_all_names_are_importable():
     assert not missing
 
 
+def test_all_names_are_unique():
+    """Duplicate exports are easy to introduce in the grouped API list."""
+    assert len(reactiontools.__all__) == len(set(reactiontools.__all__))
+
+
 def test_public_api_is_complete():
     """The documented API must all be reachable from the top-level package."""
     expected = {

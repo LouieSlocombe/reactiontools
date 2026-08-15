@@ -1,9 +1,11 @@
 """Tests for reactiontools.tools_reaction."""
 
 import os
+import socket
 import warnings
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -78,6 +80,71 @@ def fake_socketio(monkeypatch):
     return _FakeSocketIOCalculator
 
 
+class _FakeParallelSocketIOCalculator(EMT):
+    """In-process calculator double for socket-pool orchestration tests.
+
+    It behaves like EMT when ASE asks for energies and forces, while recording
+    the socket settings and context-manager lifetime that reactiontools owns.
+    Real i-PI transport is exercised separately by the integration tests.
+    """
+
+    instances = []
+    fail_on = None
+
+    def __init__(
+        self,
+        calc=None,
+        launch_client=None,
+        unixsocket=None,
+        port=None,
+        timeout=None,
+        log=None,
+    ):
+        super().__init__()
+        self.wrapped_calc = calc
+        self.launch_client = launch_client
+        self.unixsocket = unixsocket
+        self.port = port
+        self.timeout = timeout
+        self.log = log
+        self.closed = False
+        self.server = SimpleNamespace(unixsocket=unixsocket, port=port)
+        index = len(type(self).instances)
+        type(self).instances.append(self)
+        if index == type(self).fail_on:
+            raise OSError("socket failed to bind")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.closed = True
+        self.server = None
+        return False
+
+
+@pytest.fixture
+def fake_parallel_socketio(monkeypatch):
+    """Replace socket transport where a test only needs pool semantics."""
+    _FakeParallelSocketIOCalculator.instances = []
+    _FakeParallelSocketIOCalculator.fail_on = None
+    monkeypatch.setattr(
+        tools_reaction, "SocketIOCalculator", _FakeParallelSocketIOCalculator
+    )
+    return _FakeParallelSocketIOCalculator
+
+
+@pytest.fixture
+def local_socket_access(tmp_path):
+    """Skip transport integration tests where the runner forbids sockets."""
+    probe = tmp_path / "socket-probe"
+    try:
+        with socket.socket(socket.AF_UNIX) as server:
+            server.bind(str(probe))
+    except OSError as exc:
+        pytest.skip(f"local sockets are unavailable: {exc}")
+
+
 class TestGetNebPath:
     def test_returns_cumulative_distance_from_zero(self, chain):
         # One atom per image spaced 0.5 A apart, so the answer is exact
@@ -93,9 +160,13 @@ class TestGetNebPath:
 
     def test_uses_the_norm_over_all_atoms(self):
         """Displacing N atoms by d gives a step of d * sqrt(N)."""
-        path = get_neb_path(molecule("H2O") for _ in range(1))
+        first = molecule("H2O")
+        second = first.copy()
+        second.positions += [0.0, 0.0, 0.5]
 
-        assert path == pytest.approx([0.0])
+        assert get_neb_path([first, second]) == pytest.approx(
+            [0.0, 0.5 * np.sqrt(len(first))]
+        )
 
 
 class TestStitchPath:
@@ -124,9 +195,10 @@ class TestStitchPath:
             [a.positions[0, 2] for a in forward][::-1]
         )
 
-    def test_accepts_any_sequence(self, make_chain):
+    @pytest.mark.parametrize("container", [tuple, iter])
+    def test_accepts_any_sequence(self, make_chain, container):
         """Tuples and generators should work, not just lists."""
-        stitched = stitch_path(tuple(make_chain(3)), tuple(make_chain(3)))
+        stitched = stitch_path(container(make_chain(3)), container(make_chain(3)))
 
         assert len(stitched) == 5
 
@@ -622,7 +694,8 @@ class TestOptimiseNeb:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
-        images = optimise_neb(neb, fmax=0.5, steps=5)
+        with pytest.warns(ConvergenceWarning):
+            images = optimise_neb(neb, fmax=0.5, steps=5)
 
         assert len(images) == 5
 
@@ -640,7 +713,8 @@ class TestOptimiseNeb:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
-        optimise_neb(neb, fmax=0.5, steps=30, optimiser=FIRE)
+        with pytest.warns(ConvergenceWarning):
+            optimise_neb(neb, fmax=0.5, steps=30, optimiser=FIRE)
 
         log = capsys.readouterr().out
         assert "FIRE" in log
@@ -924,11 +998,12 @@ def slab_endpoints():
     return reactant, product
 
 
+@pytest.mark.usefixtures("fake_parallel_socketio")
 class TestSocketCalculators:
     def test_opens_one_calculator_per_image(self):
         with socket_calculators(4) as calcs:
             assert len(calcs) == 4
-            assert all(isinstance(c, SocketIOCalculator) for c in calcs)
+            assert all(isinstance(c, _FakeParallelSocketIOCalculator) for c in calcs)
 
     def test_each_calculator_listens_on_its_own_socket(self):
         with socket_calculators(3) as calcs:
@@ -971,12 +1046,31 @@ class TestSocketCalculators:
 
         assert all(c.server is None for c in calcs)
 
-    def test_releases_the_socket_files(self):
-        with socket_calculators(2) as calcs:
-            files = [Path(f"/tmp/ipi_{c.server.unixsocket}") for c in calcs]
-            assert all(f.exists() for f in files)
+    def test_forwards_launcher_timeout_and_log_settings(self):
+        launchers = [object(), object()]
 
-        assert not [f for f in files if f.exists()]
+        with socket_calculators(
+            2,
+            make_launcher=launchers.__getitem__,
+            unixsocket="rt-test",
+            timeout=12.5,
+            log="socket",
+        ) as calcs:
+            assert [c.launch_client for c in calcs] == launchers
+            assert [c.unixsocket for c in calcs] == ["rt-test-0", "rt-test-1"]
+            assert [c.timeout for c in calcs] == [12.5, 12.5]
+            assert [c.log for c in calcs] == ["socket-0.log", "socket-1.log"]
+
+    def test_closes_earlier_calculators_when_a_later_socket_fails(
+        self, fake_parallel_socketio
+    ):
+        fake_parallel_socketio.fail_on = 2
+
+        with pytest.raises(OSError, match="failed to bind"):
+            with socket_calculators(4):
+                pass
+
+        assert [c.closed for c in fake_parallel_socketio.instances[:2]] == [True, True]
 
     def test_rejects_both_a_port_and_a_unixsocket(self):
         with pytest.raises(ValueError, match="only one"):
@@ -994,6 +1088,25 @@ class TestSocketCalculators:
                 pass
 
 
+@pytest.mark.integration
+def test_real_socket_calculator_round_trip(slab_endpoints, local_socket_access):
+    """Keep one genuine i-PI exchange behind the deterministic pool tests."""
+    atoms = slab_endpoints[0].copy()
+    expected = slab_endpoints[0].get_potential_energy()
+
+    with socket_calculators(1, make_launcher=emt_launcher, timeout=120) as (calc,):
+        assert isinstance(calc, SocketIOCalculator)
+        socket_file = Path(f"/tmp/ipi_{calc._unixsocket}")
+        atoms.calc = calc
+        assert atoms.get_potential_energy() == pytest.approx(expected)
+        assert calc.server is not None
+        assert socket_file.exists()
+
+    assert calc.server is None
+    assert not socket_file.exists()
+
+
+@pytest.mark.usefixtures("fake_parallel_socketio")
 class TestPrepareParallelNeb:
     def test_builds_a_band_of_the_requested_length(self, evaluated_endpoints):
         reactant, product = evaluated_endpoints
@@ -1022,7 +1135,7 @@ class TestPrepareParallelNeb:
             interior = [image.calc for image in neb.images[1:-1]]
 
         assert len(interior) == 4
-        assert all(isinstance(c, SocketIOCalculator) for c in interior)
+        assert all(isinstance(c, _FakeParallelSocketIOCalculator) for c in interior)
         assert len({id(c) for c in interior}) == 4
 
     def test_does_not_give_the_endpoints_sockets(self, evaluated_endpoints):
@@ -1034,7 +1147,7 @@ class TestPrepareParallelNeb:
         ) as neb:
             ends = [neb.images[0].calc, neb.images[-1].calc]
 
-        assert not any(isinstance(c, SocketIOCalculator) for c in ends)
+        assert not any(isinstance(c, _FakeParallelSocketIOCalculator) for c in ends)
 
     def test_reuses_the_endpoint_energies_it_is_given(self, evaluated_endpoints):
         reactant, product = evaluated_endpoints
@@ -1207,6 +1320,45 @@ class TestPrepareParallelNeb:
         )
 
 
+@pytest.mark.integration
+def test_real_parallel_neb_matches_serial(slab_endpoints, local_socket_access):
+    """Exercise ASE's threaded NEB over independent real socket clients."""
+    reactant, product = slab_endpoints
+
+    with prepare_parallel_neb(
+        reactant,
+        product,
+        None,
+        make_launcher=emt_launcher,
+        n_images=5,
+        climb=True,
+        rm_ro_trans=False,
+        geo_int=False,
+        timeout=120,
+    ) as neb:
+        parallel = optimise_neb(neb, fmax=0.05, steps=200, ts_traj="real-parallel.traj")
+
+    serial = optimise_neb(
+        prepare_neb(
+            reactant,
+            product,
+            EMT(),
+            n_images=5,
+            climb=True,
+            rm_ro_trans=False,
+            geo_int=False,
+        ),
+        fmax=0.05,
+        steps=200,
+        ts_traj="real-serial.traj",
+    )
+
+    assert [image.get_potential_energy() for image in parallel] == pytest.approx(
+        [image.get_potential_energy() for image in serial], abs=1e-6
+    )
+
+
+@pytest.mark.usefixtures("fake_parallel_socketio")
 class TestRestartParallelNeb:
     def test_builds_a_band_of_the_same_length(self, partial_band):
         with restart_parallel_neb(partial_band, None) as neb:
@@ -1227,7 +1379,7 @@ class TestRestartParallelNeb:
             interior = [image.calc for image in neb.images[1:-1]]
 
         assert len(interior) == 3
-        assert all(isinstance(c, SocketIOCalculator) for c in interior)
+        assert all(isinstance(c, _FakeParallelSocketIOCalculator) for c in interior)
         assert len({id(c) for c in interior}) == 3
 
     def test_reuses_the_endpoint_energies_stored_with_the_band(self, partial_band):
@@ -1254,7 +1406,7 @@ class TestRestartParallelNeb:
         with restart_parallel_neb(partial_band, None) as neb:
             ends = [neb.images[0].calc, neb.images[-1].calc]
 
-        assert not any(isinstance(c, SocketIOCalculator) for c in ends)
+        assert not any(isinstance(c, _FakeParallelSocketIOCalculator) for c in ends)
 
     def test_closes_the_sockets_on_exit(self, partial_band):
         with restart_parallel_neb(partial_band, None) as neb:
@@ -1542,8 +1694,15 @@ class TestOptimiseTs:
         strained = molecule("H2O")
         strained.positions[1] += [0.5, 0.0, 0.0]
 
-        with pytest.warns(ConvergenceWarning, match="Sella TS search"):
-            ts = optimise_ts(strained, calc, fmax=1e-4, steps=2)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="Error reading persistent compilation cache entry.*",
+                category=UserWarning,
+            )
+            with pytest.warns(ConvergenceWarning, match="Sella TS search"):
+                ts = optimise_ts(strained, calc, fmax=1e-4, steps=2)
 
         assert ts.info["converged"] is False
 
@@ -1557,7 +1716,8 @@ class TestOptimiseTs:
 
 class TestOptimiseIrc:
     def test_returns_both_directions(self, calc, water):
-        forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
+        with pytest.warns(ConvergenceWarning):
+            forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
 
         assert len(forward) >= 1
         assert len(reverse) >= 1
@@ -1566,14 +1726,16 @@ class TestOptimiseIrc:
 
     def test_the_halves_stitch_into_one_path(self, calc, water):
         """The point of returning them: stitch_path takes it from here."""
-        forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
+        with pytest.warns(ConvergenceWarning):
+            forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
 
         path = stitch_path(reverse, forward)
 
         assert len(path) == len(forward) + len(reverse) - 1
 
     def test_both_directions_share_one_logfile(self, calc, water, capsys):
-        optimise_irc(water, calc, fmax=0.5, steps=2, logfile="irc.log")
+        with pytest.warns(ConvergenceWarning):
+            optimise_irc(water, calc, fmax=0.5, steps=2, logfile="irc.log")
 
         out = capsys.readouterr().out
         assert "Running IRC forward" in out and "Running IRC reverse" in out

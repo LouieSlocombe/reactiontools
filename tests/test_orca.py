@@ -16,23 +16,31 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from ase import Atoms
 from ase.calculators.orca import OrcaTemplate
-from ase.io import read
+from ase.io import read, write
 
 from reactiontools import (
     CHEAP_METHODS,
     NATIVE_XTB_METHODS,
+    GoldStandard,
     orca_calc_preset,
     orca_calculate_goat,
+    orca_calculator,
     orca_cheap_calculator,
+    orca_gold_standard,
     orca_optimise_atoms,
     orca_preset_ccsd_gold,
     orca_preset_dft_cheap,
     orca_preset_dft_gold,
     orca_preset_mp2_gold,
     orca_preset_xtb,
+    reaction_energy,
+    sella_ts_search,
+    tools_orca,
 )
 from reactiontools.tools_orca import (
+    EH_TO_KCAL,
     _basis_name,
     _cbs_params,
     _correlation_energy,
@@ -44,6 +52,7 @@ from reactiontools.tools_orca import (
     _parse_orca,
     _QuietOrcaTemplate,
     _resolve_orca,
+    _terminated_normally,
 )
 
 # Skip rather than fail: ORCA is licensed separately and installed by hand, so
@@ -122,6 +131,7 @@ def keywords(fake_orca, **kwargs) -> str:
 # --- integration tests, needing the real binary ------------------------------
 
 
+@pytest.mark.integration
 @orca_required
 def test_orca_calc_preset(fad):
     fad.calc = orca_calc_preset()
@@ -130,6 +140,7 @@ def test_orca_calc_preset(fad):
     assert np.allclose(energy, -10325.045291755621)
 
 
+@pytest.mark.integration
 @orca_required
 def test_orca_optimise_atoms(fad):
     opt_atoms = orca_optimise_atoms(fad)
@@ -140,6 +151,7 @@ def test_orca_optimise_atoms(fad):
     assert np.allclose(energy, -10326.977956847948)
 
 
+@pytest.mark.integration
 @orca_required
 def test_orca_calculate_goat(fad):
     conformers, df = orca_calculate_goat(fad)
@@ -535,6 +547,193 @@ class TestGeometryKeywords:
         assert not _is_native_xtb("r2SCAN-3c")
 
 
+def mechanism_input(fake_orca, **kwargs):
+    """Return the simple-input and block strings from orca_calculator."""
+    calc = orca_calculator(orca_path=fake_orca, **kwargs)
+    return calc.parameters["orcasimpleinput"], calc.parameters["orcablocks"]
+
+
+class TestOrcaCalculator:
+    """Offline coverage of every mechanism-workflow configuration branch."""
+
+    def test_default_is_an_ase_gradient_at_the_documented_level(self, fake_orca):
+        simple, blocks = mechanism_input(fake_orca)
+
+        assert simple.split()[:6] == [
+            "wB97M-V",
+            "def2-TZVPD",
+            "RIJCOSX",
+            "def2/J",
+            "NoUseSym",
+            "DEFGRID3",
+        ]
+        assert "EnGrad" in simple
+        assert "NONBO NONPA" in simple
+        assert "%scf MaxIter 300 end" in blocks
+
+    @pytest.mark.parametrize(
+        ("strategy", "included", "excluded"),
+        [
+            ("default", [], ["SlowConv", "NOSOSCF"]),
+            ("omol", ["DIIS", "NOSOSCF", "NormalConv"], ["SlowConv"]),
+            ("slow", ["SlowConv"], ["NOSOSCF"]),
+        ],
+    )
+    def test_scf_strategies(self, fake_orca, strategy, included, excluded):
+        simple, _ = mechanism_input(fake_orca, scf_strategy=strategy)
+
+        assert all(keyword in simple.split() for keyword in included)
+        assert all(keyword not in simple.split() for keyword in excluded)
+
+    def test_rejects_unknown_task_and_scf_strategy(self, fake_orca):
+        with pytest.raises(ValueError, match="task must be one of"):
+            orca_calculator(task="dance")
+        with pytest.raises(ValueError, match="scf_strategy"):
+            orca_calculator(orca_path=fake_orca, scf_strategy="reckless")
+
+    def test_restart_solvation_and_population_controls(self, fake_orca):
+        simple, blocks = mechanism_input(
+            fake_orca,
+            solvent="water",
+            solvation_model="smd",
+            autostart=False,
+            moread="previous.gbw",
+            population=True,
+            nbo=True,
+        )
+
+        assert {"CPCM(water)", "NoAutoStart", "MORead", "ALLPOP"} <= set(simple.split())
+        assert "NONBO" not in simple
+        assert 'SMDsolvent "water"' in blocks
+        assert '%moinp "previous.gbw"' in blocks
+        assert "%output" in blocks and "%nbo" in blocks
+
+    def test_open_shell_singlet_needs_atoms_and_breaks_symmetry(self, fake_orca):
+        with pytest.raises(ValueError, match="atoms= is required"):
+            orca_calculator(
+                orca_path=fake_orca,
+                multiplicity=1,
+                open_shell_singlet=True,
+            )
+
+        simple, blocks = mechanism_input(
+            fake_orca,
+            atoms=Atoms("OH", positions=[[0, 0, 0], [0, 0, 1]]),
+            multiplicity=1,
+            open_shell_singlet=True,
+        )
+        assert "UKS" in simple.split()
+        assert "%scf rotate" in blocks
+
+    def test_saddle_controls_share_one_geom_block(self, fake_orca):
+        simple, blocks = mechanism_input(
+            fake_orca,
+            task="optts+freq",
+            hybrid_hess_atoms=[0, 2, 5],
+            recalc_hess=10,
+            ts_mode=1,
+            geom_maxiter=80,
+            temperature=310,
+            freq_increment=0.01,
+        )
+
+        assert {"OptTS", "NumFreq"} <= set(simple.split())
+        assert "Calc_Hess true" in blocks
+        assert "Hybrid_Hess {0 2 5} end" in blocks
+        assert "Recalc_Hess 10" in blocks
+        assert "TS_Mode {M 1} end" in blocks
+        assert "MaxIter 80" in blocks
+        assert "%freq Temp 310" in blocks and "Increment 0.01" in blocks
+
+    def test_stored_hessian_takes_precedence_over_calculating_one(self, fake_orca):
+        _, blocks = mechanism_input(
+            fake_orca,
+            task="optts",
+            calc_hess=True,
+            inhess_file="start.hess",
+        )
+
+        assert 'InHessName "start.hess"' in blocks
+        assert "Calc_Hess" not in blocks
+
+    def test_neb_and_irc_requirements_are_encoded(self, fake_orca):
+        with pytest.raises(ValueError, match="neb_product"):
+            orca_calculator(orca_path=fake_orca, task="neb-ts")
+
+        _, neb_blocks = mechanism_input(
+            fake_orca,
+            task="neb-ts",
+            neb_product="product.xyz",
+            neb_ts_guess="guess.xyz",
+            neb_images=12,
+        )
+        _, irc_blocks = mechanism_input(
+            fake_orca,
+            task="irc",
+            irc_maxiter=90,
+            irc_hess_file="ts.hess",
+        )
+        assert 'NEB_End_XYZFile "product.xyz"' in neb_blocks
+        assert 'NEB_TS_XYZFile "guess.xyz"' in neb_blocks
+        assert "NImages 12" in neb_blocks
+        assert "%irc MaxIter 90 Direction both" in irc_blocks
+        assert 'Hess_Filename "ts.hess"' in irc_blocks
+
+    def test_scan_coordinate_is_put_in_the_geom_block(self, fake_orca):
+        _, blocks = mechanism_input(
+            fake_orca,
+            task="scan",
+            scan_coord="B 0 1 = 1.8, 1.0, 9",
+        )
+
+        assert "Scan B 0 1 = 1.8, 1.0, 9 end" in blocks
+
+
+def test_sella_search_wires_the_calculator_and_optimizer(monkeypatch, water):
+    configured = object()
+    seen = {}
+
+    def fake_calculator(**kwargs):
+        seen["calculator"] = kwargs
+        return configured
+
+    class FakeSella:
+        def __init__(self, atoms, **kwargs):
+            seen["optimizer"] = (atoms, kwargs)
+
+        def run(self, **kwargs):
+            seen["run"] = kwargs
+
+    monkeypatch.setattr(tools_orca, "orca_calculator", fake_calculator)
+    monkeypatch.setattr("sella.Sella", FakeSella)
+
+    result = sella_ts_search(
+        water,
+        charge=-1,
+        multiplicity=2,
+        fmax=0.03,
+        steps=17,
+        trajectory="sella.traj",
+        solvent="water",
+    )
+
+    assert result is water
+    assert water.calc is configured
+    assert seen["calculator"] == {
+        "charge": -1,
+        "multiplicity": 2,
+        "solvent": "water",
+        "task": "engrad",
+        "atoms": water,
+    }
+    assert seen["optimizer"][1] == {
+        "order": 1,
+        "internal": True,
+        "trajectory": "sella.traj",
+    }
+    assert seen["run"] == {"fmax": 0.03, "steps": 17}
+
+
 DLPNO_OUT = """
 ----------------
 TOTAL SCF ENERGY
@@ -644,3 +843,214 @@ class TestCbsExtrapolation:
             _basis_name("cc", 6)
         with pytest.raises(ValueError):
             _cbs_params("cc", (2, 4))
+
+
+class TestOrcaOutputHelpers:
+    def test_normal_termination_requires_a_readable_banner(self, tmp_path):
+        missing = tmp_path / "missing.out"
+        incomplete = tmp_path / "incomplete.out"
+        complete = tmp_path / "complete.out"
+        incomplete.write_text("ORCA is still running")
+        complete.write_text(DLPNO_OUT)
+
+        assert _terminated_normally(missing) is False
+        assert _terminated_normally(incomplete) is False
+        assert _terminated_normally(complete) is True
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [
+            ({"final_corr": -0.3}, -0.3),
+            ({"cc_corr": -0.29, "triples": -0.01}, -0.3),
+            ({"cc_corr": -0.29}, -0.29),
+            ({"mp2_corr": -0.28}, -0.28),
+            ({"final_sp": -76.3, "scf": -76.0}, -0.3),
+        ],
+    )
+    def test_correlation_energy_accepts_orcas_output_variants(self, values, expected):
+        assert _correlation_energy(values) == pytest.approx(expected)
+
+    def test_correlation_energy_rejects_unrecognised_output(self):
+        with pytest.raises(ValueError, match="no correlation energy"):
+            _correlation_energy({"scf": -76.0})
+
+    def test_basis_errors_name_the_bad_family_or_cardinal(self):
+        with pytest.raises(ValueError, match="unknown basis family"):
+            _basis_name("made-up", 3)
+        with pytest.raises(ValueError, match="no def2 basis"):
+            _basis_name("def2", 5)
+
+
+class TestGoldStandardResult:
+    def test_derived_energies_and_summary(self):
+        result = GoldStandard(
+            atoms=Atoms("H2"),
+            charge=-1,
+            multiplicity=2,
+            e_hf_cbs=-1.0,
+            e_corr_cbs=-0.2,
+            e_total=-1.2,
+            e_mp2_corr_cbs=-0.18,
+            delta_cc=-0.02,
+            zpe=0.01,
+            enthalpy_correction=0.03,
+            gibbs_correction=0.02,
+            imaginary_frequencies=[-321.0],
+            levels={"correlation": "correlation: test/CBS"},
+        )
+
+        assert result.energy == pytest.approx(-1.2 * tools_orca.Hartree)
+        assert result.enthalpy == pytest.approx(-1.17)
+        assert result.gibbs == pytest.approx(-1.18)
+        text = result.summary()
+        assert "H2  charge=-1 multiplicity=2" in text
+        assert "correlation: test/CBS" in text
+        assert "CCSD(T)/CBS" in text
+        assert "-321.0 cm^-1" in text
+
+    def test_thermal_properties_are_none_without_frequency_corrections(self):
+        result = GoldStandard(atoms=Atoms("H"), e_total=-0.5)
+
+        assert result.enthalpy is None
+        assert result.gibbs is None
+
+    def test_reaction_energy_supports_each_energy_level(self):
+        reactant = GoldStandard(
+            Atoms("H"),
+            e_total=-1.0,
+            enthalpy_correction=0.04,
+            gibbs_correction=0.02,
+        )
+        product = GoldStandard(
+            Atoms("H"),
+            e_total=-0.9,
+            enthalpy_correction=0.03,
+            gibbs_correction=0.01,
+        )
+
+        assert reaction_energy([reactant], [product], "electronic") == pytest.approx(
+            0.1 * EH_TO_KCAL
+        )
+        assert reaction_energy([reactant], [product], "enthalpy") == pytest.approx(
+            0.09 * EH_TO_KCAL
+        )
+        assert reaction_energy([reactant], [product], "gibbs") == pytest.approx(
+            0.09 * EH_TO_KCAL
+        )
+
+    def test_reaction_energy_rejects_missing_thermochemistry(self):
+        bare = GoldStandard(Atoms("H"), e_total=-1.0)
+
+        with pytest.raises(ValueError, match="run with frequencies=True"):
+            reaction_energy([bare], [bare], "gibbs")
+        with pytest.raises(KeyError):
+            reaction_energy([bare], [bare], "entropy")
+
+
+def _write_completed_stage(root, name, output):
+    directory = root / name
+    directory.mkdir(parents=True)
+    (directory / "orca.out").write_text(output)
+
+
+class TestOrcaGoldStandard:
+    """Exercise the compound workflow from reusable captured ORCA outputs."""
+
+    def test_mp2_cbs_plus_coupled_cluster_correction(self, fake_orca, water, tmp_path):
+        root = tmp_path / "gold"
+        _write_completed_stage(root, "mp2_3", RIMP2_OUT)
+        _write_completed_stage(root, "mp2_4", RIMP2_OUT)
+        _write_completed_stage(root, "cc_3", DLPNO_OUT)
+
+        result = orca_gold_standard(
+            water,
+            directory=root,
+            orca_path=fake_orca,
+            optimise=False,
+            frequencies=False,
+            verbose=False,
+        )
+
+        expected_delta = (
+            _correlation_energy(_parse_orca(DLPNO_OUT))
+            - _parse_orca(RIMP2_OUT)["mp2_corr"]
+        )
+        assert set(result.components) == {"mp2_3", "mp2_4", "cc_3"}
+        assert result.e_mp2_corr_cbs == pytest.approx(-0.280144219)
+        assert result.delta_cc == pytest.approx(expected_delta)
+        assert result.e_corr_cbs == pytest.approx(-0.280144219 + expected_delta)
+        assert result.e_total == pytest.approx(result.e_hf_cbs + result.e_corr_cbs)
+        assert "MP2" in result.levels["correlation"]
+
+    def test_direct_coupled_cluster_extrapolation(self, fake_orca, water, tmp_path):
+        root = tmp_path / "direct-cc"
+        _write_completed_stage(root, "cc_3", DLPNO_OUT)
+        _write_completed_stage(root, "cc_4", DLPNO_OUT)
+
+        result = orca_gold_standard(
+            water,
+            directory=root,
+            orca_path=fake_orca,
+            optimise=False,
+            frequencies=False,
+            extrapolate_cc=True,
+            verbose=False,
+        )
+
+        assert set(result.components) == {"cc_3", "cc_4"}
+        assert result.e_mp2_corr_cbs is None
+        assert result.delta_cc is None
+        assert result.e_corr_cbs == pytest.approx(
+            _correlation_energy(_parse_orca(DLPNO_OUT))
+        )
+        assert "DLPNO-CCSD(T)/CBS" in result.levels["correlation"]
+
+    def test_geometry_and_thermochemistry_are_reused(self, fake_orca, water, tmp_path):
+        root = tmp_path / "with-geometry"
+        _write_completed_stage(root, "opt", FREQ_OUT)
+        moved = water.copy()
+        moved.positions += [0.2, -0.1, 0.3]
+        write(root / "opt" / "orca.xyz", moved)
+        _write_completed_stage(root, "mp2_3", RIMP2_OUT)
+        _write_completed_stage(root, "mp2_4", RIMP2_OUT)
+        _write_completed_stage(root, "cc_3", DLPNO_OUT)
+
+        result = orca_gold_standard(
+            water,
+            directory=root,
+            orca_path=fake_orca,
+            optimise=True,
+            frequencies=True,
+            transition_state=True,
+            solvent="water",
+            verbose=False,
+        )
+
+        assert result.atoms.positions == pytest.approx(moved.positions)
+        assert result.imaginary_frequencies == [-523.44]
+        assert result.zpe == pytest.approx(0.02154960)
+        assert result.gibbs_correction == pytest.approx(-0.00190445)
+        assert result.enthalpy_correction == pytest.approx(0.025096)
+        assert "OptTS" in result.levels["geometry"]
+        assert "CPCM(water)" in result.levels["geometry"]
+
+    def test_non_tabulated_cc_cardinal_adds_a_matching_mp2_stage(
+        self, fake_orca, water, tmp_path
+    ):
+        root = tmp_path / "extra-mp2"
+        _write_completed_stage(root, "mp2_3", RIMP2_OUT)
+        _write_completed_stage(root, "mp2_4", RIMP2_OUT)
+        _write_completed_stage(root, "cc_2", DLPNO_OUT)
+        _write_completed_stage(root, "mp2_2", RIMP2_OUT)
+
+        result = orca_gold_standard(
+            water,
+            directory=root,
+            orca_path=fake_orca,
+            optimise=False,
+            frequencies=False,
+            cc_cardinal=2,
+            verbose=False,
+        )
+
+        assert "mp2_2" in result.components

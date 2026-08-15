@@ -1081,11 +1081,14 @@ for you; these are not, and nothing checks them.
 ## Testing
 
 ```bash
-pytest
+pytest --cov
 ```
 
 The suite builds its own structures with `ase.build` and evaluates them with
-EMT, so it needs no external data or calculator.
+EMT. Offline unit tests cover orchestration without opening sockets; a small
+set of `integration` tests exercises real local socket transport when the
+runner permits it. ORCA and OpenMM checks skip when those optional dependencies
+are unavailable. Coverage is branch-aware and enforces the configured floor.
 
 ## Citing
 

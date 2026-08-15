@@ -27,7 +27,7 @@ MDTraj, pytest and Ruff.
 ## 3. Check the install
 
 ```bash
-pytest
+pytest --cov
 ```
 
 Check formatting and lint before committing:

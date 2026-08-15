@@ -363,6 +363,7 @@ def metad_lines():
     )
 
 
+@pytest.mark.integration
 @plumed_required
 class TestPlumedCalculator:
     def test_biases_a_dynamics_run_and_deposits_hills(

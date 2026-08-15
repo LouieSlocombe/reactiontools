@@ -71,10 +71,32 @@ include = ["reactiontools", "reactiontools.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra --strict-config --strict-markers"
+markers = [
+  "integration: exercises an optional executable, dependency, or local socket transport",
+]
 filterwarnings = [
   "ignore::DeprecationWarning:ase.*",
+  "ignore:The implementation of `fixcm=True`.*:FutureWarning:ase.md.langevin",
+  "ignore:Log flushes by default now.*:FutureWarning:ase.optimize.optimize",
+  "ignore:Error reading persistent compilation cache entry.*:UserWarning:jax._src.compiler",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["reactiontools"]
+# Bundled upstream OPES command-line programs are smoke-tested as subprocesses;
+# they are not maintained as importable reactiontools library modules.
+omit = [
+  "reactiontools/opes/FES_from_Reweighting.py",
+  "reactiontools/opes/FES_from_State.py",
+  "reactiontools/opes/State_from_Kernels.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
 
 [tool.ruff]
 target-version = "py311"
