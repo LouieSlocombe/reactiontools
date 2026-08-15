@@ -1306,6 +1306,7 @@ def sella_ts_search(
     fmax: float = 0.02,
     steps: int = 200,
     trajectory: Optional[str] = "ts_search.traj",
+    internal: bool = False,
     **calc_kwargs,
 ):
     """Locate a saddle point with Sella, using ORCA only for energy+gradient.
@@ -1328,6 +1329,8 @@ def sella_ts_search(
         Maximum optimiser steps.
     trajectory : str or None, optional
         Path to write the search trajectory to; None writes nothing.
+    internal : bool, optional
+        Use Sella's internal coordinates instead of Cartesian coordinates.
     **calc_kwargs
         Passed to :func:`orca_calculator`. ``task`` and ``atoms`` default to
         ``"engrad"`` and *atoms*.
@@ -1345,7 +1348,7 @@ def sella_ts_search(
         charge=charge, multiplicity=multiplicity, **calc_kwargs
     )
 
-    opt = Sella(atoms, order=1, internal=True, trajectory=trajectory)
+    opt = Sella(atoms, order=1, internal=internal, trajectory=trajectory)
     opt.run(fmax=fmax, steps=steps)
     return atoms
 

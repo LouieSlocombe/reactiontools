@@ -750,7 +750,7 @@ Anything without its own keyword goes through `extra`, for example
 | `summarise_neb(images, calc=None)` | Forward and reverse barriers, reaction energy and TS index, as a `NebSummary`. |
 | `NebSummary` | What `summarise_neb` returns: `barrier`, `reverse_barrier`, `reaction_energy`, `ts_index`, `energies`, `is_barrierless`. Prints as a short report. |
 | `get_fmax(atoms)` | Largest per-atom force, the quantity the optimisers converge against. |
-| `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1, logfile='-')` | Refine a TS guess to a true saddle point with Sella. |
+| `optimise_ts(ts_image, calc, fmax=0.01, eta=1e-4, gamma=0.1, logfile='-', internal=False)` | Refine a TS guess to a true saddle point with Sella. |
 | `optimise_irc(ts_image, calc, dx=0.1, ..., logfile='-')` | Follow the IRC downhill in both directions, returning `(forward, reverse)`. |
 | `get_vibrations(atoms, calc)` | Finite-difference frequencies in cm⁻¹; one imaginary mode confirms a saddle. |
 | `quick_guess_path(reactant, product, n_images=25)` | Geodesic path guess, no optimisation. |
@@ -815,7 +815,7 @@ ships as `/usr/bin/orca` on many Linux systems.
 | --- | --- |
 | `orca_cheap_calculator(method='gfn2-xtb', charge=0, multiplicity=1, solvent=None, native='auto', ...)` | Screening calculator: GFN-FF/GFN1/GFN2-xTB — ORCA's native xTB by default, the external `xtb` binary (`$XTBEXE`) otherwise — and the Grimme "3c" composites. `CHEAP_METHODS` lists the aliases, `NATIVE_XTB_METHODS` the native keywords. Solvation defaults to ALPB for xTB and CPCM otherwise. |
 | `orca_calculator(charge=0, multiplicity=1, task='engrad', ...)` | OMol25-level wB97M-V/def2-TZVPD calculator for mechanism work. `task` picks sp/engrad/opt/optts/neb-ts/irc/freq/scan and builds the matching `%geom`/`%neb`/`%irc`/`%freq` blocks; `'engrad'` is the only task ASE reads forces from. |
-| `sella_ts_search(atoms, charge=0, multiplicity=1, fmax=0.02, ...)` | Saddle search with Sella over `orca_calculator` gradients, avoiding the 6N-gradient numerical Hessian that ORCA's own OptTS would trigger. |
+| `sella_ts_search(atoms, charge=0, multiplicity=1, fmax=0.02, internal=False, ...)` | Saddle search with Sella over `orca_calculator` gradients, avoiding the 6N-gradient numerical Hessian that ORCA's own OptTS would trigger. |
 | `orca_gold_standard(atoms, directory='orca_gold', ...)` | Compound CCSD(T)/CBS focal-point job: an optional geometry + frequency stage, MP2/CBS extrapolation and a DLPNO-CCSD(T) delta, with finished stages reused across reruns. |
 | `GoldStandard` | Its result dataclass: `e_hf_cbs`, `e_corr_cbs`, `e_total`, ZPE and thermal corrections, `energy`/`enthalpy`/`gibbs` properties and a `summary()` report. |
 | `reaction_energy(reactants, products, thermo='gibbs')` | Difference two lists of `GoldStandard` results, in kcal/mol. |

@@ -1664,6 +1664,37 @@ class TestGetVibrations:
 
 
 class TestOptimiseTs:
+    @pytest.mark.parametrize(
+        ("sella_kwargs", "expected_internal"),
+        [({}, False), ({"internal": True}, True)],
+    )
+    def test_passes_internal_coordinate_flag(
+        self, monkeypatch, calc, water, sella_kwargs, expected_internal
+    ):
+        seen = {}
+
+        class FakeSella:
+            def __init__(self, atoms, **kwargs):
+                seen["optimizer"] = (atoms, kwargs)
+
+            def run(self, **kwargs):
+                return True
+
+        monkeypatch.setattr(
+            tools_reaction,
+            "_import_sella",
+            lambda name: (FakeSella, object),
+        )
+        monkeypatch.setattr(
+            tools_reaction,
+            "read",
+            lambda trajectory, index: water.copy(),
+        )
+
+        optimise_ts(water, calc, **sella_kwargs)
+
+        assert seen["optimizer"][1]["internal"] is expected_internal
+
     def test_returns_a_structure_and_keeps_the_trajectory(self, calc, water):
         ts = optimise_ts(water, calc, fmax=0.5, steps=2)
 

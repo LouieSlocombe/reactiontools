@@ -1444,6 +1444,7 @@ def optimise_ts(
     sella_traj="sella.traj",
     raise_on_unconverged=False,
     logfile="-",
+    internal=False,
 ):
     """Refine a transition-state guess to a true saddle point with Sella.
 
@@ -1477,6 +1478,8 @@ def optimise_ts(
         stdout; a filename writes there instead; ``None`` silences it. The
         two energy lines printed before the search are not affected. There is
         no ``optimiser`` argument here: the search is Sella's.
+    internal : bool, optional
+        Use Sella's internal coordinates instead of Cartesian coordinates.
 
     Returns
     -------
@@ -1504,7 +1507,12 @@ def optimise_ts(
     print(f"Initial max force: {get_fmax(ts_image):.3} eV/A", flush=True)
 
     sella_ts = Sella(
-        ts_image, trajectory=sella_traj, logfile=logfile, eta=eta, gamma=gamma
+        ts_image,
+        trajectory=sella_traj,
+        logfile=logfile,
+        eta=eta,
+        gamma=gamma,
+        internal=internal,
     )
     converged = sella_ts.run(fmax=fmax, steps=steps)
 

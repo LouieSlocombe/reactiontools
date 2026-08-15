@@ -689,7 +689,13 @@ class TestOrcaCalculator:
         assert "Scan B 0 1 = 1.8, 1.0, 9 end" in blocks
 
 
-def test_sella_search_wires_the_calculator_and_optimizer(monkeypatch, water):
+@pytest.mark.parametrize(
+    ("sella_kwargs", "expected_internal"),
+    [({}, False), ({"internal": True}, True)],
+)
+def test_sella_search_wires_the_calculator_and_optimizer(
+    monkeypatch, water, sella_kwargs, expected_internal
+):
     configured = object()
     seen = {}
 
@@ -715,6 +721,7 @@ def test_sella_search_wires_the_calculator_and_optimizer(monkeypatch, water):
         steps=17,
         trajectory="sella.traj",
         solvent="water",
+        **sella_kwargs,
     )
 
     assert result is water
@@ -728,7 +735,7 @@ def test_sella_search_wires_the_calculator_and_optimizer(monkeypatch, water):
     }
     assert seen["optimizer"][1] == {
         "order": 1,
-        "internal": True,
+        "internal": expected_internal,
         "trajectory": "sella.traj",
     }
     assert seen["run"] == {"fmax": 0.03, "steps": 17}
