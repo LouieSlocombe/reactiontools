@@ -4,7 +4,7 @@ There are two ways to install `reactiontools`, depending on where you are runnin
 
 | Route | Use when | Script |
 |---|---|---|
-| Conda environment | Normal use. Everything from conda-forge except PLUMED. | `conda_install.sh` |
+| Conda environment | Normal use. Everything from conda-forge except PLUMED and the two editable checkouts. | `conda_install.sh` |
 | Sol cluster | Running on Sol. Same split, plus the module loads and SLURM wrapper. | `sub_sol_install.sh` |
 
 Both routes compile PLUMED and the PLUMED Python bindings (py-plumed), because
@@ -26,8 +26,8 @@ without `PLUMED_KERNEL` set in your shell.
 - A compatible operating system: Linux, macOS, or Windows via WSL.
 - Python 3.13 or higher.
 - Conda or Mamba.
-- Git, to clone the PLUMED sources. The compiler and `make` come from the
-  environment (`cxx-compiler`, `make`); git does not.
+- Git, to clone the PLUMED sources and the editable dependencies. The compiler
+  and `make` come from the environment (`cxx-compiler`, `make`); git does not.
 
 ## Conda environment
 
@@ -47,9 +47,9 @@ ENV_NAME=reactiontools2 bash conda_install.sh
 
 The script creates the environment from `environment.yml`, compiles PLUMED and
 py-plumed into it (sources are cloned into the gitignored `build_tools/sources/`,
-wiped on each run), installs `reactiontools` in editable mode so changes to the
-source are picked up without reinstalling, and finishes with import checks. It is
-equivalent to running, from this directory:
+wiped on each run), installs `reactiontools` and its two git dependencies in
+editable mode so changes to the source are picked up without reinstalling, and
+finishes with import checks. It is equivalent to running, from this directory:
 
 ```bash
 conda env create -f environment.yml
@@ -57,23 +57,54 @@ conda activate reactiontools
 src_dir="$(mktemp -d)"
 source build_plumed.sh && build_plumed "${src_dir}" && build_py_plumed "${src_dir}"
 pip install -e ..
+source editable_repos.sh && install_editable_repos ../..
 ```
 
-(`build_plumed.sh` is a function library rather than a script; `build_py_plumed`
-reuses the plumed2 checkout that `build_plumed` leaves behind, so both take the
-same working directory. The PLUMED version is pinned there, in one place.)
+(`build_plumed.sh` and `editable_repos.sh` are function libraries rather than
+scripts. `build_py_plumed` reuses the plumed2 checkout that `build_plumed` leaves
+behind, so both take the same working directory, and the PLUMED version is pinned
+there in one place.)
 
 `environment.yml` on its own installs no PLUMED at all — everything else in
 `reactiontools` works without it, but `plumed_calculator` and `run_sum_hills`
 do not, so skip the build only if you already have a PLUMED with `opes` on your
 `PATH`.
 
+### Editable dependencies
+
+`geodesic_interpolate` and `sella` are forks that get edited alongside this
+package, so the installer clones them **next to the repository** and installs
+them editable rather than pulling them from GitHub on every install:
+
+```
+skunkworks/
+├── reactiontools/
+├── geodesic_interpolate/
+└── sella/
+```
+
+Set `SRC_DIR` to keep them elsewhere. A checkout that is already there is used
+exactly as it is — the installer never pulls, resets or removes one, so
+uncommitted work is safe across a rebuild. Only a missing one is cloned.
+
+The editable installs run **after** `pip install -e ..`, not before: `pyproject.toml`
+declares both as `name @ git+...` dependencies, and pip re-clones those even when
+the package is already installed, so an editable install done first would be
+replaced by the copy pip pulls. `conda_install.sh` finishes by checking each one
+imports from its checkout rather than from `site-packages`.
+
 ## Sol cluster
 
 `custom_install_sol.sh` builds the `reactiontools` environment on Sol. Most
 dependencies come from conda-forge, but PLUMED is compiled from source for the
-`opes` module as above. Sources are cloned into `$SCRATCH/reactiontools_sources`,
-and both the environment and the sources are recreated from scratch on each run.
+`opes` module as above. PLUMED sources are cloned into
+`$SCRATCH/reactiontools_sources`, and both the environment and those sources are
+recreated from scratch on each run.
+
+`reactiontools` itself and the two editable dependencies are cloned into
+`$HOME/reactiontools_src` instead — outside the build area, since that is wiped —
+and installed editable, so `git pull` in a checkout is enough to update it. Set
+`SRC_DIR` to put them somewhere else.
 
 Submit it as a batch job from this directory:
 
@@ -88,9 +119,7 @@ interactive -t 60 -p htc -c 12 --mem=64G
 ```
 
 No GPU is requested for either: the build and `reactiontools` itself are
-CPU-only, and the calculator a script brings is what decides otherwise. Unlike
-the conda route this installs `reactiontools` from git rather than in editable
-mode, so re-run it to pick up changes.
+CPU-only, and the calculator a script brings is what decides otherwise.
 
 ## Check the install
 

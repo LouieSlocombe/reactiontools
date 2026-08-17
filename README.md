@@ -30,8 +30,11 @@ bash build_tools/conda_install.sh
 
 That creates the `reactiontools` conda environment, compiles PLUMED with the
 OPES module and the matching Python bindings into it, and installs this package
+— along with `geodesic_interpolate` and `sella`, cloned next to this repository —
 in editable mode. It **removes and recreates** any environment of that name;
-pass `ENV_NAME=...` to install somewhere else.
+pass `ENV_NAME=...` to install somewhere else, or `SRC_DIR=...` to keep the
+checkouts elsewhere. Checkouts that already exist are used as they are and never
+wiped.
 
 If you already have a PLUMED with OPES on your `PATH`, the environment and the
 package on their own are:
@@ -54,11 +57,14 @@ PLUMED is built from source, and the Sol cluster route.
 ### Dependencies
 
 Installed requirements include `numpy`, `scipy`, `matplotlib`, `pandas`,
-`ase>=3.23` (the version where `NEB` moved to `ase.mep`), `mdtraj`, Sella,
-pytest and Ruff, plus
+`ase>=3.23` (the version where `NEB` moved to `ase.mep`), `mdtraj`, pytest and
+Ruff, plus two that come from git:
+[`sella`](https://github.com/LouieSlocombe/sella) (saddle-point refinement and
+IRC) and
 [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
-(installed from git, used by `prepare_neb`, `quick_guess_path` and
-`quick_guess_ts`).
+(used by `prepare_neb`, `quick_guess_path` and `quick_guess_ts`).
+`conda_install.sh` sets both up as editable checkouts beside this repository;
+a plain `pip install` takes them from GitHub instead.
 
 Three dependencies fall outside `pip install` and are only needed by the
 functions named:
