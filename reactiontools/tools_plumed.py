@@ -41,8 +41,8 @@ PLUMED_ASE_UNITS = "UNITS ENERGY=eV LENGTH=A TIME=fs"
 
 _PLUMED_HINT = (
     "plumed_calculator needs the plumed Python module, which is "
-    "not installed. Install it with "
-    "`conda install -c conda-forge py-plumed`."
+    "not installed. Build it, and the PLUMED it binds to, with "
+    "`bash build_tools/conda_install.sh`."
 )
 
 _CV_LABEL = re.compile(r"^\s*([A-Za-z_]\w*)\s*:")

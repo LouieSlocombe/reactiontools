@@ -22,7 +22,19 @@ from EMT to a machine-learned potential to a DFT code.
 
 ## Installation
 
-Create the conda environment and install in editable mode:
+One command, from the repository root:
+
+```bash
+bash build_tools/conda_install.sh
+```
+
+That creates the `reactiontools` conda environment, compiles PLUMED with the
+OPES module and the matching Python bindings into it, and installs this package
+in editable mode. It **removes and recreates** any environment of that name;
+pass `ENV_NAME=...` to install somewhere else.
+
+If you already have a PLUMED with OPES on your `PATH`, the environment and the
+package on their own are:
 
 ```bash
 conda env create -f build_tools/environment.yml -y
@@ -36,8 +48,8 @@ conda activate reactiontools
 pip install -e .
 ```
 
-See [build_tools/README.md](build_tools/README.md) for the full guide,
-including building PLUMED with the OPES module.
+See [build_tools/README.md](build_tools/README.md) for the full guide, why
+PLUMED is built from source, and the Sol cluster route.
 
 ### Dependencies
 
@@ -48,12 +60,13 @@ pytest and Ruff, plus
 (installed from git, used by `prepare_neb`, `quick_guess_path` and
 `quick_guess_ts`).
 
-Three dependencies remain external and are only needed by the functions named:
+Three dependencies fall outside `pip install` and are only needed by the
+functions named:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |
-| `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. |
-| `py-plumed` | `plumed_calculator` | The Python bindings, `conda install -c conda-forge py-plumed`. Imported on first use; the input builder works without it. |
+| `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. Compiled by `conda_install.sh`; conda-forge's `plumed` package is built without the OPES module that `f_opes=True` inputs need. |
+| `py-plumed` | `plumed_calculator` | The Python bindings, compiled by `conda_install.sh` against the same PLUMED. Imported on first use; the input builder works without it. |
 | [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` | Licensed separately and installed by hand; point `ORCA_PATH` at the binary. See [build_tools/README.md](build_tools/README.md#orca). |
 
 ## Quickstart

@@ -16,8 +16,14 @@ dependencies:
   - pytest
   - pytest-cov
   - ruff
-  - plumed
-  - py-plumed
+
+  # --- Build tools, for build_plumed.sh ---
+  # PLUMED is compiled rather than taken from conda-forge because that build has
+  # no opes module, which tools_cv's f_opes=True inputs and run_opes_fes need.
+  - make
+  - cxx-compiler
+  # build_py_plumed regenerates the py-plumed C extension from its .pyx source.
+  - cython
 
   - pip:
       - git+https://github.com/LouieSlocombe/geodesic_interpolate.git

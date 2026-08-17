@@ -24,7 +24,7 @@ from reactiontools import (
 # without PLUMED, as does everything else in the module.
 plumed_required = pytest.mark.skipif(
     importlib.util.find_spec("plumed") is None,
-    reason="needs the plumed Python module (conda install -c conda-forge py-plumed)",
+    reason="needs the plumed Python module (bash build_tools/conda_install.sh)",
 )
 
 

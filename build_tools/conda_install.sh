@@ -1,0 +1,58 @@
+#!/bin/bash
+# One-command install of the reactiontools conda environment: creates the environment
+# from environment.yml, compiles PLUMED (with the opes module) and the PLUMED Python
+# bindings (py-plumed) into it, then installs reactiontools in editable mode and
+# verifies the result.
+#
+#   bash conda_install.sh
+#
+# WARNING: the target environment (default: reactiontools) is REMOVED and recreated
+# from scratch on every run, as are the sources cloned into build_tools/sources/.
+# Set ENV_NAME to install into a differently named environment instead:
+#
+#   ENV_NAME=reactiontools2 bash conda_install.sh
+
+# Exit immediately on error and fail pipelines cleanly, so a broken build does not
+# fall through to the later steps and report success.
+set -eo pipefail
+
+ENV_NAME="${ENV_NAME:-reactiontools}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORK_DIR="${SCRIPT_DIR}/sources"
+
+# Pulls in build_plumed() and build_py_plumed(), with the PLUMED version they pin.
+source "${SCRIPT_DIR}/build_plumed.sh"
+
+echo "=== Initializing Conda Environment ==="
+source "$(conda info --base)/etc/profile.d/conda.sh"
+# conda refuses to remove the active environment, so drop back to base first
+# (covers running this script from inside an activated ${ENV_NAME}).
+conda activate base
+conda env remove -n "${ENV_NAME}" -y 2>/dev/null || true
+# -n overrides the name pinned inside environment.yml, so ENV_NAME works.
+conda env create -n "${ENV_NAME}" -f "${SCRIPT_DIR}/environment.yml"
+conda activate "${ENV_NAME}"
+
+echo "=== Preparing Build Directory ==="
+rm -rf "${WORK_DIR}"
+mkdir -p "${WORK_DIR}"
+
+build_plumed "${WORK_DIR}"
+build_py_plumed "${WORK_DIR}"
+
+echo "=== Installing reactiontools (editable) ==="
+pip install -e "${REPO_DIR}"
+
+echo "=== Verifying Installation ==="
+cd "${REPO_DIR}"
+plumed --no-mpi config -q module opes
+echo "PLUMED opes module: OK"
+python -c "import plumed; plumed.Plumed()"
+echo "py-plumed kernel load: OK"
+python -c "import reactiontools"
+echo "reactiontools: OK"
+
+echo "=== Build Complete! ==="
+echo "Activate with: conda activate ${ENV_NAME}"
