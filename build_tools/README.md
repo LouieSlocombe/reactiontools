@@ -156,6 +156,8 @@ rather than fail when it is unset.
 Running the same collective variables under OpenMM instead of ASE — path-integral
 and nuclear-quantum-effect simulations — is
 [openmmnqe](https://github.com/LouieSlocombe/openmmnqe), which depends on this
-package and installs it from git. Its `build_tools/` compiles the same PLUMED,
-from the same pinned version, plus the `openmm-plumed` plugin; install that
-environment instead of this one if you need both.
+package. Its `build_tools/` compiles the same PLUMED, from the same pinned
+version, plus the `openmm-plumed` plugin, and its `editable_repos.sh` installs
+this repository editable alongside `geodesic_interpolate` and `sella` — the same
+checkouts this one uses. Install that environment instead of this one if you need
+both.
