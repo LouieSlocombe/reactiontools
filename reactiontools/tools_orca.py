@@ -1830,6 +1830,17 @@ def orca_gold_standard(
     -------
     GoldStandard
         Energies in Hartree, plus per-stage components and directories.
+
+    Raises
+    ------
+    ValueError
+        If *basis_family* and *cardinals* are not tabulated, or ``n_procs >
+        1`` and the resolved ORCA command is not an absolute path -- which
+        ORCA's own MPI launcher requires.
+    FileNotFoundError
+        If the ORCA binary cannot be located; see :func:`_resolve_orca`.
+    RuntimeError
+        If what was located does not look like ORCA.
     """
     n_lo, n_hi = sorted(cardinals)
     alpha, beta = _cbs_params(basis_family, (n_lo, n_hi))

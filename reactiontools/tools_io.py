@@ -46,8 +46,7 @@ _HYDROGEN_LOOKALIKES = {"He", "Hf", "Hg", "Ho", "Hs"}
 
 
 def element_from_pdb_line(line):
-    """
-    Determine the element symbol for a PDB ``ATOM``/``HETATM`` line.
+    """Determine the element symbol for a PDB ``ATOM``/``HETATM`` line.
 
     The element column (77-78) is used when present. Otherwise the symbol is
     inferred from the atom name in columns 13-16, which by convention starts in
@@ -95,8 +94,7 @@ def element_from_pdb_line(line):
 
 
 def write_xyz_frame(fh, symbols, positions, comment=""):
-    """
-    Write a single frame to an open XYZ file handle.
+    """Write a single frame to an open XYZ file handle.
 
     Parameters
     ----------
@@ -116,8 +114,7 @@ def write_xyz_frame(fh, symbols, positions, comment=""):
 
 
 def format_pdb_atom_name(symbol, count):
-    """
-    Format a unique atom name for the PDB atom-name field (columns 13-16).
+    """Format a unique atom name for the PDB atom-name field (columns 13-16).
 
     Single-character elements are indented by one column, following the PDB
     convention, and names longer than four characters are truncated so that
@@ -142,8 +139,7 @@ def format_pdb_atom_name(symbol, count):
 
 
 def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1):
-    """
-    Convert an XYZ file to a PDB file with connectivity and residue assignment.
+    """Convert an XYZ file to a PDB file with connectivity and residue assignment.
 
     Molecules (clusters) are identified using distance-based connectivity and
     assigned unique chain IDs, residue IDs, and three-letter residue names.
@@ -254,8 +250,7 @@ def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1)
 
 
 def convert_pdb_to_xyz(input_file, output_file, comment=None):
-    """
-    Convert a PDB file to an XYZ file.
+    """Convert a PDB file to an XYZ file.
 
     Every ``ATOM`` and ``HETATM`` record contributes one atom, in file order.
     Multi-model PDB files (``MODEL``/``ENDMDL``) produce one XYZ frame per
@@ -325,8 +320,7 @@ def convert_pdb_to_xyz(input_file, output_file, comment=None):
 
 
 def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line="HETATM"):
-    """
-    Convert a reaction path from XYZ into the reference PLUMED's PATHMSD reads.
+    """Convert a reaction path from XYZ into the reference PLUMED's PATHMSD reads.
 
     Each XYZ frame becomes one model of a multi-model PDB, written by taking
     the template's atom records and substituting the frame's coordinates into
@@ -402,8 +396,7 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line="HE
 
 
 def pdb_remove_ter_index(input_path, output_path):
-    """
-    Renumber the atom serials of a PDB file, keeping TER and CONECT in step.
+    """Renumber the atom serials of a PDB file, keeping TER and CONECT in step.
 
     Atoms are renumbered sequentially from 1, restarting at each model, and
     ``CONECT`` records are rewritten to point at the new serials.  PLUMED
@@ -462,8 +455,7 @@ def pdb_remove_ter_index(input_path, output_path):
 
 
 def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
-    """
-    Remove hydrogen atoms from a PDB file, except for a chosen subset.
+    """Remove hydrogen atoms from a PDB file, except for a chosen subset.
 
     A path collective variable built over every atom of a reacting group
     spends most of its resolution on hydrogens that only rattle. Stripping all

@@ -19,8 +19,10 @@ The package is organised into ten modules, all of which are re-exported here:
     reaction-energy helper over the results.
 ``tools_geometry``
     Work out which atoms make up each half of a stacked dimer and swap those
-    halves over, or move a hydrogen across a hydrogen bond, to build a product
-    end state for a band.
+    halves over, or move one or more hydrogens across their hydrogen bonds, to
+    build a product end state for a band. For two structures that already
+    describe the same atoms, superpose one on the other with the optimal rigid
+    Kabsch transform and measure the RMSD that remains.
 ``tools_io``
     Read and write the structure files a reaction path passes through -- XYZ,
     PDB, and the multi-model reference a ``PATHMSD`` collective variable is
@@ -35,10 +37,16 @@ The package is organised into ten modules, all of which are re-exported here:
     plus the public plumbing for writing a collective variable of your own.
 ``tools_plumed``
     Prepare PLUMED input, bias an ASE dynamics run with it, and turn the
-    metadynamics hills that come out into a free-energy surface.
+    metadynamics hills that come out into a free-energy surface -- or, for an
+    ``OPES_METAD`` run, which deposits no hills, read the surface back out of
+    the ``STATE`` file it writes instead.
 ``tools_fes``
     Read PLUMED output -- ``COLVAR``, ``fes.dat``, ``HILLS`` -- and plot free
-    energy in one or two dimensions, in whichever energy unit you want.
+    energy in one or two dimensions, along a path through CV space, or as
+    slices and overlays, in whichever energy unit you want. Beyond plotting,
+    measure the barrier and the basin free-energy difference off a profile,
+    and follow those two numbers across a series of surfaces to see whether
+    the run has converged.
 ``tools_units``
     The energy units the rest of the package converts between, and the thermal
     energy kBT that reweighting needs.

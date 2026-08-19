@@ -312,6 +312,11 @@ def optimise_geom(
         Keep ``opti_traj`` instead of deleting it. Off by default because a
         successful relaxation only needs its final structure, and on is what
         to reach for when one misbehaves and the path it took is the evidence.
+    _what : str, optional
+        Internal. How the run is named in the convergence warning or error,
+        so that :func:`optimise_reactant_product` can say which of its two
+        end states failed rather than reporting both as a plain geometry
+        optimisation.
 
     Returns
     -------
@@ -858,10 +863,31 @@ class _FixedEnergy(Calculator):
     implemented_properties = ["energy", "free_energy"]
 
     def __init__(self, energy):
+        """Store the energy this calculator reports.
+
+        Parameters
+        ----------
+        energy : float
+            Potential energy in eV, as some earlier calculator reported it.
+        """
         super().__init__()
         self.energy = energy
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=None):
+        """Report the stored energy, whatever the atoms and request were.
+
+        Parameters
+        ----------
+        atoms : ase.Atoms, optional
+            Structure being asked about. Ignored beyond the bookkeeping ASE
+            does with it.
+        properties : sequence of str, optional
+            Properties ASE asked for. Both implemented ones are always
+            returned. Default is ``("energy",)``.
+        system_changes : sequence of str or None, optional
+            What ASE noticed had changed. Ignored: rigid-body motion is the
+            only change the endpoints see, and it leaves the energy alone.
+        """
         super().calculate(atoms, properties, system_changes or [])
         self.results = {"energy": self.energy, "free_energy": self.energy}
 
@@ -1385,7 +1411,7 @@ def summarise_neb(images, calc=None):
 
     Examples
     --------
-    >>> summary = summarise_neb(images)
+    >>> summary = summarise_neb(images)                 # doctest: +SKIP
     >>> print(summary)                                  # doctest: +SKIP
     Barrier:         0.374 eV
     Reverse barrier: 0.374 eV

@@ -111,8 +111,7 @@ def _length_scale(length_unit):
 
 
 def estimate_path_lambda(pdb_path, length_unit="nm"):
-    """
-    Estimate the LAMBDA a reference path should be given in ``PATHMSD``.
+    """Estimate the LAMBDA a reference path should be given in ``PATHMSD``.
 
     ``LAMBDA`` sets how sharply ``path.sss`` tells neighbouring frames apart.
     Too small and the whole path reads as one blurred position; too large and
@@ -195,8 +194,7 @@ def estimate_path_lambda(pdb_path, length_unit="nm"):
 
 
 def cv_from_colvar(colvar_file, n_frames, cv_name=None):
-    """
-    Read a CV from a PLUMED COLVAR file, one value per trajectory frame.
+    """Read a CV from a PLUMED COLVAR file, one value per trajectory frame.
 
     PLUMED and OpenMM disagree about when to write: ``PRINT`` fires at step 0
     and every stride thereafter, while a reporter first fires one interval in.
@@ -238,8 +236,7 @@ def cv_from_colvar(colvar_file, n_frames, cv_name=None):
 
 
 def _nearest_monotone(series, targets):
-    """
-    Pick the entry of *series* closest to each target, never going backwards.
+    """Pick the entry of *series* closest to each target, never going backwards.
 
     Searching the whole series for each target would let a noisy trajectory
     hand back frames out of order, which is no use as a path.  Each search
@@ -282,8 +279,7 @@ def _nearest_monotone(series, targets):
 
 
 def select_frames_by_cv(cv, n_images, cv_start=None, cv_stop=None):
-    """
-    Choose the frames that are evenly spaced along a collective variable.
+    """Choose the frames that are evenly spaced along a collective variable.
 
     Parameters
     ----------
@@ -307,8 +303,7 @@ def select_frames_by_cv(cv, n_images, cv_start=None, cv_stop=None):
 
 
 def select_frames_by_msd(xyz, n_images):
-    """
-    Choose the frames that are evenly spaced along the trajectory itself.
+    """Choose the frames that are evenly spaced along the trajectory itself.
 
     Distance is measured as the RMSD between consecutive frames accumulated
     along the trajectory, which is the spacing ``PATHMSD`` cares about.  Use
@@ -333,8 +328,7 @@ def select_frames_by_msd(xyz, n_images):
 
 
 def _smooth_frames(xyz, picks, window):
-    """
-    Average each selected frame with its neighbours to damp thermal noise.
+    """Average each selected frame with its neighbours to damp thermal noise.
 
     Parameters
     ----------
@@ -378,8 +372,7 @@ def path_from_steered_md(
     atom_line="HETATM",
     length_unit="nm",
 ):
-    """
-    Estimate a path collective variable from a steered MD trajectory.
+    """Estimate a path collective variable from a steered MD trajectory.
 
     Frames evenly spaced along the CV are pulled out of the trajectory,
     aligned, and written as the multi-model PDB that ``PATHMSD`` reads, in the

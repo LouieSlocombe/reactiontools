@@ -339,8 +339,7 @@ def plumed_angle_radians(angle_lim):
 
 
 def switching_value(r, r_0, nn=6, mm=None):
-    """
-    Evaluate PLUMED's default rational switching function.
+    """Evaluate PLUMED's default rational switching function.
 
     This is the same function ``COORDINATION`` applies to every pair distance,
     ``s(r) = (1 - (r/r_0)^nn) / (1 - (r/r_0)^mm)``, so it can be used to work
@@ -409,8 +408,7 @@ def plumed_bias_and_fes(
     grid_max=None,
     label="metad:      ",
 ):
-    """
-    Build the metadynamics bias line and the matching FES-reconstruction command.
+    """Build the metadynamics bias line and the matching FES-reconstruction command.
 
     Every builder in this module goes through here, so that the bias it emits
     and the command that reads the surface back cannot disagree about the grid
@@ -484,8 +482,7 @@ def plumed_bias_and_fes(
 
 
 def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix="", pad=12):
-    """
-    Build the PLUMED lines defining one proton-transfer CV and its walls.
+    """Build the PLUMED lines defining one proton-transfer CV and its walls.
 
     The coordination difference that every builder in the first two families
     is made of: how strongly the hydrogen is bound to the donor, minus how
@@ -530,6 +527,7 @@ def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix="", pad=12):
         ang, a_wall = "ang_1", "ang_wall"
 
     def line(label, body):
+        """Pad a label out to *pad* columns and put the action after it."""
         return f"{label + ':':<{pad}}{body}"
 
     cv_lines = "\n".join(
@@ -564,8 +562,7 @@ def plumed_input_steered(
     extra_lines=None,
     units="plumed",
 ):
-    """
-    Build a PLUMED input that drags a collective variable (steered MD).
+    """Build a PLUMED input that drags a collective variable (steered MD).
 
     The centre of a harmonic restraint is moved linearly from *cv_start* to
     *cv_stop* over *steps* MD steps, optionally after holding at the starting
@@ -671,8 +668,7 @@ def plumed_input_steered_pt(
     wall_kappa=500.0,
     units="plumed",
 ):
-    """
-    Build a steered MD input that pulls a proton across a hydrogen bond.
+    """Build a steered MD input that pulls a proton across a hydrogen bond.
 
     The collective variable is the one :func:`plumed_input_1pt` biases, the
     difference between the donor-hydrogen and acceptor-hydrogen coordination
@@ -779,8 +775,7 @@ def plumed_input_1pt(
     f_opes=False,
     units="plumed",
 ):
-    """
-    Build a PLUMED input that biases a single proton transfer with metadynamics.
+    """Build a PLUMED input that biases a single proton transfer with metadynamics.
 
     The collective variable is the same one :func:`plumed_input_steered_pt`
     drags: the difference between the donor-hydrogen and acceptor-hydrogen
@@ -951,8 +946,7 @@ def plumed_input_2pt_1d(
     f_opes=False,
     units="plumed",
 ):
-    """
-    Build a PLUMED input that biases two proton transfers along one coordinate.
+    """Build a PLUMED input that biases two proton transfers along one coordinate.
 
     Each transfer gets its own coordination-difference CV, as in
     :func:`plumed_input_1pt`, and the two are averaged into a single
@@ -1064,8 +1058,7 @@ def plumed_input_2pt_2d(
     f_opes=False,
     units="plumed",
 ):
-    """
-    Build a PLUMED input that biases two proton transfers on a 2-D surface.
+    """Build a PLUMED input that biases two proton transfers on a 2-D surface.
 
     Each proton transfer gets its own donor-hydrogen/acceptor-hydrogen
     coordination-difference CV, as in :func:`plumed_input_1pt`, and the two
@@ -1174,8 +1167,7 @@ def plumed_input_neb_path(
     f_opes=False,
     units="plumed",
 ):
-    """
-    Build a PLUMED input that biases progress along a reference path.
+    """Build a PLUMED input that biases progress along a reference path.
 
     When the reaction is not well described by any one geometric coordinate --
     a transfer that only happens after the surroundings rearrange, say -- there

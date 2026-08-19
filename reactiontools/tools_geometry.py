@@ -29,7 +29,28 @@ from .tools_reaction import _check_converged
 
 
 def _alignment_positions(points, name):
-    """Return a validated ``(n, 3)`` floating-point coordinate array."""
+    """Return a validated ``(n, 3)`` floating-point coordinate array.
+
+    Parameters
+    ----------
+    points : array_like
+        Cartesian coordinates of shape ``(n, 3)``.
+    name : str
+        Name of the caller's argument, quoted back in the error messages.
+
+    Returns
+    -------
+    numpy.ndarray
+        The coordinates as a float array of shape ``(n, 3)``.
+
+    Raises
+    ------
+    TypeError
+        If *points* cannot be converted to a numeric array.
+    ValueError
+        If the shape is not ``(n, 3)``, no positions are supplied, or a
+        coordinate is non-finite.
+    """
     try:
         positions = np.asarray(points, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -45,7 +66,29 @@ def _alignment_positions(points, name):
 
 
 def _alignment_weights(weights, count):
-    """Return validated weights for a rigid fit or RMSD calculation."""
+    """Return validated weights for a rigid fit or RMSD calculation.
+
+    Parameters
+    ----------
+    weights : array_like or None
+        One non-negative weight per correspondence, at least one of them
+        positive. ``None`` weights every correspondence equally.
+    count : int
+        Number of correspondences the weights have to cover.
+
+    Returns
+    -------
+    numpy.ndarray
+        The weights as a float array of shape ``(count,)``.
+
+    Raises
+    ------
+    TypeError
+        If *weights* cannot be converted to a numeric array.
+    ValueError
+        If the length does not match *count*, a value is non-finite or
+        negative, or every weight is zero.
+    """
     if weights is None:
         return np.ones(count, dtype=float)
 
@@ -124,7 +167,31 @@ def kabsch_transform(mobile_positions, reference_positions, weights=None):
 
 
 def _atom_indices(atoms, indices, name):
-    """Validate an alignment selection and return it as an integer array."""
+    """Validate an alignment selection and return it as an integer array.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        Structure the selection indexes into.
+    indices : int or iterable of int or None
+        Atoms to select. ``None`` selects every atom in *atoms*.
+    name : str
+        Name of the caller's argument, quoted back in the error messages.
+
+    Returns
+    -------
+    numpy.ndarray
+        The selection as an integer array, in the order given.
+
+    Raises
+    ------
+    TypeError
+        If *indices* is neither an integer nor an iterable of integers.
+    ValueError
+        If the selection is empty or repeats an index.
+    IndexError
+        If an index lies outside *atoms*.
+    """
     if indices is None:
         if len(atoms) == 0:
             raise ValueError(f"{name} must not be empty.")
@@ -157,7 +224,35 @@ def _atom_indices(atoms, indices, name):
 def _atom_alignment_data(
     mobile, reference, mobile_indices, reference_indices, weights
 ):
-    """Resolve atom selections and weights shared by alignment operations."""
+    """Resolve atom selections and weights shared by alignment operations.
+
+    Parameters
+    ----------
+    mobile, reference : ase.Atoms
+        Structure to move and structure to fit it onto.
+    mobile_indices, reference_indices : int or iterable of int or None
+        Corresponding selections used for the fit, matched by position within
+        each. ``None`` selects every atom in that structure.
+    weights : {None, "masses"} or array_like
+        Fit weights, interpreted as in :func:`align_atom_sets`.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(mobile_positions, reference_positions, weights)``, the positions
+        of shape ``(n, 3)`` and the weights of shape ``(n,)``.
+
+    Raises
+    ------
+    TypeError
+        If either structure is not an :class:`ase.Atoms`, or a selection or
+        the weights have the wrong type.
+    ValueError
+        If the selections differ in length, *weights* is a string other than
+        ``"masses"``, or a selection or weight is otherwise invalid.
+    IndexError
+        If a selection contains an atom index outside its structure.
+    """
     if not isinstance(mobile, Atoms) or not isinstance(reference, Atoms):
         raise TypeError("mobile and reference must both be ase.Atoms objects.")
 
@@ -840,6 +935,27 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
         If an atom index is out of range.
     """
     def as_indices(value, name):
+        """Normalise one index argument to a list of plain integers.
+
+        Parameters
+        ----------
+        value : int or iterable of int
+            A single shared index, or one index per hydrogen.
+        name : str
+            Name of the caller's argument, quoted back in the error messages.
+
+        Returns
+        -------
+        list of int
+            The indices, in the order given.
+
+        Raises
+        ------
+        TypeError
+            If *value* is neither an integer nor an iterable of integers.
+        ValueError
+            If an empty iterable is supplied.
+        """
         if isinstance(value, Integral) and not isinstance(value, bool):
             return [int(value)]
 
@@ -865,6 +981,27 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
     transfer_count = len(hydrogens)
 
     def one_per_hydrogen(indices, name):
+        """Broadcast a shared index over the hydrogens, or check the count.
+
+        Parameters
+        ----------
+        indices : list of int
+            Indices as ``as_indices`` returned them.
+        name : str
+            Name of the caller's argument, quoted back in the error message.
+
+        Returns
+        -------
+        list of int
+            One index per hydrogen, the single shared index repeated when
+            only one was given.
+
+        Raises
+        ------
+        ValueError
+            If more than one index was given and the count does not match the
+            number of hydrogens.
+        """
         if len(indices) == 1:
             return indices * transfer_count
         if len(indices) != transfer_count:

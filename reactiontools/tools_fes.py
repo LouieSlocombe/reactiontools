@@ -289,7 +289,15 @@ class FES:
     regular: bool = True
 
     def __post_init__(self):
-        """Coerce and validate the arrays, then name unlabelled variables."""
+        """Coerce and validate the arrays, then name unlabelled variables.
+
+        Raises
+        ------
+        ValueError
+            If there is not one or two CVs, the energies are empty, a CV
+            shape does not match the energy shape, the dimensionality does
+            not suit the layout, or the CV labels are miscounted.
+        """
         self.cvs = [np.asarray(cv, dtype=float) for cv in self.cvs]
         self.energy = np.asarray(self.energy, dtype=float)
         if len(self.cvs) not in (1, 2):
@@ -778,6 +786,11 @@ def _as_fes_list(sources, **kwargs):
     -------
     list of FES
         The prepared surfaces.
+
+    Raises
+    ------
+    ValueError
+        If *sources* is an empty collection.
     """
     if _is_single_source(sources):
         sources = [sources]
@@ -913,6 +926,11 @@ def _keep_last(fes_list, label_list, max_datasets):
     -------
     tuple of list
         ``(fes_list, label_list)``, trimmed together.
+
+    Raises
+    ------
+    ValueError
+        If *max_datasets* is neither ``None`` nor a positive integer.
     """
     if max_datasets is not None:
         if isinstance(max_datasets, bool) or not isinstance(
@@ -944,7 +962,26 @@ def _default_colors(count):
 
 
 def _resolve_colors(colors, count):
-    """Return exactly one colour per dataset, rejecting silent truncation."""
+    """Return exactly one colour per dataset, rejecting silent truncation.
+
+    Parameters
+    ----------
+    colors : str or sequence of str or None
+        One colour name, one per dataset, or ``None`` for the default cycle.
+    count : int
+        Number of datasets to be drawn.
+
+    Returns
+    -------
+    list of str
+        One colour per dataset, in order.
+
+    Raises
+    ------
+    ValueError
+        If a sequence was given whose length is not *count*. Recycling or
+        truncating it would silently colour two datasets alike.
+    """
     if colors is None:
         return _default_colors(count)
     if isinstance(colors, str):
@@ -956,7 +993,27 @@ def _resolve_colors(colors, count):
 
 
 def _figure_from_axes(fig, axes):
-    """Resolve and validate the figure which owns supplied axes."""
+    """Resolve and validate the figure which owns supplied axes.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure or None
+        Figure the caller supplied alongside the axes, checked against them
+        when it is not ``None``.
+    axes : matplotlib.axes.Axes or sequence of matplotlib.axes.Axes
+        The axes to be drawn on, in any array shape.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The figure the axes belong to.
+
+    Raises
+    ------
+    ValueError
+        If the axes are spread over more than one figure, or *fig* is not the
+        figure that owns them.
+    """
     axes = np.atleast_1d(axes).ravel()
     owners = {axis.figure for axis in axes}
     if len(owners) != 1:
@@ -983,8 +1040,16 @@ def _shared_levels(fes_list, levels):
 
     Returns
     -------
-    numpy.ndarray
-        The contour levels.
+    numpy.ndarray or int
+        The contour levels. When every surface is flat there is no range to
+        divide, and the count is passed straight back for matplotlib to
+        place the levels itself.
+
+    Raises
+    ------
+    ValueError
+        If *levels* is neither an integer of at least 2 nor a strictly
+        increasing finite sequence, or no surface has a finite energy.
     """
     if not np.isscalar(levels):
         levels = np.asarray(levels, dtype=float)
@@ -1017,7 +1082,31 @@ def _shared_levels(fes_list, levels):
 
 
 def _draw_fes_contour(axis, fes, filled, **kwargs):
-    """Draw one regular or triangulated FES with a common validation path."""
+    """Draw one regular or triangulated FES with a common validation path.
+
+    Parameters
+    ----------
+    axis : matplotlib.axes.Axes
+        Axes to draw on.
+    fes : FES
+        The surface. Gridded surfaces go through ``contour``/``contourf``,
+        scattered ones through their ``tri`` counterparts.
+    filled : bool
+        Fill between the levels rather than drawing lines.
+    **kwargs
+        Passed through to the matplotlib contouring call.
+
+    Returns
+    -------
+    matplotlib.contour.QuadContourSet or matplotlib.tri.TriContourSet
+        The contour set that was drawn.
+
+    Raises
+    ------
+    ValueError
+        If a gridded surface has a non-finite CV coordinate, or a scattered
+        one has fewer than the three finite points a triangulation needs.
+    """
     method = "contourf" if filled else "contour"
     if fes.regular:
         if any(not np.isfinite(cv).all() for cv in fes.cvs):
@@ -1057,7 +1146,21 @@ def _default_grid_size(n_panels, fig_size):
 # Plotting
 # ---------------------------------------------------------------------------
 def _format_energy(value):
-    """Format an energy, without a sign on a value that rounds to zero."""
+    """Format an energy, without a sign on a value that rounds to zero.
+
+    A barrier that comes out a hair below zero reads as a finding rather than
+    as the rounding it is.
+
+    Parameters
+    ----------
+    value : float
+        The energy to format.
+
+    Returns
+    -------
+    str
+        The value to three decimal places, never as ``"-0.000"``.
+    """
     text = f"{value:.3f}"
     return "0.000" if text == "-0.000" else text
 
@@ -1214,7 +1317,7 @@ def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
 
     Examples
     --------
-    >>> summary = summarise_fes("fes.dat", basin_a=(1.0, 2.0),
+    >>> summary = summarise_fes("fes.dat", basin_a=(1.0, 2.0),   # doctest: +SKIP
     ...                         basin_b=(3.0, 4.5), source_unit="eV")
     >>> print(summary)                                       # doctest: +SKIP
     Barrier A->B:  0.352 eV
@@ -1307,6 +1410,12 @@ def fes_convergence(sources, basin_a, basin_b, temperature=None, **kwargs):
     -------
     list of FESSummary
         One per surface, in the order given.
+
+    Raises
+    ------
+    ValueError
+        If *sources* is empty, or for any of the reasons
+        :func:`summarise_fes` raises on one of the surfaces.
     """
     # Pass the sources through untouched rather than preparing them here:
     # summarise_fes calls as_fes itself, and doing it twice would apply
@@ -1806,7 +1915,7 @@ def plot_fes_2d_overlay(
 
     Parameters
     ----------
-    sources : sequence of FES sources
+    sources : FES source or sequence of FES sources
         Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
     fig : matplotlib.figure.Figure, optional
         Figure to draw on. Inferred from *ax* when omitted.
