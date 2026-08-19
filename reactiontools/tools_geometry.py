@@ -9,12 +9,17 @@ flipped structure, ready to pass to
 :func:`~reactiontools.tools_reaction.prepare_neb`.
 
 :func:`swap_bonding_configuration` does the same job for proton transfers,
-moving one or more hydrogens across their hydrogen bonds. For structures that
+moving one or more hydrogens across their hydrogen bonds. Where those two build
+a product out of what the reaction is known to do,
+:func:`seed_product_from_ts` builds one out of a transition state instead,
+stepping past the saddle along the geodesic that reaches it -- no calculator,
+and no need to have guessed the mechanism first. For structures that
 already describe the same atoms, :func:`align_atom_sets` superposes one on the
 other with the optimal rigid Kabsch transform, and :func:`atom_set_rmsd`
 measures what remains.
 """
 
+import warnings
 from itertools import permutations
 from numbers import Integral
 
@@ -25,7 +30,15 @@ from ase.data import covalent_radii
 from ase.neighborlist import NeighborList, natural_cutoffs
 from ase.optimize import BFGS
 
-from .tools_reaction import _check_converged
+from .tools_reaction import _check_converged, get_neb_path, quick_guess_path
+
+#: Cosine below which the direction a path arrives at the saddle in counts as
+#: unrelated to the direction the reaction is going in overall -- 0.5 is 60
+#: degrees off. Interpolating between two structures that barely differ gives a
+#: local direction made of numerical wander rather than chemistry, and this is
+#: what tells the two apart: a real reaction comes in above 0.9, while two
+#: copies of the same structure score about zero.
+_SEED_MIN_ALIGNMENT = 0.5
 
 
 def _alignment_positions(points, name):
@@ -1060,3 +1073,358 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
     swapped = atoms.copy()
     swapped.positions[hydrogens] = new_hydrogen_positions
     return swapped
+
+
+class SeedWarning(UserWarning):
+    """A seeded end state did not come out looking like a new structure.
+
+    Warned rather than raised by :func:`seed_product_from_ts`, because a seed
+    that stopped short of where it was aimed is still a starting point, and
+    because whether it landed in the right basin is settled by relaxing it
+    rather than by measuring it. Turn it into an error with
+    ``warnings.simplefilter("error", SeedWarning)`` in a batch script, where a
+    seed that is really a second copy of the reactant would otherwise be
+    carried into everything downstream.
+    """
+
+
+def _seed_clash(atoms, radii_sum, clash_scale):
+    """Find the worst-compressed contact in a structure, if there is one.
+
+    The geometric stand-in for an energy: with no calculator to say a step has
+    gone somewhere unphysical, what says it instead is two atoms driven closer
+    than any bond between them would ever sit.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        Structure to check.
+    radii_sum : numpy.ndarray
+        ``(n_atoms, n_atoms)`` sums of covalent radii.
+    clash_scale : float
+        Fraction of a pair's covalent radii below which their separation
+        counts as a clash.
+
+    Returns
+    -------
+    tuple or None
+        ``(i, j, distance, limit)`` for the worst offending pair, or None when
+        nothing is compressed past ``clash_scale``.
+    """
+    distances = atoms.get_all_distances(mic=bool(np.any(atoms.pbc)))
+    scaled = distances / radii_sum
+    # Every atom sits at zero distance from itself, which would otherwise be
+    # the worst contact in every structure.
+    np.fill_diagonal(scaled, np.inf)
+    i, j = np.unravel_index(np.argmin(scaled), scaled.shape)
+    if scaled[i, j] >= clash_scale:
+        return None
+    return int(i), int(j), float(distances[i, j]), float(radii_sum[i, j])
+
+
+def seed_product_from_ts(
+    reactant,
+    ts,
+    n_images=25,
+    push=1.0,
+    n_steps=10,
+    tangent_images=2,
+    weights="masses",
+    clash_scale=0.7,
+    return_path=False,
+):
+    """Seed the far end state by stepping past a transition state.
+
+    Geodesically interpolates from ``reactant`` to ``ts``, reads the direction
+    the path is travelling in as it arrives at the saddle, and keeps stepping
+    that way past it. What comes out is the structure on the other side: a
+    product guess built from a reactant and a transition state alone.
+
+    This is the cheap counterpart to
+    :func:`~reactiontools.tools_reaction.optimise_irc`, which answers the same
+    question properly by following the true reaction coordinate downhill, at
+    the cost of a converged saddle, a calculator and hundreds of gradients.
+    Nothing here is evaluated: the seed is unrelaxed, and the way to turn it
+    into an end state worth using is to relax it with
+    :func:`~reactiontools.tools_reaction.optimise_geom`. Running
+    :func:`~reactiontools.tools_reaction.prepare_neb` between the reactant and
+    the relaxed seed, and checking the band comes back over a barrier near the
+    transition state it started from, is what confirms the seed landed in the
+    basin it was aimed at.
+
+    Nothing about this is specific to products. The reactant is only the end
+    state you already have, so passing a product as ``reactant`` seeds the
+    reactant instead, by stepping off the other side of the same saddle.
+
+    Parameters
+    ----------
+    reactant : ase.Atoms
+        End state to start from. Not modified.
+    ts : ase.Atoms
+        Transition state, or a guess at one -- it is used for its geometry and
+        nothing else, so it need not be converged. Not modified. Must describe
+        the same atoms, in the same order, as ``reactant``.
+    n_images : int, optional
+        Number of images in the geodesic interpolation from ``reactant`` to
+        ``ts``. More images resolve the arriving direction more finely.
+    push : float, optional
+        How far past the transition state to step, as a multiple of the
+        geodesic length from ``reactant`` to ``ts``. The default of 1.0 steps
+        as far beyond the saddle as the reactant sits before it, which for a
+        near-symmetric reaction -- a proton transfer, say -- puts the seed
+        roughly where the reactant would be reflected through the saddle.
+        Raise it for a reaction whose product lies further out, lower it for a
+        saddle that sits late along the path.
+    n_steps : int, optional
+        Number of equal increments the push is taken in. Nothing but the clash
+        check looks between them, so this sets both how finely a push that has
+        to stop early can stop and how well that check sees: increments long
+        enough to carry an atom clean through another one step over the clash
+        without noticing it.
+    tangent_images : int, optional
+        Number of trailing images the arrival direction is measured over. The
+        default of 2 is the difference between the last two images; a larger
+        chord is less sensitive to the geodesic wobbling near its endpoint,
+        at the cost of averaging in curvature from further back.
+    weights : {"masses", None} or array_like, optional
+        How the two images are superposed before their difference is taken,
+        interpreted as in :func:`align_atom_sets`.
+        The default weights by mass, which is the frame a reaction coordinate
+        is conventionally defined in and which keeps the heavy atoms still
+        while a hydrogen does the travelling. Weighting every atom equally
+        instead spreads a proton's motion back over the atoms it left, and
+        extrapolating that pulls them apart. Pass None for equal weights, or
+        an array to fix the frame on part of the structure.
+    clash_scale : float or None, optional
+        Stop stepping before any two atoms come closer than this fraction of
+        the sum of their covalent radii, and warn :class:`SeedWarning` saying
+        how far it got. The default of 0.7 sits well inside a normal bond, so
+        a bond forming across the saddle does not trip it, while a step
+        driving atoms through each other does. None steps the whole way
+        regardless.
+    return_path : bool, optional
+        Also return every structure the seed was built from.
+
+    Returns
+    -------
+    ase.Atoms or tuple
+        The seeded end state, carrying ``info["seeded"]``, whether both the
+        checks below passed; ``info["seed_push"]``,
+        ``info["seed_rmsd_reactant"]`` and ``info["seed_rmsd_ts"]``, how far it
+        actually travelled, in Å; and ``info["seed_alignment"]``, how much the
+        direction it was stepped along had to do with the direction the path
+        travelled overall, as a cosine. With ``return_path`` it is instead
+        ``(seed, path)``, where ``path`` is the geodesic from the reactant to
+        the transition state followed by every extrapolated image, ending on
+        the seed -- a band to plot, or to hand to
+        :func:`~reactiontools.tools_reaction.restart_neb`. It is
+        ``n_images + n_steps`` long unless the push stopped early. The whole
+        band is put in the frame of ``ts``, so its image ``n_images - 1`` is
+        exactly the transition state as given, while its first image is the
+        reactant up to the rigid drift the interpolation accumulated along the
+        way.
+
+    Raises
+    ------
+    ValueError
+        If ``reactant`` and ``ts`` do not describe the same atoms, if any of
+        the arguments are out of range, or if the two structures are so alike
+        that the path between them gives no direction to extrapolate along.
+
+    Warns
+    -----
+    SeedWarning
+        If the push had to stop early to avoid a clash; if the seed did not end
+        up further from the reactant than the transition state already was,
+        which means the step went nowhere useful; or if the direction the path
+        arrived in bore little relation to the direction it travelled overall,
+        which means there was no reaction coordinate there to read.
+
+    Notes
+    -----
+    Geodesic interpolation measures plain Cartesian distances, with no
+    minimum-image convention and no knowledge of the cell, and hands its path
+    back rigidly rotated. For a periodic system that rotation is meaningless,
+    since the cell does not follow it -- which is why the band is put back in
+    the frame of ``ts`` before anything is measured off it, and why the seed
+    comes out where the cell expects it. What that does not rescue is a
+    reaction whose atoms cross a cell boundary: the interpolation never sees
+    the periodic image, so there is nothing sensible to extrapolate and this is
+    the wrong tool for it.
+
+    Examples
+    --------
+    >>> seed = seed_product_from_ts(reactant, ts)        # doctest: +SKIP
+    >>> product = optimise_geom(seed, calc)              # doctest: +SKIP
+    >>> summarise_neb(optimise_neb(prepare_neb(reactant, product, calc)))
+    ...                                                  # doctest: +SKIP
+    """
+    if len(reactant) != len(ts):
+        raise ValueError(
+            f"reactant and ts must describe the same atoms, got "
+            f"{len(reactant)} and {len(ts)}"
+        )
+    if reactant.get_chemical_symbols() != ts.get_chemical_symbols():
+        raise ValueError(
+            "reactant and ts must have the same chemical symbols in the same "
+            "order, so that the path between them connects each atom to "
+            "itself. Reorder one of them to match the other."
+        )
+    if n_images < 3:
+        raise ValueError(
+            f"Geodesic interpolation needs an interior image to move, so "
+            f"n_images must be at least 3, got {n_images}"
+        )
+    if not 2 <= tangent_images <= n_images:
+        raise ValueError(
+            f"tangent_images must be between 2 and n_images={n_images} to "
+            f"measure a direction across the path, got {tangent_images}"
+        )
+    if push <= 0:
+        raise ValueError(
+            f"push must be positive to step past the transition state, got "
+            f"{push}. Swap reactant and ts to step the other way."
+        )
+    if n_steps < 1:
+        raise ValueError(f"n_steps must be at least 1, got {n_steps}")
+    if atom_set_rmsd(reactant, ts, align=True) < 1e-6:
+        raise ValueError(
+            "reactant and ts are the same structure, so there is no reaction "
+            "coordinate to read a direction off and nothing to step past."
+        )
+
+    path = quick_guess_path(reactant, ts, n_images=n_images)
+
+    # Geodesic interpolation hands the path back in a frame of its own, so the
+    # last image is the transition state rotated and shifted away from where
+    # the caller put it. Taking the transform from that image and applying it
+    # to the whole path moves the band into the caller's frame in one piece,
+    # leaving the seed a plain displacement of the transition state as given,
+    # overlayable on it. The fit is exact rather than a compromise, because
+    # the image being fitted is that same structure and not merely a similar
+    # one -- which is why it is anchored on the transition state and not on
+    # the reactant at the other end.
+    rotation, translation = kabsch_transform(path[-1].positions, ts.positions)
+    for image in path:
+        # apply_constraint=False: this is a change of frame, not a step, and a
+        # constraint would hold the fixed atoms behind in the old one.
+        image.set_positions(
+            image.positions @ rotation + translation, apply_constraint=False
+        )
+
+    # Superpose the trailing image on the last one before differencing them:
+    # the difference of two frames that differ by a rotation is mostly that
+    # rotation, and the direction wanted here is the internal motion alone.
+    behind = align_atom_sets(path[-tangent_images], path[-1], weights=weights)
+    direction = path[-1].positions - behind.positions
+
+    # Frobenius norm over the whole 3N vector, the same measure get_neb_path
+    # sums, so that push is a multiple of a length on the same scale.
+    norm = np.linalg.norm(direction)
+    if norm < 1e-8:
+        raise ValueError(
+            "The last two images of the path came back identical, so there is "
+            "no direction to extrapolate along. Raise n_images, or lower "
+            "tangent_images to measure across a shorter stretch of the path."
+        )
+    direction = direction / norm
+
+    # How much the direction the path arrives in has to do with where the path
+    # came from. Interpolation between two structures that differ only a
+    # little returns one whose local direction is mostly numerical wander, and
+    # extrapolating that steps somewhere arbitrary; this is the number that
+    # shows it, and it is worth reporting even when it is healthy.
+    start = align_atom_sets(path[0], path[-1], weights=weights)
+    overall = path[-1].positions - start.positions
+    alignment = float(np.sum(direction * overall) / np.linalg.norm(overall))
+
+    step = push * get_neb_path(path)[-1] / n_steps
+
+    if clash_scale is not None:
+        radii = covalent_radii[ts.get_atomic_numbers()]
+        radii_sum = radii[:, None] + radii[None, :]
+
+    extrapolated = []
+    stopped_at = None
+    for i in range(1, n_steps + 1):
+        image = ts.copy()
+        # Whether the transition state converged says nothing about a
+        # structure extrapolated away from it.
+        image.info.pop("converged", None)
+        # apply_constraint=True, and set_positions rather than assigning to
+        # .positions, which writes the array straight through: this is a step,
+        # not a change of frame, so an atom the caller fixed has to stay where
+        # it was fixed. It also means the geometry checked for clashes below
+        # is the one that would be kept.
+        image.set_positions(
+            path[-1].positions + i * step * direction, apply_constraint=True
+        )
+
+        if clash_scale is not None:
+            clash = _seed_clash(image, radii_sum, clash_scale)
+            if clash is not None:
+                stopped_at = (i, clash)
+                break
+
+        extrapolated.append(image)
+
+    if stopped_at is not None:
+        i, (first, second, distance, limit) = stopped_at
+        warnings.warn(
+            f"Seeding stopped after {i - 1} of {n_steps} steps "
+            f"({(i - 1) * step:.3f} Å of the {n_steps * step:.3f} Å push): the "
+            f"next step brought {ts.symbols[first]}{first} and "
+            f"{ts.symbols[second]}{second} within {distance:.3f} Å, under "
+            f"clash_scale={clash_scale} of their {limit:.3f} Å covalent radii. "
+            f"Lower push, or pass clash_scale=None to step anyway.",
+            SeedWarning,
+            stacklevel=2,
+        )
+
+    # Every step clashed, so there is nothing to hand back but the transition
+    # state itself, in the frame the path put it in.
+    if not extrapolated:
+        seed = ts.copy()
+        seed.info.pop("converged", None)
+        seed.set_positions(path[-1].positions, apply_constraint=False)
+    else:
+        seed = extrapolated[-1]
+
+    # Plain Cartesian RMSDs, whatever ``weights`` says: a mass-weighted one
+    # barely registers a hydrogen crossing, which is exactly the motion these
+    # numbers are here to report on.
+    rmsd_reactant = atom_set_rmsd(seed, reactant, align=True)
+    rmsd_ts = atom_set_rmsd(seed, ts, align=True)
+    ts_from_reactant = atom_set_rmsd(ts, reactant, align=True)
+
+    if rmsd_reactant <= ts_from_reactant:
+        warnings.warn(
+            f"The seed is {rmsd_reactant:.3f} Å from the reactant, no further "
+            f"than the transition state already was ({ts_from_reactant:.3f} "
+            f"Å), so stepping past the saddle went nowhere useful. Raise push, "
+            f"or check that ts really lies between the two end states.",
+            SeedWarning,
+            stacklevel=2,
+        )
+    if alignment < _SEED_MIN_ALIGNMENT:
+        warnings.warn(
+            f"The path arrives at the transition state {alignment:.2f} aligned "
+            f"with the direction it travelled overall, so the direction the "
+            f"seed was stepped along has little to do with the reaction. "
+            f"reactant and ts are probably too alike to interpolate between "
+            f"usefully.",
+            SeedWarning,
+            stacklevel=2,
+        )
+
+    seed.info["seeded"] = bool(
+        rmsd_reactant > ts_from_reactant and alignment >= _SEED_MIN_ALIGNMENT
+    )
+    seed.info["seed_push"] = float(len(extrapolated) * step)
+    seed.info["seed_alignment"] = alignment
+    seed.info["seed_rmsd_reactant"] = rmsd_reactant
+    seed.info["seed_rmsd_ts"] = rmsd_ts
+
+    if return_path:
+        return seed, list(path) + extrapolated
+    return seed

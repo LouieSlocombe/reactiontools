@@ -523,6 +523,42 @@ neb = prepare_neb(atoms, product, calc, n_images=7)
 Pass `optimise_after=False` to skip the relaxation and get the rigid swap
 alone, in which case no calculator is needed.
 
+### Seeding a product from a transition state
+
+The two functions above build a product out of what the reaction is known to
+do. When that is not known, but a transition state is already to hand -- from a
+scan, a database, or a saddle search that started from something else --
+`seed_product_from_ts` builds one out of the saddle instead. It interpolates
+from the reactant to the transition state geodesically, reads the direction the
+path is travelling in as it arrives, and keeps stepping that way past it:
+
+```python
+from reactiontools import optimise_geom, prepare_neb, seed_product_from_ts
+
+seed = seed_product_from_ts(reactant, ts)
+product = optimise_geom(seed, calc)
+neb = prepare_neb(reactant, product, calc, n_images=7)
+```
+
+Nothing is evaluated while the seed is built, so no calculator is involved
+until the relaxation. `push` sets how far past the saddle to step, as a
+multiple of the reactant-to-transition-state distance: the default of 1.0 lands
+roughly where the reactant would be reflected through the saddle, which suits a
+near-symmetric reaction such as a proton transfer, and a product further out
+wants more.
+
+Whether the seed landed in the intended basin is settled by relaxing it, not by
+building it -- run the band above and check it comes back over a barrier near
+the transition state it started from. `seed_product_from_ts` only warns
+`SeedWarning` about what it can see for itself: a push stopped short to avoid
+driving two atoms through each other, or one that went nowhere. Pass
+`return_path=True` for the whole band it built, reactant through saddle to
+seed, to plot or to hand to `restart_neb`.
+
+`optimise_irc` answers the same question properly, by following the true
+reaction coordinate downhill from a converged saddle, and costs hundreds of
+gradients to do it.
+
 ### Running metadynamics
 
 The three stages of a metadynamics run, in order: pick the atoms, build the
@@ -844,7 +880,9 @@ ships as `/usr/bin/orca` on many Linux systems.
 A NEB needs a product as well as a reactant, and the product is usually the
 awkward one to draw by hand. These build it: superpose corresponding structures,
 for a stacked dimer find the two halves and swap them over, or for a proton
-transfer move the hydrogen across.
+transfer move the hydrogen across. When the mechanism is not known well enough
+to draw the product but a transition state is already to hand,
+`seed_product_from_ts` builds one from that instead.
 
 | Function | Description |
 | --- | --- |
@@ -857,6 +895,8 @@ transfer move the hydrogen across.
 | `optimize_with_fixed_anchors(atoms, baseA_idxs, baseB_idxs, anchor_indices, calc, fmax=0.05, steps=1000, optimiser=BFGS, logfile='-')` | Relax the fragments with their anchors pinned, leaving all other atoms untouched. |
 | `get_best_flip_and_face_bases(atoms, baseA_idxs, baseB_idxs, anchors, optimise_after=True, calc=None)` | Search the reflection signs and keep whichever leaves the fragment centres of mass closest. |
 | `swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index)` | Turn one or more donor-H...acceptor bonds into donor...H-acceptor, keeping each original donor-H length. Scalar donor/acceptor indices are shared; iterables pair one-to-one with the hydrogen indices. |
+| `seed_product_from_ts(reactant, ts, n_images=25, push=1.0, n_steps=10, tangent_images=2, weights='masses', clash_scale=0.7, return_path=False)` | Seed the end state on the far side of a transition state: interpolate reactant to TS geodesically, take the direction the path arrives in, and keep stepping past the saddle. No calculator, and the seed comes back unrelaxed. Warns `SeedWarning` if the push had to stop short of a clash or went nowhere. |
+| `SeedWarning` | Raised as a warning by `seed_product_from_ts`. Promote it with `warnings.simplefilter('error', SeedWarning)`. |
 
 ### `tools_plumed` — metadynamics support
 
@@ -1141,7 +1181,7 @@ the codes it wraps you actually exercised — all in
 | --- | --- | --- |
 | `Slocombe_reactiontools` | `reactiontools` itself | always |
 | `larsen2017atomic` | [ASE](https://wiki.fysik.dtu.dk/ase/) | NEB, optimisation and I/O throughout |
-| `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts` |
+| `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts`, `seed_product_from_ts` |
 | `hermes2022sella` | [Sella](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc`, `sella_ts_search` |
 | `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills`, `plumed_calculator` |
 | `laio2002escaping` | The metadynamics method | `plumed_metad_input` |

@@ -1,5 +1,7 @@
 """Tests for reactiontools.tools_geometry."""
 
+import warnings
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -10,6 +12,7 @@ from ase.optimize import FIRE
 from reactiontools import (
     ConvergenceError,
     ConvergenceWarning,
+    SeedWarning,
     align_atom_sets,
     atom_set_rmsd,
     bonded_cluster_indices_no_anchor_hub,
@@ -18,6 +21,7 @@ from reactiontools import (
     get_dimer_bonded_cluster_indices,
     kabsch_transform,
     optimize_with_fixed_anchors,
+    seed_product_from_ts,
     swap_bonding_configuration,
 )
 from reactiontools.tools_geometry import (
@@ -766,3 +770,265 @@ class TestSwapBondingConfiguration:
 
         with pytest.raises(ValueError, match="positions must be different"):
             swap_bonding_configuration(h_bond, 0, 1, 2)
+
+
+@pytest.fixture
+def transfer():
+    """A proton transfer and a transition state for it.
+
+    The reactant is the hydrogen-bonded triad of the `pt_atoms` fixture, with
+    the proton on the donor oxygen; the transition state has it midway across.
+    Returned as a pair, since seeding needs both.
+    """
+    reactant = Atoms(
+        "OHOCCC",
+        positions=[
+            [0.00, 0.00, 0.00],
+            [0.98, 0.00, 0.00],
+            [2.65, 0.00, 0.00],
+            [-0.65, 1.18, 0.00],
+            [0.10, 2.40, 0.00],
+            [1.55, 2.35, 0.00],
+        ],
+    )
+    ts = reactant.copy()
+    ts.positions[1] = [1.325, 0.00, 0.00]
+    return reactant, ts
+
+
+@pytest.fixture
+def contracting():
+    """A pair whose path pulls the two oxygens together as it goes.
+
+    Extrapolating it keeps contracting them, so the push runs into the clash
+    check rather than into anything chemical.
+    """
+    reactant = Atoms("OHO", positions=[[0.0, 0, 0], [1.5, 0, 0], [3.0, 0, 0]])
+    ts = Atoms("OHO", positions=[[0.2, 0, 0], [1.5, 0, 0], [2.8, 0, 0]])
+    return reactant, ts
+
+
+class TestSeedProductFromTs:
+    def test_steps_past_the_transition_state(self, transfer):
+        reactant, ts = transfer
+
+        seed = seed_product_from_ts(reactant, ts)
+
+        assert atom_set_rmsd(seed, reactant, align=True) > atom_set_rmsd(
+            ts, reactant, align=True
+        )
+
+    def test_carries_the_proton_towards_the_acceptor(self, transfer):
+        """The point of the whole thing, on the reaction it was written for."""
+        reactant, ts = transfer
+
+        seed = seed_product_from_ts(reactant, ts)
+
+        assert seed.get_distance(1, 2) < ts.get_distance(1, 2)
+        assert seed.get_distance(0, 1) > ts.get_distance(0, 1)
+
+    def test_a_bigger_push_crosses_further(self, transfer):
+        reactant, ts = transfer
+
+        near = seed_product_from_ts(reactant, ts, push=1.0)
+        far = seed_product_from_ts(reactant, ts, push=2.5)
+
+        assert far.get_distance(1, 2) < near.get_distance(1, 2)
+
+    def test_the_push_scales_the_distance_travelled(self, transfer):
+        reactant, ts = transfer
+
+        single = seed_product_from_ts(reactant, ts, push=1.0)
+        double = seed_product_from_ts(reactant, ts, push=2.0)
+
+        assert double.info["seed_push"] == pytest.approx(
+            2 * single.info["seed_push"]
+        )
+        assert atom_set_rmsd(double, ts) == pytest.approx(
+            2 * atom_set_rmsd(single, ts)
+        )
+
+    def test_seeds_the_reactant_when_the_ends_are_swapped(self, transfer):
+        """Nothing about it is specific to products: passing the product seeds
+        the reactant, off the other side of the same saddle."""
+        reactant, ts = transfer
+        product = reactant.copy()
+        product.positions[1] = [1.67, 0.00, 0.00]  # the proton on the acceptor
+
+        back = seed_product_from_ts(product, ts)
+
+        assert back.get_distance(0, 1) < ts.get_distance(0, 1)
+
+    def test_does_not_modify_its_inputs(self, transfer):
+        reactant, ts = transfer
+        before = reactant.positions.copy(), ts.positions.copy()
+
+        seed_product_from_ts(reactant, ts)
+
+        assert np.allclose(reactant.positions, before[0])
+        assert np.allclose(ts.positions, before[1])
+
+    def test_keeps_the_atoms_the_cell_and_the_boundary_conditions(self, transfer):
+        reactant, ts = transfer
+        for atoms in (reactant, ts):
+            atoms.set_cell([12.0, 12.0, 12.0])
+            atoms.pbc = True
+
+        seed = seed_product_from_ts(reactant, ts)
+
+        assert seed.get_chemical_symbols() == ts.get_chemical_symbols()
+        assert np.allclose(seed.cell, ts.cell)
+        assert all(seed.pbc)
+
+    def test_holds_a_constrained_atom_still(self, transfer):
+        reactant, ts = transfer
+        ts.set_constraint(FixAtoms(indices=[0]))
+
+        seed = seed_product_from_ts(reactant, ts)
+
+        assert np.allclose(seed.positions[0], ts.positions[0])
+        assert seed.constraints
+
+    def test_does_not_carry_over_the_transition_state_convergence(self, transfer):
+        """Whether the saddle converged says nothing about a structure off it."""
+        reactant, ts = transfer
+        ts.info["converged"] = True
+
+        seed = seed_product_from_ts(reactant, ts)
+
+        assert "converged" not in seed.info
+
+    def test_records_how_far_it_went(self, transfer):
+        reactant, ts = transfer
+
+        seed = seed_product_from_ts(reactant, ts)
+
+        assert seed.info["seeded"] is True
+        assert seed.info["seed_push"] > 0
+        assert seed.info["seed_alignment"] > 0.5
+        assert seed.info["seed_rmsd_reactant"] > seed.info["seed_rmsd_ts"]
+
+    def test_returns_the_whole_band_when_asked(self, transfer):
+        reactant, ts = transfer
+
+        seed, path = seed_product_from_ts(
+            reactant, ts, n_images=8, n_steps=4, return_path=True
+        )
+
+        assert len(path) == 12
+        assert path[-1] is seed
+
+    def test_the_band_passes_through_the_transition_state_as_given(self, transfer):
+        """The whole path is put back in the frame the caller works in."""
+        reactant, ts = transfer
+
+        _seed, path = seed_product_from_ts(reactant, ts, n_images=8, return_path=True)
+
+        assert atom_set_rmsd(path[7], ts) == pytest.approx(0.0, abs=1e-8)
+
+    def test_the_weighting_changes_the_direction(self, transfer):
+        """Weighting every atom equally spreads a proton's motion over the rest."""
+        reactant, ts = transfer
+
+        weighted = seed_product_from_ts(reactant, ts)
+        uniform = seed_product_from_ts(reactant, ts, weights=None)
+
+        assert not np.allclose(weighted.positions, uniform.positions)
+
+    def test_stops_short_of_a_clash_and_says_so(self, contracting):
+        reactant, ts = contracting
+
+        with pytest.warns(SeedWarning, match="Seeding stopped after"):
+            seed = seed_product_from_ts(reactant, ts, push=8.0, n_steps=20)
+
+        assert seed.info["seed_push"] > 0  # it got some of the way
+        assert seed.get_distance(0, 1) > 0.7 * (0.66 + 0.31)  # and no further
+
+    def test_the_clash_check_can_be_turned_off(self, contracting):
+        reactant, ts = contracting
+
+        with pytest.warns(SeedWarning, match="Seeding stopped after"):
+            stopped = seed_product_from_ts(reactant, ts, push=8.0, n_steps=20)
+        through = seed_product_from_ts(
+            reactant, ts, push=8.0, n_steps=20, clash_scale=None
+        )
+
+        assert through.info["seed_push"] > stopped.info["seed_push"]
+        assert through.get_distance(0, 2) < stopped.get_distance(0, 2)
+
+    def test_warns_when_it_could_not_step_at_all(self, transfer):
+        """A clash_scale nothing can satisfy leaves the seed on the saddle."""
+        reactant, ts = transfer
+
+        with pytest.warns(SeedWarning, match="Seeding stopped after 0"):
+            with pytest.warns(SeedWarning, match="went nowhere useful"):
+                seed = seed_product_from_ts(reactant, ts, clash_scale=2.0)
+
+        assert seed.info["seeded"] is False
+        assert seed.info["seed_push"] == 0.0
+
+    def test_warns_when_the_two_structures_are_too_alike(self, transfer):
+        """Interpolating between near-identical structures gives noise, not a
+        direction."""
+        reactant, _ts = transfer
+        barely = reactant.copy()
+        barely.positions[1] += [0.005, 0.0, 0.0]
+
+        with pytest.warns(SeedWarning, match="aligned with the direction"):
+            seed = seed_product_from_ts(reactant, barely)
+
+        assert seed.info["seeded"] is False
+        assert seed.info["seed_alignment"] < 0.5
+
+    def test_a_warning_filter_can_promote_it_to_an_error(self, transfer):
+        reactant, ts = transfer
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SeedWarning)
+
+            with pytest.raises(SeedWarning):
+                seed_product_from_ts(reactant, ts, clash_scale=2.0)
+
+    def test_a_healthy_seed_warns_about_nothing(self, transfer):
+        reactant, ts = transfer
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SeedWarning)
+
+            seed_product_from_ts(reactant, ts)
+
+    def test_rejects_structures_of_different_lengths(self, transfer):
+        reactant, ts = transfer
+
+        with pytest.raises(ValueError, match="same atoms"):
+            seed_product_from_ts(reactant, ts[:-1])
+
+    def test_rejects_structures_with_different_elements(self, transfer):
+        reactant, ts = transfer
+        ts.symbols[3] = "N"
+
+        with pytest.raises(ValueError, match="same chemical symbols"):
+            seed_product_from_ts(reactant, ts)
+
+    def test_rejects_two_copies_of_the_same_structure(self, transfer):
+        reactant, _ts = transfer
+
+        with pytest.raises(ValueError, match="same structure"):
+            seed_product_from_ts(reactant, reactant.copy())
+
+    @pytest.mark.parametrize(
+        "kwargs, message",
+        [
+            ({"n_images": 2}, "at least 3"),
+            ({"tangent_images": 1}, "tangent_images must be"),
+            ({"tangent_images": 99}, "tangent_images must be"),
+            ({"push": 0.0}, "push must be positive"),
+            ({"push": -1.0}, "push must be positive"),
+            ({"n_steps": 0}, "n_steps must be at least 1"),
+        ],
+    )
+    def test_rejects_arguments_out_of_range(self, transfer, kwargs, message):
+        reactant, ts = transfer
+
+        with pytest.raises(ValueError, match=message):
+            seed_product_from_ts(reactant, ts, **kwargs)
