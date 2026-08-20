@@ -1,5 +1,7 @@
 """Tests for the structure-file readers and writers."""
 
+from pathlib import Path
+
 import pytest
 from ase.build import molecule
 
@@ -16,16 +18,16 @@ from reactiontools import (
 
 
 def _pdb_line(
-    serial=1,
-    name=" C1 ",
-    resname="AAA",
-    chain="A",
-    resid=1,
-    x=0.0,
-    y=0.0,
-    z=0.0,
-    element="C",
-):
+    serial: int = 1,
+    name: str = " C1 ",
+    resname: str = "AAA",
+    chain: str = "A",
+    resid: int = 1,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    element: str = "C",
+) -> str:
     """One ATOM record, built by column so the tests can vary one field."""
     return (
         f"ATOM  {serial:>5} {name} {resname:>3} {chain}{resid:>4}    "
@@ -34,17 +36,17 @@ def _pdb_line(
 
 
 class TestElementFromPdbLine:
-    def test_the_element_column_wins_when_it_is_there(self):
+    def test_the_element_column_wins_when_it_is_there(self) -> None:
         line = _pdb_line(name=" CA ", element="CA")
 
         assert element_from_pdb_line(line) == "Ca"
 
-    def test_a_missing_element_column_falls_back_to_the_name(self):
+    def test_a_missing_element_column_falls_back_to_the_name(self) -> None:
         line = _pdb_line(name=" CA ", element="")
 
         assert element_from_pdb_line(line) == "C"
 
-    def test_alignment_separates_calcium_from_an_alpha_carbon(self):
+    def test_alignment_separates_calcium_from_an_alpha_carbon(self) -> None:
         alpha_carbon = _pdb_line(name=" CA ", element="")
         calcium = _pdb_line(name="CA  ", element="")
 
@@ -52,31 +54,31 @@ class TestElementFromPdbLine:
         assert element_from_pdb_line(calcium) == "Ca"
 
     @pytest.mark.parametrize("name", ["HG  ", "HE  ", "HF  ", "HO  ", "HS  "])
-    def test_hydrogen_lookalikes_resolve_to_hydrogen(self, name):
+    def test_hydrogen_lookalikes_resolve_to_hydrogen(self, name: str) -> None:
         # A PDB with no element column is far likelier to hold a gamma
         # hydrogen than mercury.
         assert element_from_pdb_line(_pdb_line(name=name, element="")) == "H"
 
-    def test_a_digit_prefixed_name_carries_a_one_letter_symbol(self):
+    def test_a_digit_prefixed_name_carries_a_one_letter_symbol(self) -> None:
         assert element_from_pdb_line(_pdb_line(name="1HB ", element="")) == "H"
 
-    def test_a_nameless_record_gives_up_rather_than_guessing(self):
+    def test_a_nameless_record_gives_up_rather_than_guessing(self) -> None:
         assert element_from_pdb_line(_pdb_line(name="    ", element="")) == "X"
 
 
 class TestFormatPdbAtomName:
-    def test_one_letter_symbols_are_indented_by_a_column(self):
+    def test_one_letter_symbols_are_indented_by_a_column(self) -> None:
         assert format_pdb_atom_name("C", 1) == " C1 "
 
-    def test_two_letter_symbols_start_in_the_first_column(self):
+    def test_two_letter_symbols_start_in_the_first_column(self) -> None:
         assert format_pdb_atom_name("Cl", 1) == "Cl1 "
 
-    def test_a_long_name_is_truncated_to_keep_the_columns_aligned(self):
+    def test_a_long_name_is_truncated_to_keep_the_columns_aligned(self) -> None:
         assert len(format_pdb_atom_name("Cl", 12345)) == 4
 
 
 class TestRoundTrip:
-    def test_xyz_survives_a_trip_through_pdb(self, tmp_path):
+    def test_xyz_survives_a_trip_through_pdb(self, tmp_path: Path) -> None:
         water = molecule("H2O")
         xyz = tmp_path / "in.xyz"
         with open(xyz, "w") as handle:
@@ -92,7 +94,7 @@ class TestRoundTrip:
         assert n_frames == 1
         assert back.read_text().splitlines()[0].strip() == "3"
 
-    def test_a_multi_model_pdb_gives_one_frame_per_model(self, tmp_path):
+    def test_a_multi_model_pdb_gives_one_frame_per_model(self, tmp_path: Path) -> None:
         pdb = tmp_path / "path.pdb"
         pdb.write_text(
             "".join(
@@ -103,7 +105,9 @@ class TestRoundTrip:
 
         assert convert_pdb_to_xyz(pdb, tmp_path / "path.xyz") == 3
 
-    def test_a_pdb_with_no_atoms_is_an_error_not_an_empty_file(self, tmp_path):
+    def test_a_pdb_with_no_atoms_is_an_error_not_an_empty_file(
+        self, tmp_path: Path
+    ) -> None:
         pdb = tmp_path / "empty.pdb"
         pdb.write_text("REMARK nothing here\nEND\n")
 
@@ -112,7 +116,7 @@ class TestRoundTrip:
 
 
 class TestPdbRemoveTerIndex:
-    def test_serials_are_renumbered_from_one(self, tmp_path):
+    def test_serials_are_renumbered_from_one(self, tmp_path: Path) -> None:
         pdb = tmp_path / "in.pdb"
         pdb.write_text(_pdb_line(serial=17) + _pdb_line(serial=42) + "END\n")
 
@@ -125,7 +129,7 @@ class TestPdbRemoveTerIndex:
         ]
         assert serials == ["1", "2"]
 
-    def test_numbering_restarts_at_each_model(self, tmp_path):
+    def test_numbering_restarts_at_each_model(self, tmp_path: Path) -> None:
         pdb = tmp_path / "in.pdb"
         pdb.write_text(
             "MODEL     1\n" + _pdb_line(serial=5) + _pdb_line(serial=6) + "ENDMDL\n"
@@ -141,7 +145,9 @@ class TestPdbRemoveTerIndex:
         ]
         assert serials == ["1", "2", "1", "2"]
 
-    def test_conect_records_follow_the_atoms_they_point_at(self, tmp_path):
+    def test_conect_records_follow_the_atoms_they_point_at(
+        self, tmp_path: Path
+    ) -> None:
         pdb = tmp_path / "in.pdb"
         pdb.write_text(
             _pdb_line(serial=17) + _pdb_line(serial=42) + "CONECT   17   42\n"
@@ -154,7 +160,7 @@ class TestPdbRemoveTerIndex:
         )
         assert conect.split() == ["CONECT", "1", "2"]
 
-    def test_a_ter_shares_the_serial_of_the_atom_after_it(self, tmp_path):
+    def test_a_ter_shares_the_serial_of_the_atom_after_it(self, tmp_path: Path) -> None:
         pdb = tmp_path / "in.pdb"
         pdb.write_text(
             _pdb_line(serial=1) + "TER       2      AAA A   1\n" + _pdb_line(serial=3)
@@ -171,7 +177,7 @@ class TestPdbRemoveTerIndex:
 
 
 class TestStripHydrogensKeepIndices:
-    def test_every_hydrogen_goes_when_nothing_is_kept(self, tmp_path):
+    def test_every_hydrogen_goes_when_nothing_is_kept(self, tmp_path: Path) -> None:
         pdb = tmp_path / "in.pdb"
         pdb.write_text(
             _pdb_line(serial=1, element="O")
@@ -184,7 +190,7 @@ class TestStripHydrogensKeepIndices:
 
         assert len(out.read_text().splitlines()) == 1
 
-    def test_the_named_hydrogens_stay(self, tmp_path):
+    def test_the_named_hydrogens_stay(self, tmp_path: Path) -> None:
         pdb = tmp_path / "in.pdb"
         pdb.write_text(
             _pdb_line(serial=1, element="O")
@@ -199,7 +205,7 @@ class TestStripHydrogensKeepIndices:
         serials = [line[6:11].strip() for line in out.read_text().splitlines()]
         assert serials == ["1", "2"]
 
-    def test_non_atom_records_are_passed_through(self, tmp_path):
+    def test_non_atom_records_are_passed_through(self, tmp_path: Path) -> None:
         pdb = tmp_path / "in.pdb"
         pdb.write_text("MODEL     1\n" + _pdb_line(element="H") + "ENDMDL\nEND\n")
 
@@ -210,7 +216,9 @@ class TestStripHydrogensKeepIndices:
 
 
 class TestConvertXyzToPlumedRef:
-    def test_each_frame_becomes_a_model_with_the_template_records(self, tmp_path):
+    def test_each_frame_becomes_a_model_with_the_template_records(
+        self, tmp_path: Path
+    ) -> None:
         template = tmp_path / "index_atoms.pdb"
         template.write_text(
             _pdb_line(serial=1, name=" O1 ", element="O")
@@ -238,7 +246,9 @@ class TestConvertXyzToPlumedRef:
         assert text.count(" O1 ") == 3
         assert " 2.000   0.000   0.000" in text
 
-    def test_the_reference_and_its_template_end_up_numbered_alike(self, tmp_path):
+    def test_the_reference_and_its_template_end_up_numbered_alike(
+        self, tmp_path: Path
+    ) -> None:
         template = tmp_path / "index_atoms.pdb"
         template.write_text(
             _pdb_line(serial=90, name=" O1 ", element="O")
@@ -267,7 +277,7 @@ class TestConvertXyzToPlumedRef:
         assert template_serials == ["1", "2"]
         assert out_serials == ["1", "2"]
 
-    def test_accepts_multiple_template_record_types(self, tmp_path):
+    def test_accepts_multiple_template_record_types(self, tmp_path: Path) -> None:
         template = tmp_path / "index_atoms.pdb"
         template.write_text(
             _pdb_line(serial=1, name=" O1 ", element="O")
@@ -289,7 +299,9 @@ class TestConvertXyzToPlumedRef:
         ]
         assert len(atom_lines) == 2
 
-    def test_an_empty_xyz_writes_nothing_rather_than_failing(self, tmp_path):
+    def test_an_empty_xyz_writes_nothing_rather_than_failing(
+        self, tmp_path: Path
+    ) -> None:
         template = tmp_path / "index_atoms.pdb"
         template.write_text(_pdb_line())
         xyz = tmp_path / "empty.xyz"

@@ -9,6 +9,9 @@ import matplotlib
 # Must run before reactiontools imports pyplot, or the tests need a display.
 matplotlib.use("Agg")
 
+from collections.abc import Callable, Iterator  # noqa: E402
+from pathlib import Path  # noqa: E402
+
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
@@ -19,7 +22,7 @@ from ase.io import write  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _work_in_tmp_path(tmp_path, monkeypatch):
+def _work_in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run every test in a scratch directory.
 
     Several functions write trajectories and figures relative to the working
@@ -29,25 +32,25 @@ def _work_in_tmp_path(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _close_figures():
+def _close_figures() -> Iterator[None]:
     """Close any figures a test leaves behind."""
     yield
     plt.close("all")
 
 
 @pytest.fixture
-def calc():
+def calc() -> EMT:
     """An EMT calculator, cheap enough to run in a test."""
     return EMT()
 
 
 @pytest.fixture
-def water():
+def water() -> Atoms:
     """A single water molecule."""
     return molecule("H2O")
 
 
-def _make_chain(n_images, dz=0.5):
+def _make_chain(n_images: int, dz: float = 0.5) -> list[Atoms]:
     """Build a path of single atoms displaced by ``dz`` along z.
 
     One atom per image makes the path maths exact: the distance between
@@ -70,19 +73,19 @@ def _make_chain(n_images, dz=0.5):
 
 
 @pytest.fixture
-def make_chain():
+def make_chain() -> Callable[..., list[Atoms]]:
     """Factory for chains of single atoms, for tests needing several."""
     return _make_chain
 
 
 @pytest.fixture
-def chain():
+def chain() -> list[Atoms]:
     """A five-image chain spaced 0.5 Å apart."""
     return _make_chain(5)
 
 
 @pytest.fixture
-def md_trajectory(tmp_path):
+def md_trajectory(tmp_path: Path) -> Path:
     """Write a short MD-like trajectory and return its path.
 
     Frames carry both momenta and EMT energies, so the trajectory supports
@@ -109,7 +112,7 @@ PT_DONOR, PT_HYDROGEN, PT_ACCEPTOR = 0, 1, 2
 
 
 @pytest.fixture
-def pt_atoms():
+def pt_atoms() -> Atoms:
     """A hydrogen-bonded triad with a carbon backbone, as ASE atoms.
 
     Malonaldehyde-like without being malonaldehyde: the proton sits on the
@@ -131,7 +134,7 @@ def pt_atoms():
 
 
 @pytest.fixture
-def pt_pdb(pt_atoms, tmp_path):
+def pt_pdb(pt_atoms: Atoms, tmp_path: Path) -> Path:
     """The `pt_atoms` triad written as a PDB, and its path.
 
     ASE writes ``ATOM`` records, so anything reading this back wants
@@ -143,7 +146,7 @@ def pt_pdb(pt_atoms, tmp_path):
 
 
 @pytest.fixture
-def fes_file(tmp_path):
+def fes_file(tmp_path: Path) -> Path:
     """Write a minimal PLUMED ``fes.dat`` and return its path.
 
     Values are in eV, as ``plumed sum_hills`` writes them, so the readers

@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from ase import Atoms
 
 import reactiontools
 
@@ -21,7 +22,7 @@ _PACKAGE = Path(reactiontools.__file__).resolve().parent
 _PLOT_FREE = {"tools_units", "tools_plumed", "tools_cv", "tools_io"}
 
 
-def _source_of(name):
+def _source_of(name: str) -> Path | None:
     """Path of a sibling module, whether it is a file or a package.
 
     Parameters
@@ -40,7 +41,7 @@ def _source_of(name):
     return None
 
 
-def _module_imports(name):
+def _module_imports(name: str) -> tuple[set[str], set[str]]:
     """Intra-package and third-party top-level imports of one module.
 
     Read off the source rather than from a live import, so that a module can
@@ -77,7 +78,7 @@ def _module_imports(name):
     return local, external
 
 
-def _reachable(name, seen=None):
+def _reachable(name: str, seen: set[str] | None = None) -> tuple[set[str], set[str]]:
     """Every sibling module reachable from *name*, and every external import."""
     seen = set() if seen is None else seen
     if name in seen:
@@ -90,12 +91,12 @@ def _reachable(name, seen=None):
     return seen, external
 
 
-def _package_modules():
+def _package_modules() -> list[str]:
     return sorted(path.stem for path in _PACKAGE.glob("tools_*.py"))
 
 
 @pytest.mark.parametrize("name", _package_modules())
-def test_no_module_imports_itself_in_a_cycle(name):
+def test_no_module_imports_itself_in_a_cycle(name: str) -> None:
     """The intra-package import graph must stay acyclic.
 
     A cycle here does not fail at import time in every order, only in some, so
@@ -110,7 +111,7 @@ def test_no_module_imports_itself_in_a_cycle(name):
 
 
 @pytest.mark.parametrize("name", sorted(_PLOT_FREE))
-def test_the_plot_free_modules_stay_plot_free(name):
+def test_the_plot_free_modules_stay_plot_free(name: str) -> None:
     if _source_of(name) is None:
         pytest.skip(f"{name} does not exist yet")
 
@@ -119,12 +120,12 @@ def test_the_plot_free_modules_stay_plot_free(name):
     assert "matplotlib" not in external
 
 
-def test_version_is_a_string():
+def test_version_is_a_string() -> None:
     assert isinstance(reactiontools.__version__, str)
     assert reactiontools.__version__.count(".") == 2
 
 
-def test_all_names_are_importable():
+def test_all_names_are_importable() -> None:
     """Everything advertised in __all__ must actually be re-exported."""
     missing = [
         name for name in reactiontools.__all__ if not hasattr(reactiontools, name)
@@ -132,12 +133,12 @@ def test_all_names_are_importable():
     assert not missing
 
 
-def test_all_names_are_unique():
+def test_all_names_are_unique() -> None:
     """Duplicate exports are easy to introduce in the grouped API list."""
     assert len(reactiontools.__all__) == len(set(reactiontools.__all__))
 
 
-def test_public_api_is_complete():
+def test_public_api_is_complete() -> None:
     """The documented API must all be reachable from the top-level package."""
     expected = {
         # tools_reaction
@@ -190,7 +191,7 @@ def test_public_api_is_complete():
     assert expected <= set(reactiontools.__all__)
 
 
-def test_every_public_name_is_documented():
+def test_every_public_name_is_documented() -> None:
     """__all__ and the README API reference must not drift apart.
 
     Every public name is meant to appear in four places: the module, the
@@ -207,7 +208,7 @@ def test_every_public_name_is_documented():
     assert not missing
 
 
-def test_quick_guess_path_returns_the_requested_images(water):
+def test_quick_guess_path_returns_the_requested_images(water: Atoms) -> None:
     product = water.copy()
     product.positions[1] += [0.4, 0.0, 0.0]
 
@@ -216,7 +217,7 @@ def test_quick_guess_path_returns_the_requested_images(water):
     assert len(path) == 7
 
 
-def test_quick_guess_ts_returns_a_midpoint_structure(water):
+def test_quick_guess_ts_returns_a_midpoint_structure(water: Atoms) -> None:
     product = water.copy()
     product.positions[1] += [0.4, 0.0, 0.0]
 

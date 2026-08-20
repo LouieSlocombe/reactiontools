@@ -20,6 +20,9 @@ Coordinates are in angstrom throughout, which is what both formats use.
 import os
 import string
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
+from pathlib import Path
+from typing import TextIO
 
 import numpy as np
 from ase.data import chemical_symbols
@@ -45,7 +48,7 @@ __all__ = [
 _HYDROGEN_LOOKALIKES = {"He", "Hf", "Hg", "Ho", "Hs"}
 
 
-def element_from_pdb_line(line):
+def element_from_pdb_line(line: str) -> str:
     """Determine the element symbol for a PDB ``ATOM``/``HETATM`` line.
 
     The element column (77-78) is used when present. Otherwise the symbol is
@@ -93,7 +96,12 @@ def element_from_pdb_line(line):
     return symbol[0] if symbol[0] in chemical_symbols else "X"
 
 
-def write_xyz_frame(fh, symbols, positions, comment=""):
+def write_xyz_frame(
+    fh: TextIO,
+    symbols: Sequence[str],
+    positions: Sequence[Sequence[float]] | np.ndarray,
+    comment: str = "",
+) -> None:
     """Write a single frame to an open XYZ file handle.
 
     Parameters
@@ -113,7 +121,7 @@ def write_xyz_frame(fh, symbols, positions, comment=""):
         fh.write(f"{symbol:<2}   {x:>12.6f} {y:>12.6f} {z:>12.6f}\n")
 
 
-def format_pdb_atom_name(symbol, count):
+def format_pdb_atom_name(symbol: str, count: int) -> str:
     """Format a unique atom name for the PDB atom-name field (columns 13-16).
 
     Single-character elements are indented by one column, following the PDB
@@ -138,7 +146,12 @@ def format_pdb_atom_name(symbol, count):
     return f"{name:<4}"[:4]
 
 
-def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1):
+def convert_xyz_to_pdb(
+    input_file: str | Path,
+    output_file: str | Path,
+    cutoff_multiplier: float = 1.1,
+    index: int = -1,
+) -> int:
     """Convert an XYZ file to a PDB file with connectivity and residue assignment.
 
     Molecules (clusters) are identified using distance-based connectivity and
@@ -249,7 +262,11 @@ def convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1, index=-1)
     return n_clusters
 
 
-def convert_pdb_to_xyz(input_file, output_file, comment=None):
+def convert_pdb_to_xyz(
+    input_file: str | Path,
+    output_file: str | Path,
+    comment: str | None = None,
+) -> int:
     """Convert a PDB file to an XYZ file.
 
     Every ``ATOM`` and ``HETATM`` record contributes one atom, in file order.
@@ -319,7 +336,12 @@ def convert_pdb_to_xyz(input_file, output_file, comment=None):
     return len(frames)
 
 
-def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line="HETATM"):
+def convert_xyz_to_plumed_ref(
+    xyz_file: str | Path,
+    template_pdb: str | Path,
+    output_file: str | Path,
+    atom_line: str | Sequence[str] = "HETATM",
+) -> None:
     """Convert a reaction path from XYZ into the reference PLUMED's PATHMSD reads.
 
     Each XYZ frame becomes one model of a multi-model PDB, written by taking
@@ -395,7 +417,7 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line="HE
     pdb_remove_ter_index(output_file, output_file)
 
 
-def pdb_remove_ter_index(input_path, output_path):
+def pdb_remove_ter_index(input_path: str | Path, output_path: str | Path) -> None:
     """Renumber the atom serials of a PDB file, keeping TER and CONECT in step.
 
     Atoms are renumbered sequentially from 1, restarting at each model, and
@@ -454,7 +476,11 @@ def pdb_remove_ter_index(input_path, output_path):
         f.writelines(clean_lines)
 
 
-def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
+def strip_hydrogens_keep_indices(
+    input_pdb: str | Path,
+    output_pdb: str | Path,
+    keep: Iterable[int] | None = None,
+) -> None:
     """Remove hydrogen atoms from a PDB file, except for a chosen subset.
 
     A path collective variable built over every atom of a reacting group

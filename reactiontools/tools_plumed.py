@@ -21,10 +21,13 @@ handling and works without either.
 import re
 import subprocess
 import sys
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+from ase import Atoms
 from ase.calculators.plumed import Plumed
 from ase.neighborlist import build_neighbor_list
 from ase.units import kB
@@ -48,7 +51,7 @@ _PLUMED_HINT = (
 _CV_LABEL = re.compile(r"^\s*([A-Za-z_]\w*)\s*:")
 
 
-def plumed_selection(indices):
+def plumed_selection(indices: Iterable[int]) -> str:
     """Format atom indices as a PLUMED ``ATOMS=`` selection string.
 
     Parameters
@@ -81,7 +84,7 @@ def plumed_selection(indices):
     return ",".join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
 
 
-def find_molecules(atoms):
+def find_molecules(atoms: Atoms) -> list[np.ndarray]:
     """Return connected atom groups identified as molecules.
 
     Parameters
@@ -101,7 +104,7 @@ def find_molecules(atoms):
     return [np.where(labels == k)[0] for k in range(n)]
 
 
-def _cv_labels(cvs):
+def _cv_labels(cvs: Sequence[str]) -> list[str]:
     """Pull the label off each collective-variable line.
 
     PLUMED refers to a CV by the label it was defined with, so ``METAD`` and
@@ -143,19 +146,19 @@ def _cv_labels(cvs):
 
 
 def plumed_metad_input(
-    cvs,
-    sigma,
-    height,
-    pace,
-    biasfactor=None,
-    temperature=None,
-    hills="HILLS",
-    colvar="COLVAR",
-    stride=10,
-    units=True,
-    metad_extra=None,
-    extra=None,
-):
+    cvs: Sequence[str],
+    sigma: float | Sequence[float],
+    height: float,
+    pace: int,
+    biasfactor: float | None = None,
+    temperature: float | None = None,
+    hills: str = "HILLS",
+    colvar: str | None = "COLVAR",
+    stride: int = 10,
+    units: bool = True,
+    metad_extra: str | None = None,
+    extra: Sequence[str] | None = None,
+) -> list[str]:
     """Build the PLUMED input for a metadynamics run.
 
     Assembles the lines :func:`plumed_calculator` takes: the units, the
@@ -282,8 +285,14 @@ def plumed_metad_input(
 
 @contextmanager
 def plumed_calculator(
-    atoms, calc, input_lines, timestep, temperature=None, log="", restart=False
-):
+    atoms: Atoms,
+    calc: Any,
+    input_lines: Sequence[str],
+    timestep: float,
+    temperature: float | None = None,
+    log: str = "",
+    restart: bool = False,
+) -> Iterator[Plumed]:
     """Bias an ASE calculator with PLUMED, for the length of the block.
 
     Wraps ``calc`` in an :class:`ase.calculators.plumed.Plumed` and hangs it
@@ -380,7 +389,7 @@ def plumed_calculator(
             atoms.calc = previous
 
 
-def _grid_bound(value):
+def _grid_bound(value: float | str | Sequence[float]) -> str:
     """Format a per-variable grid bound, which PLUMED takes comma-separated.
 
     Parameters
@@ -398,7 +407,7 @@ def _grid_bound(value):
     return ",".join(str(item) for item in value)
 
 
-def sum_hills_files(outfile="fes.dat"):
+def sum_hills_files(outfile: str | Path = "fes.dat") -> list[Path]:
     """List the surfaces a strided :func:`run_sum_hills` wrote, in order.
 
     ``--stride`` does not number the file it was given: it writes
@@ -442,20 +451,20 @@ def sum_hills_files(outfile="fes.dat"):
 
 
 def run_sum_hills(
-    hills="HILLS",
-    outfile="fes.dat",
-    mintozero=True,
-    stride=None,
-    nohistory=False,
-    grid_min=None,
-    grid_max=None,
-    grid_bin=None,
-    idw=None,
-    kt=None,
-    negbias=False,
-    extra=None,
-    verbose=True,
-):
+    hills: str | Path = "HILLS",
+    outfile: str | Path = "fes.dat",
+    mintozero: bool = True,
+    stride: int | None = None,
+    nohistory: bool = False,
+    grid_min: float | Sequence[float] | None = None,
+    grid_max: float | Sequence[float] | None = None,
+    grid_bin: int | Sequence[int] | None = None,
+    idw: str | Sequence[str] | None = None,
+    kt: float | None = None,
+    negbias: bool = False,
+    extra: Sequence[str] | None = None,
+    verbose: bool = True,
+) -> str:
     """Run ``plumed sum_hills`` to build a free-energy surface from the hills.
 
     The paths are resolved by the plumed executable, so this acts on the
@@ -557,14 +566,14 @@ def run_sum_hills(
 
 
 def _opes_fes_command(
-    state="STATE",
-    outfile="fes.dat",
-    grid_min=None,
-    grid_max=None,
-    grid_bin=None,
-    kt=None,
-    extra=None,
-):
+    state: str | Path = "STATE",
+    outfile: str | Path = "fes.dat",
+    grid_min: float | str | Sequence[float] | None = None,
+    grid_max: float | str | Sequence[float] | None = None,
+    grid_bin: int | str | Sequence[int] | None = None,
+    kt: float | None = None,
+    extra: Sequence[str] | None = None,
+) -> list[str]:
     """Build the command line that reconstructs a FES from an OPES state file.
 
     ``OPES_METAD`` does not deposit hills for ``plumed sum_hills`` to add up;
@@ -627,15 +636,15 @@ def _opes_fes_command(
 
 
 def run_opes_fes(
-    state="STATE",
-    outfile="fes.dat",
-    grid_min=None,
-    grid_max=None,
-    grid_bin=None,
-    kt=None,
-    extra=None,
-    verbose=True,
-):
+    state: str | Path = "STATE",
+    outfile: str | Path = "fes.dat",
+    grid_min: float | Sequence[float] | None = None,
+    grid_max: float | Sequence[float] | None = None,
+    grid_bin: int | Sequence[int] | None = None,
+    kt: float | None = None,
+    extra: Sequence[str] | None = None,
+    verbose: bool = True,
+) -> str:
     """Rebuild a free-energy surface from an OPES state file.
 
     The ``OPES_METAD`` counterpart of :func:`run_sum_hills`, and the other half

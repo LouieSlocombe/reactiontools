@@ -29,12 +29,15 @@ saddle-point searches, :func:`optimise_ts` and :func:`optimise_irc`.
 import copy
 import os
 import warnings
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TextIO
 
 import geodesic_interpolate as gi
 import numpy as np
+from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase.calculators.socketio import SocketIOCalculator
 from ase.io import read
@@ -71,7 +74,13 @@ class ConvergenceError(RuntimeError):
     """
 
 
-def _check_converged(converged, what, fmax, steps, raise_on_unconverged):
+def _check_converged(
+    converged: bool,
+    what: str,
+    fmax: float,
+    steps: int,
+    raise_on_unconverged: bool,
+) -> bool:
     """Report an optimisation that ran out of steps.
 
     ASE's optimisers return whether they converged and otherwise say nothing,
@@ -123,7 +132,7 @@ def _check_converged(converged, what, fmax, steps, raise_on_unconverged):
     return False
 
 
-def _import_sella(name):
+def _import_sella(name: str) -> tuple[type, type]:
     """Import sella on demand, with an install hint when it is missing.
 
     Importing Sella only for saddle-point searches keeps package startup
@@ -151,7 +160,7 @@ def _import_sella(name):
     return Sella, IRC
 
 
-def get_neb_path(images):
+def get_neb_path(images: Sequence[Atoms]) -> np.ndarray:
     """Compute the cumulative reaction-path distance for NEB images.
 
     Parameters
@@ -172,7 +181,7 @@ def get_neb_path(images):
     return np.cumsum(path)
 
 
-def get_fmax(atoms):
+def get_fmax(atoms: Atoms) -> float:
     """Return the largest force acting on any single atom.
 
     This is the quantity ASE's optimisers converge against, so it is the one
@@ -191,7 +200,11 @@ def get_fmax(atoms):
     return np.sqrt((atoms.get_forces() ** 2).sum(axis=1).max())
 
 
-def stitch_path(path1, path2, f_reverse_path=False):
+def stitch_path(
+    path1: Iterable[Atoms],
+    path2: Iterable[Atoms],
+    f_reverse_path: bool = False,
+) -> list[Atoms]:
     """Join two reaction paths into a single IRC-like sequence.
 
     Parameters
@@ -214,7 +227,7 @@ def stitch_path(path1, path2, f_reverse_path=False):
     return irc
 
 
-def resample_path(path, n_resample):
+def resample_path(path: Sequence[Atoms], n_resample: int) -> list[Atoms]:
     """Resample a path to a fixed number of images using cubic splines.
 
     Parameters
@@ -243,21 +256,21 @@ def resample_path(path, n_resample):
 
 
 def optimise_geom(
-    atoms,
-    calc,
-    fmax=0.01,
-    steps=1000,
-    opti_traj="opti.traj",
-    use_socket=False,
-    socket_port=None,
-    socket_unixsocket=None,
-    socket_log=None,
-    raise_on_unconverged=False,
-    optimiser=BFGS,
-    logfile="-",
-    keep_traj=False,
-    _what="Geometry optimisation",
-):
+    atoms: Atoms,
+    calc: Calculator,
+    fmax: float = 0.01,
+    steps: int = 1000,
+    opti_traj: str = "opti.traj",
+    use_socket: bool = False,
+    socket_port: int | None = None,
+    socket_unixsocket: str | None = None,
+    socket_log: Any = None,
+    raise_on_unconverged: bool = False,
+    optimiser: Callable[..., Any] = BFGS,
+    logfile: str | TextIO | None = "-",
+    keep_traj: bool = False,
+    _what: str = "Geometry optimisation",
+) -> Atoms:
     """Relax a structure and return the final image.
 
     Whether the optimiser actually converged is recorded in
@@ -353,22 +366,22 @@ def optimise_geom(
 
 
 def optimise_reactant_product(
-    reactant,
-    product,
-    calc,
-    fmax=0.01,
-    steps=1000,
-    reactant_opti="reactant_opti.traj",
-    product_opti="product_opti.traj",
-    use_socket=False,
-    socket_port=None,
-    socket_unixsocket=None,
-    socket_log=None,
-    raise_on_unconverged=False,
-    optimiser=BFGS,
-    logfile="-",
-    keep_traj=False,
-):
+    reactant: Atoms,
+    product: Atoms,
+    calc: Calculator,
+    fmax: float = 0.01,
+    steps: int = 1000,
+    reactant_opti: str = "reactant_opti.traj",
+    product_opti: str = "product_opti.traj",
+    use_socket: bool = False,
+    socket_port: int | None = None,
+    socket_unixsocket: str | None = None,
+    socket_log: Any = None,
+    raise_on_unconverged: bool = False,
+    optimiser: Callable[..., Any] = BFGS,
+    logfile: str | TextIO | None = "-",
+    keep_traj: bool = False,
+) -> tuple[Atoms, Atoms]:
     """Optimise reactant and product structures independently.
 
     Each endpoint carries its own ``info["converged"]``, and the two are
@@ -454,16 +467,16 @@ def optimise_reactant_product(
 
 
 def _build_band(
-    reactant,
-    product,
-    n_images,
-    climb,
-    rm_ro_trans,
-    geo_int,
-    k,
-    parallel=False,
-    world=None,
-):
+    reactant: Atoms,
+    product: Atoms,
+    n_images: int,
+    climb: bool,
+    rm_ro_trans: bool,
+    geo_int: bool,
+    k: float,
+    parallel: bool = False,
+    world: Any = None,
+) -> NEB:
     """Build an interpolated NEB whose images carry no calculators yet.
 
     Shared by :func:`prepare_neb` and :func:`prepare_parallel_neb`, which
@@ -516,7 +529,7 @@ def _build_band(
     return neb
 
 
-def _validate_band(images):
+def _validate_band(images: Iterable[Atoms]) -> list[Atoms]:
     """Check a sequence of images can be relaxed as a band, and listify it.
 
     ASE builds a two-image NEB happily and then fails with an ``IndexError``
@@ -548,8 +561,14 @@ def _validate_band(images):
 
 
 def _band_from_images(
-    images, n_images, climb, rm_ro_trans, k, parallel=False, world=None
-):
+    images: Sequence[Atoms],
+    n_images: int | None,
+    climb: bool,
+    rm_ro_trans: bool,
+    k: float,
+    parallel: bool = False,
+    world: Any = None,
+) -> NEB:
     """Build a NEB from an existing band, interpolating nothing.
 
     The counterpart to :func:`_build_band`: the images are already where they
@@ -602,7 +621,7 @@ def _band_from_images(
     )
 
 
-def _attach_calculators(neb, calc):
+def _attach_calculators(neb: NEB, calc: Calculator) -> NEB:
     """Give every image its own copy of ``calc`` and evaluate the band once.
 
     Parameters
@@ -630,17 +649,17 @@ def _attach_calculators(neb, calc):
 
 
 def prepare_neb(
-    reactant,
-    product,
-    calc,
-    n_images=5,
-    climb=True,
-    rm_ro_trans=True,
-    geo_int=True,
-    k=2.0,
-    parallel=False,
-    world=None,
-):
+    reactant: Atoms,
+    product: Atoms,
+    calc: Calculator,
+    n_images: int = 5,
+    climb: bool = True,
+    rm_ro_trans: bool = True,
+    geo_int: bool = True,
+    k: float = 2.0,
+    parallel: bool = False,
+    world: Any = None,
+) -> NEB:
     """Build an ASE NEB object from reactant and product end states.
 
     Parameters
@@ -694,15 +713,15 @@ def prepare_neb(
 
 
 def restart_neb(
-    images,
-    calc,
-    n_images=None,
-    climb=True,
-    rm_ro_trans=True,
-    k=2.0,
-    parallel=False,
-    world=None,
-):
+    images: Sequence[Atoms],
+    calc: Calculator,
+    n_images: int | None = None,
+    climb: bool = True,
+    rm_ro_trans: bool = True,
+    k: float = 2.0,
+    parallel: bool = False,
+    world: Any = None,
+) -> NEB:
     """Build a NEB from a band that has already been relaxed once.
 
     :func:`prepare_neb` interpolates a fresh band between two endpoints, which
@@ -781,14 +800,14 @@ def restart_neb(
 
 
 def optimise_neb(
-    neb,
-    fmax=0.01,
-    steps=1000,
-    ts_traj="ts.traj",
-    raise_on_unconverged=False,
-    optimiser=BFGS,
-    logfile="-",
-):
+    neb: NEB,
+    fmax: float = 0.01,
+    steps: int = 1000,
+    ts_traj: str = "ts.traj",
+    raise_on_unconverged: bool = False,
+    optimiser: Callable[..., Any] = BFGS,
+    logfile: str | TextIO | None = "-",
+) -> list[Atoms]:
     """Optimise an NEB band and return the final trajectory images.
 
     A band that runs out of steps warns :class:`ConvergenceWarning` rather
@@ -862,7 +881,7 @@ class _FixedEnergy(Calculator):
 
     implemented_properties = ["energy", "free_energy"]
 
-    def __init__(self, energy):
+    def __init__(self, energy: float) -> None:
         """Store the energy this calculator reports.
 
         Parameters
@@ -873,7 +892,12 @@ class _FixedEnergy(Calculator):
         super().__init__()
         self.energy = energy
 
-    def calculate(self, atoms=None, properties=("energy",), system_changes=None):
+    def calculate(
+        self,
+        atoms: Atoms | None = None,
+        properties: Sequence[str] = ("energy",),
+        system_changes: Sequence[str] | None = None,
+    ) -> None:
         """Report the stored energy, whatever the atoms and request were.
 
         Parameters
@@ -892,7 +916,7 @@ class _FixedEnergy(Calculator):
         self.results = {"energy": self.energy, "free_energy": self.energy}
 
 
-def _cached_energy(atoms):
+def _cached_energy(atoms: Atoms) -> float | None:
     """Return an energy ``atoms`` already holds, without running anything.
 
     Deliberately reads the stored result rather than calling
@@ -924,14 +948,14 @@ def _cached_energy(atoms):
 
 @contextmanager
 def socket_calculators(
-    n_calculators,
-    make_calc=None,
-    make_launcher=None,
-    unixsocket=None,
-    port=None,
-    timeout=None,
-    log=None,
-):
+    n_calculators: int,
+    make_calc: Callable[[int], Calculator] | None = None,
+    make_launcher: Callable[[int], Any] | None = None,
+    unixsocket: str | None = None,
+    port: int | None = None,
+    timeout: float | None = None,
+    log: str | None = None,
+) -> Iterator[list[SocketIOCalculator]]:
     """Open a pool of socket calculators, one per image.
 
     Each :class:`~ase.calculators.socketio.SocketIOCalculator` gets its own
@@ -1013,7 +1037,7 @@ def socket_calculators(
         yield calculators
 
 
-def _require_single_rank(name):
+def _require_single_rank(name: str) -> None:
     """Refuse to run under more than one MPI rank.
 
     The parallelism here is threads and sockets, so the ranks belong to the
@@ -1040,7 +1064,12 @@ def _require_single_rank(name):
 
 
 @contextmanager
-def _parallel_band(neb, energies, make_calc, socket_kwargs):
+def _parallel_band(
+    neb: NEB,
+    energies: Sequence[float | None],
+    make_calc: Callable[[int], Calculator] | None,
+    socket_kwargs: dict[str, Any],
+) -> Iterator[NEB]:
     """Put a built band onto a pool of socket calculators.
 
     Only the interior images need sockets. The endpoints are pinned to a fixed
@@ -1081,16 +1110,16 @@ def _parallel_band(neb, energies, make_calc, socket_kwargs):
 
 @contextmanager
 def prepare_parallel_neb(
-    reactant,
-    product,
-    make_calc,
-    n_images=5,
-    climb=True,
-    rm_ro_trans=True,
-    geo_int=True,
-    k=2.0,
-    **socket_kwargs,
-):
+    reactant: Atoms,
+    product: Atoms,
+    make_calc: Callable[[int], Calculator] | None,
+    n_images: int = 5,
+    climb: bool = True,
+    rm_ro_trans: bool = True,
+    geo_int: bool = True,
+    k: float = 2.0,
+    **socket_kwargs: Any,
+) -> Iterator[NEB]:
     """Build a NEB that evaluates its images concurrently over sockets.
 
     The serial :func:`prepare_neb` walks the band one image at a time, so a
@@ -1198,14 +1227,14 @@ def prepare_parallel_neb(
 
 @contextmanager
 def restart_parallel_neb(
-    images,
-    make_calc,
-    n_images=None,
-    climb=True,
-    rm_ro_trans=True,
-    k=2.0,
-    **socket_kwargs,
-):
+    images: Sequence[Atoms],
+    make_calc: Callable[[int], Calculator] | None,
+    n_images: int | None = None,
+    climb: bool = True,
+    rm_ro_trans: bool = True,
+    k: float = 2.0,
+    **socket_kwargs: Any,
+) -> Iterator[NEB]:
     """Continue an existing band over sockets, evaluating its images at once.
 
     :func:`restart_neb` for the case where the images are expensive enough to
@@ -1282,7 +1311,7 @@ def restart_parallel_neb(
         yield band
 
 
-def _get_energy(image, calc):
+def _get_energy(image: Atoms, calc: Calculator | None) -> float:
     """Return the energy an image already carries, else evaluate with ``calc``.
 
     Images read back from a trajectory hold their energies, and re-running the
@@ -1339,12 +1368,12 @@ class NebSummary:
     reverse_barrier: float
     reaction_energy: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Coerce *energies* to a float array, whatever it was built from."""
         self.energies = np.asarray(self.energies, dtype=float)
 
     @property
-    def is_barrierless(self):
+    def is_barrierless(self) -> bool:
         """bool: True when the highest image is one of the endpoints.
 
         The band then has no maximum in between: it runs downhill throughout,
@@ -1356,7 +1385,7 @@ class NebSummary:
         return self.ts_index in (0, len(self.energies) - 1)
 
     @staticmethod
-    def _ev(value):
+    def _ev(value: float) -> str:
         """Format an energy, without a sign on a value that rounds to zero.
 
         A thermoneutral reaction comes out a hair either side of zero, and
@@ -1365,7 +1394,7 @@ class NebSummary:
         text = f"{value:.3f}"
         return "0.000" if text == "-0.000" else text
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Report the barriers and the reaction energy, one per line."""
         return (
             f"Barrier:         {self._ev(self.barrier)} eV\n"
@@ -1376,7 +1405,10 @@ class NebSummary:
         )
 
 
-def summarise_neb(images, calc=None):
+def summarise_neb(
+    images: Sequence[Atoms],
+    calc: Calculator | None = None,
+) -> NebSummary:
     """Reduce a relaxed band to the numbers it was run for.
 
     The barrier is measured from the highest image, so it agrees with
@@ -1433,7 +1465,7 @@ def summarise_neb(images, calc=None):
     )
 
 
-def get_ts_image(neb_images, calc=None):
+def get_ts_image(neb_images: Sequence[Atoms], calc: Calculator | None = None) -> Atoms:
     """Return the highest-energy image along a NEB band.
 
     Parameters
@@ -1461,17 +1493,17 @@ def get_ts_image(neb_images, calc=None):
 
 
 def optimise_ts(
-    ts_image,
-    calc,
-    fmax=0.01,
-    steps=1000,
-    eta=1e-4,
-    gamma=0.1,
-    sella_traj="sella.traj",
-    raise_on_unconverged=False,
-    logfile="-",
-    internal=False,
-):
+    ts_image: Atoms,
+    calc: Calculator,
+    fmax: float = 0.01,
+    steps: int = 1000,
+    eta: float = 1e-4,
+    gamma: float = 0.1,
+    sella_traj: str = "sella.traj",
+    raise_on_unconverged: bool = False,
+    logfile: str | TextIO | None = "-",
+    internal: bool = False,
+) -> Atoms:
     """Refine a transition-state guess to a true saddle point with Sella.
 
     A NEB band gets close to the saddle but rarely converges tightly onto it,
@@ -1550,19 +1582,19 @@ def optimise_ts(
 
 
 def optimise_irc(
-    ts_image,
-    calc,
-    fmax=0.01,
-    steps=1000,
-    dx=0.1,
-    eta=1e-4,
-    gamma=0.1,
-    keep_going=True,
-    irc_f_traj="irc_f.traj",
-    irc_r_traj="irc_r.traj",
-    raise_on_unconverged=False,
-    logfile="-",
-):
+    ts_image: Atoms,
+    calc: Calculator,
+    fmax: float = 0.01,
+    steps: int = 1000,
+    dx: float = 0.1,
+    eta: float = 1e-4,
+    gamma: float = 0.1,
+    keep_going: bool = True,
+    irc_f_traj: str = "irc_f.traj",
+    irc_r_traj: str = "irc_r.traj",
+    raise_on_unconverged: bool = False,
+    logfile: str | TextIO | None = "-",
+) -> tuple[list[Atoms], list[Atoms]]:
     """Follow the intrinsic reaction coordinate downhill from a saddle point.
 
     Runs Sella's IRC in both directions, which is what confirms that a saddle
@@ -1666,7 +1698,7 @@ def optimise_irc(
     return forward, reverse
 
 
-def get_vibrations(atoms, calc):
+def get_vibrations(atoms: Atoms, calc: Calculator) -> np.ndarray:
     """Compute vibrational frequencies by finite differences.
 
     Mostly used to characterise a stationary point: a minimum has all-real
@@ -1699,7 +1731,11 @@ def get_vibrations(atoms, calc):
     return freqs
 
 
-def quick_guess_path(reactant, product, n_images=25):
+def quick_guess_path(
+    reactant: Atoms,
+    product: Atoms,
+    n_images: int = 25,
+) -> list[Atoms]:
     """Generate a quick geodesic path guess between two endpoints.
 
     Parameters
@@ -1719,7 +1755,7 @@ def quick_guess_path(reactant, product, n_images=25):
     return gi.geodesic_interpolate([reactant, product], n_images=n_images)
 
 
-def quick_guess_ts(reactant, product, n_images=25):
+def quick_guess_ts(reactant: Atoms, product: Atoms, n_images: int = 25) -> Atoms:
     """Return the midpoint image from a quick geodesic path guess.
 
     Parameters

@@ -3,9 +3,11 @@
 import os
 import socket
 import warnings
+from collections.abc import Callable, Iterable
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Self
 
 import numpy as np
 import pytest
@@ -56,7 +58,13 @@ class _FakeSocketIOCalculator:
 
     instances = []
 
-    def __init__(self, calc, port=None, unixsocket=None, log=None):
+    def __init__(
+        self,
+        calc: Any,
+        port: int | None = None,
+        unixsocket: str | None = None,
+        log: Any = None,
+    ) -> None:
         self.calc = calc
         self.port = port
         self.unixsocket = unixsocket
@@ -64,16 +72,16 @@ class _FakeSocketIOCalculator:
         self.closed = False
         _FakeSocketIOCalculator.instances.append(self)
 
-    def __enter__(self):
+    def __enter__(self) -> Any:
         return self.calc
 
-    def __exit__(self, *exc_info):
+    def __exit__(self, *exc_info: Any) -> bool:
         self.closed = True
         return False
 
 
 @pytest.fixture
-def fake_socketio(monkeypatch):
+def fake_socketio(monkeypatch: pytest.MonkeyPatch) -> type[_FakeSocketIOCalculator]:
     """Patch tools_reaction's SocketIOCalculator with a recording stub."""
     _FakeSocketIOCalculator.instances = []
     monkeypatch.setattr(tools_reaction, "SocketIOCalculator", _FakeSocketIOCalculator)
@@ -93,13 +101,13 @@ class _FakeParallelSocketIOCalculator(EMT):
 
     def __init__(
         self,
-        calc=None,
-        launch_client=None,
-        unixsocket=None,
-        port=None,
-        timeout=None,
-        log=None,
-    ):
+        calc: Any = None,
+        launch_client: Any = None,
+        unixsocket: str | None = None,
+        port: int | None = None,
+        timeout: float | None = None,
+        log: str | None = None,
+    ) -> None:
         super().__init__()
         self.wrapped_calc = calc
         self.launch_client = launch_client
@@ -114,17 +122,19 @@ class _FakeParallelSocketIOCalculator(EMT):
         if index == type(self).fail_on:
             raise OSError("socket failed to bind")
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc_info):
+    def __exit__(self, *exc_info: Any) -> bool:
         self.closed = True
         self.server = None
         return False
 
 
 @pytest.fixture
-def fake_parallel_socketio(monkeypatch):
+def fake_parallel_socketio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> type[_FakeParallelSocketIOCalculator]:
     """Replace socket transport where a test only needs pool semantics."""
     _FakeParallelSocketIOCalculator.instances = []
     _FakeParallelSocketIOCalculator.fail_on = None
@@ -135,7 +145,7 @@ def fake_parallel_socketio(monkeypatch):
 
 
 @pytest.fixture
-def local_socket_access(tmp_path):
+def local_socket_access(tmp_path: Path) -> None:
     """Skip transport integration tests where the runner forbids sockets."""
     probe = tmp_path / "socket-probe"
     try:
@@ -146,19 +156,19 @@ def local_socket_access(tmp_path):
 
 
 class TestGetNebPath:
-    def test_returns_cumulative_distance_from_zero(self, chain):
+    def test_returns_cumulative_distance_from_zero(self, chain: list[Atoms]) -> None:
         # One atom per image spaced 0.5 A apart, so the answer is exact
         assert get_neb_path(chain) == pytest.approx([0.0, 0.5, 1.0, 1.5, 2.0])
 
-    def test_is_monotonic(self, chain):
+    def test_is_monotonic(self, chain: list[Atoms]) -> None:
         path = get_neb_path(chain)
 
         assert np.all(np.diff(path) >= 0)
 
-    def test_length_matches_the_number_of_images(self, chain):
+    def test_length_matches_the_number_of_images(self, chain: list[Atoms]) -> None:
         assert len(get_neb_path(chain)) == len(chain)
 
-    def test_uses_the_norm_over_all_atoms(self):
+    def test_uses_the_norm_over_all_atoms(self) -> None:
         """Displacing N atoms by d gives a step of d * sqrt(N)."""
         first = molecule("H2O")
         second = first.copy()
@@ -170,7 +180,9 @@ class TestGetNebPath:
 
 
 class TestStitchPath:
-    def test_reverses_the_first_path_and_drops_the_shared_image(self, make_chain):
+    def test_reverses_the_first_path_and_drops_the_shared_image(
+        self, make_chain: Callable[..., list[Atoms]]
+    ) -> None:
         first = make_chain(3, dz=1.0)  # z = 0, 1, 2
         second = make_chain(3, dz=2.0)  # z = 0, 2, 4
 
@@ -180,12 +192,16 @@ class TestStitchPath:
         z = [atoms.positions[0, 2] for atoms in stitched]
         assert z == pytest.approx([2.0, 1.0, 0.0, 2.0, 4.0])
 
-    def test_length_is_one_less_than_the_sum(self, make_chain):
+    def test_length_is_one_less_than_the_sum(
+        self, make_chain: Callable[..., list[Atoms]]
+    ) -> None:
         stitched = stitch_path(make_chain(4), make_chain(3))
 
         assert len(stitched) == 4 + 3 - 1
 
-    def test_reverse_flag_flips_the_result(self, make_chain):
+    def test_reverse_flag_flips_the_result(
+        self, make_chain: Callable[..., list[Atoms]]
+    ) -> None:
         first, second = make_chain(3, dz=1.0), make_chain(3, dz=2.0)
 
         forward = stitch_path(first, second)
@@ -196,7 +212,11 @@ class TestStitchPath:
         )
 
     @pytest.mark.parametrize("container", [tuple, iter])
-    def test_accepts_any_sequence(self, make_chain, container):
+    def test_accepts_any_sequence(
+        self,
+        make_chain: Callable[..., list[Atoms]],
+        container: Callable[[list[Atoms]], Iterable[Atoms]],
+    ) -> None:
         """Tuples and generators should work, not just lists."""
         stitched = stitch_path(container(make_chain(3)), container(make_chain(3)))
 
@@ -204,29 +224,29 @@ class TestStitchPath:
 
 
 class TestResamplePath:
-    def test_returns_the_requested_number_of_images(self, chain):
+    def test_returns_the_requested_number_of_images(self, chain: list[Atoms]) -> None:
         assert len(resample_path(chain, 9)) == 9
 
-    def test_preserves_the_endpoints(self, chain):
+    def test_preserves_the_endpoints(self, chain: list[Atoms]) -> None:
         resampled = resample_path(chain, 9)
 
         assert resampled[0].positions == pytest.approx(chain[0].positions)
         assert resampled[-1].positions == pytest.approx(chain[-1].positions)
 
-    def test_spaces_a_linear_path_evenly(self, chain):
+    def test_spaces_a_linear_path_evenly(self, chain: list[Atoms]) -> None:
         """A straight path resampled stays straight and evenly spaced."""
         resampled = resample_path(chain, 9)
 
         z = np.array([atoms.positions[0, 2] for atoms in resampled])
         assert z == pytest.approx(np.linspace(0.0, 2.0, 9))
 
-    def test_can_downsample(self, chain):
+    def test_can_downsample(self, chain: list[Atoms]) -> None:
         resampled = resample_path(chain, 3)
 
         assert len(resampled) == 3
         assert resampled[-1].positions == pytest.approx(chain[-1].positions)
 
-    def test_keeps_the_chemical_symbols(self, water):
+    def test_keeps_the_chemical_symbols(self, water: Atoms) -> None:
         middle = water.copy()
         middle.positions[1] += [0.25, 0.0, 0.0]
         product = water.copy()
@@ -241,7 +261,7 @@ class TestResamplePath:
 
 
 class TestOptimiseGeom:
-    def test_lowers_the_energy(self, calc):
+    def test_lowers_the_energy(self, calc: EMT) -> None:
         atoms = molecule("H2O")
         atoms.positions[1] += [0.2, 0.0, 0.0]
         atoms.calc = EMT()
@@ -251,7 +271,7 @@ class TestOptimiseGeom:
 
         assert relaxed.get_potential_energy() <= before
 
-    def test_converges_below_fmax(self, calc):
+    def test_converges_below_fmax(self, calc: EMT) -> None:
         atoms = molecule("H2O")
         atoms.positions[1] += [0.2, 0.0, 0.0]
 
@@ -259,12 +279,12 @@ class TestOptimiseGeom:
 
         assert np.linalg.norm(relaxed.get_forces(), axis=1).max() < 0.05
 
-    def test_removes_the_temporary_trajectory(self, calc, water):
+    def test_removes_the_temporary_trajectory(self, calc: EMT, water: Atoms) -> None:
         optimise_geom(water, calc, fmax=0.05, steps=5, opti_traj="scratch.traj")
 
         assert not Path("scratch.traj").exists()
 
-    def test_does_not_mutate_the_input(self, calc):
+    def test_does_not_mutate_the_input(self, calc: EMT) -> None:
         atoms = molecule("H2O")
         atoms.positions[1] += [0.2, 0.0, 0.0]
         original = atoms.positions.copy()
@@ -273,12 +293,16 @@ class TestOptimiseGeom:
 
         assert atoms.positions == pytest.approx(original)
 
-    def test_returns_a_structure_with_a_calculator(self, calc, water):
+    def test_returns_a_structure_with_a_calculator(
+        self, calc: EMT, water: Atoms
+    ) -> None:
         relaxed = optimise_geom(water, calc, fmax=0.05, steps=5)
 
         assert relaxed.calc is not None
 
-    def test_uses_socketio_when_requested(self, calc, water, fake_socketio):
+    def test_uses_socketio_when_requested(
+        self, calc: EMT, water: Atoms, fake_socketio: type[_FakeSocketIOCalculator]
+    ) -> None:
         optimise_geom(
             water,
             calc,
@@ -296,7 +320,9 @@ class TestOptimiseGeom:
         assert used.log == "sock.log"
         assert used.closed is True
 
-    def test_relaxes_through_the_socket_wrapper(self, calc, water, fake_socketio):
+    def test_relaxes_through_the_socket_wrapper(
+        self, calc: EMT, water: Atoms, fake_socketio: type[_FakeSocketIOCalculator]
+    ) -> None:
         """The fake hands EMT straight back, so relaxation still works."""
         atoms = water.copy()
         atoms.positions[1] += [0.2, 0.0, 0.0]
@@ -305,12 +331,14 @@ class TestOptimiseGeom:
 
         assert np.linalg.norm(relaxed.get_forces(), axis=1).max() < 0.05
 
-    def test_does_not_touch_socketio_by_default(self, calc, water, fake_socketio):
+    def test_does_not_touch_socketio_by_default(
+        self, calc: EMT, water: Atoms, fake_socketio: type[_FakeSocketIOCalculator]
+    ) -> None:
         optimise_geom(water, calc, fmax=0.05, steps=5)
 
         assert fake_socketio.instances == []
 
-    def test_records_convergence_on_the_result(self, calc):
+    def test_records_convergence_on_the_result(self, calc: EMT) -> None:
         atoms = molecule("H2O")
         atoms.positions[1] += [0.2, 0.0, 0.0]
 
@@ -318,7 +346,7 @@ class TestOptimiseGeom:
 
         assert relaxed.info["converged"] is True
 
-    def test_warns_and_records_when_it_runs_out_of_steps(self, calc):
+    def test_warns_and_records_when_it_runs_out_of_steps(self, calc: EMT) -> None:
         """The whole point: an unrelaxed structure must not come back silent."""
         atoms = molecule("H2O")
         atoms.positions[1] += [0.5, 0.0, 0.0]
@@ -328,14 +356,14 @@ class TestOptimiseGeom:
 
         assert relaxed.info["converged"] is False
 
-    def test_raises_instead_when_asked(self, calc):
+    def test_raises_instead_when_asked(self, calc: EMT) -> None:
         atoms = molecule("H2O")
         atoms.positions[1] += [0.5, 0.0, 0.0]
 
         with pytest.raises(ConvergenceError, match="fmax=0.001"):
             optimise_geom(atoms, calc, fmax=1e-3, steps=2, raise_on_unconverged=True)
 
-    def test_still_cleans_up_the_trajectory_when_it_raises(self, calc):
+    def test_still_cleans_up_the_trajectory_when_it_raises(self, calc: EMT) -> None:
         atoms = molecule("H2O")
         atoms.positions[1] += [0.5, 0.0, 0.0]
 
@@ -351,14 +379,18 @@ class TestOptimiseGeom:
 
         assert not Path("scratch.traj").exists()
 
-    def test_uses_the_optimiser_it_is_given(self, calc, water, capsys):
+    def test_uses_the_optimiser_it_is_given(
+        self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         optimise_geom(water, calc, fmax=0.05, steps=20, optimiser=FIRE)
 
         log = capsys.readouterr().out
         assert "FIRE" in log
         assert "BFGS" not in log
 
-    def test_accepts_a_factory_for_optimiser_specific_arguments(self, calc):
+    def test_accepts_a_factory_for_optimiser_specific_arguments(
+        self, calc: EMT
+    ) -> None:
         """partial() is how an optimiser's own settings get through."""
         atoms = molecule("H2O")
         atoms.positions[1] += [0.2, 0.0, 0.0]
@@ -369,30 +401,36 @@ class TestOptimiseGeom:
 
         assert relaxed.info["converged"] is True
 
-    def test_logs_to_stdout_by_default(self, calc, water, capsys):
+    def test_logs_to_stdout_by_default(
+        self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         optimise_geom(water, calc, fmax=0.05, steps=5)
 
         assert "Step" in capsys.readouterr().out
 
-    def test_a_logfile_takes_the_log_off_stdout(self, calc, water, capsys):
+    def test_a_logfile_takes_the_log_off_stdout(
+        self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         optimise_geom(water, calc, fmax=0.05, steps=5, logfile="opt.log")
 
         assert capsys.readouterr().out == ""
         assert "Step" in Path("opt.log").read_text()
 
-    def test_no_logfile_silences_it(self, calc, water, capsys):
+    def test_no_logfile_silences_it(
+        self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         optimise_geom(water, calc, fmax=0.05, steps=5, logfile=None)
 
         assert capsys.readouterr().out == ""
 
-    def test_keeps_the_trajectory_when_asked(self, calc, water):
+    def test_keeps_the_trajectory_when_asked(self, calc: EMT, water: Atoms) -> None:
         optimise_geom(
             water, calc, fmax=0.05, steps=5, opti_traj="kept.traj", keep_traj=True
         )
 
         assert Path("kept.traj").exists()
 
-    def test_the_kept_trajectory_survives_a_raise(self, calc):
+    def test_the_kept_trajectory_survives_a_raise(self, calc: EMT) -> None:
         """Keeping it matters most when the run is the one that went wrong."""
         atoms = molecule("H2O")
         atoms.positions[1] += [0.5, 0.0, 0.0]
@@ -410,7 +448,7 @@ class TestOptimiseGeom:
 
         assert Path("kept.traj").exists()
 
-    def test_a_warning_filter_can_promote_it_to_an_error(self, calc):
+    def test_a_warning_filter_can_promote_it_to_an_error(self, calc: EMT) -> None:
         """ConvergenceWarning is its own class so a whole script can escalate."""
         atoms = molecule("H2O")
         atoms.positions[1] += [0.5, 0.0, 0.0]
@@ -422,7 +460,7 @@ class TestOptimiseGeom:
 
 
 class TestOptimiseReactantProduct:
-    def test_relaxes_both_endpoints(self, calc):
+    def test_relaxes_both_endpoints(self, calc: EMT) -> None:
         reactant = molecule("H2O")
         reactant.positions[1] += [0.2, 0.0, 0.0]
         product = molecule("H2O")
@@ -435,7 +473,7 @@ class TestOptimiseReactantProduct:
         for relaxed in (relaxed_r, relaxed_p):
             assert np.linalg.norm(relaxed.get_forces(), axis=1).max() < 0.05
 
-    def test_cleans_up_both_trajectories(self, calc, water):
+    def test_cleans_up_both_trajectories(self, calc: EMT, water: Atoms) -> None:
         optimise_reactant_product(
             water,
             water.copy(),
@@ -450,8 +488,8 @@ class TestOptimiseReactantProduct:
         assert not Path("p.traj").exists()
 
     def test_forwards_socket_options_to_both_optimisations(
-        self, calc, water, fake_socketio
-    ):
+        self, calc: EMT, water: Atoms, fake_socketio: type[_FakeSocketIOCalculator]
+    ) -> None:
         optimise_reactant_product(
             water,
             water.copy(),
@@ -465,7 +503,9 @@ class TestOptimiseReactantProduct:
         assert len(fake_socketio.instances) == 2
         assert all(i.unixsocket == "rt-test" for i in fake_socketio.instances)
 
-    def test_forwards_the_optimiser_and_logfile_to_both(self, calc, water, capsys):
+    def test_forwards_the_optimiser_and_logfile_to_both(
+        self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         optimise_reactant_product(
             water,
             water.copy(),
@@ -483,7 +523,7 @@ class TestOptimiseReactantProduct:
         assert "Step" not in out
         assert Path("rp.log").read_text().count("LBFGS") >= 2
 
-    def test_forwards_keep_traj_to_both(self, calc, water):
+    def test_forwards_keep_traj_to_both(self, calc: EMT, water: Atoms) -> None:
         optimise_reactant_product(
             water,
             water.copy(),
@@ -498,7 +538,7 @@ class TestOptimiseReactantProduct:
         assert Path("r.traj").exists()
         assert Path("p.traj").exists()
 
-    def test_reports_the_two_endpoints_separately(self, calc):
+    def test_reports_the_two_endpoints_separately(self, calc: EMT) -> None:
         """Both must be named, or one silently stands in for the other.
 
         The warnings module shows a repeated message from one call site only
@@ -523,7 +563,7 @@ class TestOptimiseReactantProduct:
 
 
 @pytest.fixture
-def endpoints(water):
+def endpoints(water: Atoms) -> tuple[Atoms, Atoms]:
     """A reactant and a displaced product, for band construction."""
     product = water.copy()
     product.positions[1] += [0.4, 0.0, 0.0]
@@ -531,7 +571,9 @@ def endpoints(water):
 
 
 class TestPrepareNeb:
-    def test_builds_a_band_of_the_requested_length(self, calc, endpoints):
+    def test_builds_a_band_of_the_requested_length(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
 
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -539,7 +581,9 @@ class TestPrepareNeb:
         assert isinstance(neb, NEB)
         assert len(neb.images) == 5
 
-    def test_endpoints_are_preserved(self, calc, endpoints):
+    def test_endpoints_are_preserved(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
 
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -547,7 +591,9 @@ class TestPrepareNeb:
         assert neb.images[0].positions == pytest.approx(reactant.positions)
         assert neb.images[-1].positions == pytest.approx(product.positions)
 
-    def test_interior_images_are_interpolated(self, calc, endpoints):
+    def test_interior_images_are_interpolated(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Without interpolation the interior would still equal the reactant."""
         reactant, product = endpoints
 
@@ -557,7 +603,9 @@ class TestPrepareNeb:
         assert interior != pytest.approx(reactant.positions)
         assert interior != pytest.approx(product.positions)
 
-    def test_every_image_has_its_own_calculator(self, calc, endpoints):
+    def test_every_image_has_its_own_calculator(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
 
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -566,7 +614,9 @@ class TestPrepareNeb:
         assert all(c is not None for c in calcs)
         assert len({id(c) for c in calcs}) == len(calcs)
 
-    def test_cached_energies_match_the_final_geometries(self, calc, endpoints):
+    def test_cached_energies_match_the_final_geometries(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Regression: energies were cached before interpolation moved the atoms.
 
         Interior images then reported the reactant energy, which plot_neb
@@ -583,7 +633,9 @@ class TestPrepareNeb:
                 fresh.get_potential_energy()
             )
 
-    def test_geodesic_interpolation_builds_a_band(self, calc, endpoints):
+    def test_geodesic_interpolation_builds_a_band(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Regression: geo_int=True, the default, raised NameError.
 
         Extracting _build_band left prepare_neb referring to a local the
@@ -601,7 +653,9 @@ class TestPrepareNeb:
             np.isfinite([image.get_potential_energy() for image in neb.images])
         )
 
-    def test_images_do_not_share_calculator_state(self, endpoints):
+    def test_images_do_not_share_calculator_state(
+        self, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Regression: shallow copies of a used calculator share their arrays.
 
         Passing the same calculator to optimise_reactant_product and then to
@@ -627,7 +681,9 @@ class TestPrepareNeb:
         ]
         assert not shared
 
-    def test_get_ts_image_does_not_share_calculator_state(self, chain):
+    def test_get_ts_image_does_not_share_calculator_state(
+        self, chain: list[Atoms]
+    ) -> None:
         """get_ts_image clones the calculator the same way prepare_neb does."""
         used = EMT()
         chain[0].calc = used
@@ -645,7 +701,9 @@ class TestPrepareNeb:
         ]
         assert not shared
 
-    def test_climb_flag_is_passed_through(self, calc, endpoints):
+    def test_climb_flag_is_passed_through(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
 
         climbing = prepare_neb(
@@ -658,7 +716,9 @@ class TestPrepareNeb:
         assert climbing.climb is True
         assert plain.climb is False
 
-    def test_parallel_flag_is_passed_through(self, calc, endpoints):
+    def test_parallel_flag_is_passed_through(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
 
         parallel = prepare_neb(
@@ -671,7 +731,9 @@ class TestPrepareNeb:
         assert parallel.parallel is True
         assert serial.parallel is False
 
-    def test_parallel_evaluation_matches_serial(self, calc, endpoints):
+    def test_parallel_evaluation_matches_serial(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Without an MPI launcher, parallel=True evaluates images on threads.
 
         The result should be identical to the serial evaluation, just spread
@@ -690,7 +752,9 @@ class TestPrepareNeb:
 
 
 class TestOptimiseNeb:
-    def test_returns_the_final_band(self, calc, endpoints):
+    def test_returns_the_final_band(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
@@ -699,7 +763,9 @@ class TestOptimiseNeb:
 
         assert len(images) == 5
 
-    def test_writes_the_trajectory(self, calc, endpoints):
+    def test_writes_the_trajectory(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
@@ -708,7 +774,12 @@ class TestOptimiseNeb:
 
         assert Path("band.traj").exists()
 
-    def test_uses_the_optimiser_it_is_given(self, calc, endpoints, capsys):
+    def test_uses_the_optimiser_it_is_given(
+        self,
+        calc: EMT,
+        endpoints: tuple[Atoms, Atoms],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         """FIRE is the usual second thing to try on a band BFGS cannot settle."""
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -720,7 +791,12 @@ class TestOptimiseNeb:
         assert "FIRE" in log
         assert "BFGS" not in log
 
-    def test_a_logfile_takes_the_log_off_stdout(self, calc, endpoints, capsys):
+    def test_a_logfile_takes_the_log_off_stdout(
+        self,
+        calc: EMT,
+        endpoints: tuple[Atoms, Atoms],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
@@ -730,7 +806,12 @@ class TestOptimiseNeb:
         assert capsys.readouterr().out == ""
         assert "Step" in Path("band.log").read_text()
 
-    def test_no_logfile_silences_it(self, calc, endpoints, capsys):
+    def test_no_logfile_silences_it(
+        self,
+        calc: EMT,
+        endpoints: tuple[Atoms, Atoms],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
@@ -739,7 +820,9 @@ class TestOptimiseNeb:
 
         assert capsys.readouterr().out == ""
 
-    def test_marks_every_image_with_the_bands_convergence(self, calc, endpoints):
+    def test_marks_every_image_with_the_bands_convergence(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """A band converges as a whole, so each image carries the same answer."""
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -749,7 +832,9 @@ class TestOptimiseNeb:
 
         assert [image.info["converged"] for image in images] == [False] * 5
 
-    def test_records_a_converged_band(self, calc, endpoints):
+    def test_records_a_converged_band(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
@@ -757,14 +842,18 @@ class TestOptimiseNeb:
 
         assert all(image.info["converged"] for image in images)
 
-    def test_raises_instead_when_asked(self, calc, endpoints):
+    def test_raises_instead_when_asked(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
 
         with pytest.raises(ConvergenceError, match="NEB optimisation"):
             optimise_neb(neb, fmax=0.5, steps=3, raise_on_unconverged=True)
 
-    def test_the_band_is_still_on_disk_when_it_raises(self, calc, endpoints):
+    def test_the_band_is_still_on_disk_when_it_raises(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """An unconverged band is the best start for the next run."""
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -778,7 +867,7 @@ class TestOptimiseNeb:
 
 
 @pytest.fixture
-def partial_band(calc, endpoints):
+def partial_band(calc: EMT, endpoints: tuple[Atoms, Atoms]) -> list[Atoms]:
     """A band stopped well short of convergence, as a restart source.
 
     Comes back through the trajectory, so the images carry stored results
@@ -791,13 +880,17 @@ def partial_band(calc, endpoints):
 
 
 class TestRestartNeb:
-    def test_builds_a_band_of_the_same_length(self, calc, partial_band):
+    def test_builds_a_band_of_the_same_length(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         neb = restart_neb(partial_band, calc)
 
         assert isinstance(neb, NEB)
         assert len(neb.images) == len(partial_band)
 
-    def test_starts_from_the_band_it_was_given(self, calc, partial_band):
+    def test_starts_from_the_band_it_was_given(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         """The whole point: continue the path, do not rebuild it.
 
         With rm_ro_trans off nothing re-aligns the images, so the positions
@@ -808,7 +901,9 @@ class TestRestartNeb:
         for restarted, original in zip(neb.images, partial_band):
             assert restarted.positions == pytest.approx(original.positions)
 
-    def test_carries_the_energies_of_the_band_it_continues(self, calc, partial_band):
+    def test_carries_the_energies_of_the_band_it_continues(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         expected = [image.get_potential_energy() for image in partial_band]
 
         neb = restart_neb(partial_band, calc)
@@ -818,8 +913,8 @@ class TestRestartNeb:
         )
 
     def test_differs_from_a_freshly_interpolated_band(
-        self, calc, endpoints, partial_band
-    ):
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms], partial_band: list[Atoms]
+    ) -> None:
         """Guards the test above: it would also pass if nothing had moved."""
         reactant, product = endpoints
         fresh = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -832,7 +927,9 @@ class TestRestartNeb:
 
         assert continued != pytest.approx(interpolated)
 
-    def test_leaves_the_callers_images_alone(self, calc, partial_band):
+    def test_leaves_the_callers_images_alone(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         """The band passed in is the fallback if the restart goes worse."""
         positions = [image.positions.copy() for image in partial_band]
 
@@ -842,7 +939,9 @@ class TestRestartNeb:
         for image, before in zip(partial_band, positions):
             assert image.positions == pytest.approx(before)
 
-    def test_drops_a_stale_convergence_flag(self, calc, partial_band):
+    def test_drops_a_stale_convergence_flag(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         """The old run's verdict is not true of the band about to be relaxed."""
         assert partial_band[0].info["converged"] is False
 
@@ -850,39 +949,51 @@ class TestRestartNeb:
 
         assert all("converged" not in image.info for image in neb.images)
 
-    def test_gives_each_image_its_own_calculator(self, calc, partial_band):
+    def test_gives_each_image_its_own_calculator(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         """ASE refuses a band whose images share one."""
         neb = restart_neb(partial_band, calc)
 
         assert len({id(image.calc) for image in neb.images}) == len(neb.images)
 
-    def test_can_turn_on_climbing_for_the_second_pass(self, calc, partial_band):
+    def test_can_turn_on_climbing_for_the_second_pass(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         """Running without climb and then with it is the standard two-pass."""
         neb = restart_neb(partial_band, calc, climb=True)
 
         assert neb.climb is True
 
-    def test_resamples_when_asked(self, calc, partial_band):
+    def test_resamples_when_asked(self, calc: EMT, partial_band: list[Atoms]) -> None:
         neb = restart_neb(partial_band, calc, n_images=9)
 
         assert len(neb.images) == 9
 
-    def test_resampling_keeps_the_endpoints(self, calc, partial_band):
+    def test_resampling_keeps_the_endpoints(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         neb = restart_neb(partial_band, calc, n_images=9, rm_ro_trans=False)
 
         assert neb.images[0].positions == pytest.approx(partial_band[0].positions)
         assert neb.images[-1].positions == pytest.approx(partial_band[-1].positions)
 
-    def test_rejects_a_band_with_no_interior(self, calc, partial_band):
+    def test_rejects_a_band_with_no_interior(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         """ASE would take it and fail later inside the tangent calculation."""
         with pytest.raises(ValueError, match="at least 3"):
             restart_neb([partial_band[0], partial_band[-1]], calc)
 
-    def test_rejects_resampling_below_three_images(self, calc, partial_band):
+    def test_rejects_resampling_below_three_images(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         with pytest.raises(ValueError, match="at least 3"):
             restart_neb(partial_band, calc, n_images=2)
 
-    def test_accepts_a_band_read_back_from_disk(self, calc, partial_band):
+    def test_accepts_a_band_read_back_from_disk(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         """The band on disk is what a later session actually has to work with."""
         from_disk = read("partial.traj", index=f"-{len(partial_band)}:")
 
@@ -891,7 +1002,9 @@ class TestRestartNeb:
         assert len(neb.images) == len(partial_band)
         assert np.isfinite(neb.get_forces()).all()
 
-    def test_the_continued_band_can_be_optimised_further(self, calc, partial_band):
+    def test_the_continued_band_can_be_optimised_further(
+        self, calc: EMT, partial_band: list[Atoms]
+    ) -> None:
         neb = restart_neb(partial_band, calc)
 
         # Whether this toy band reaches fmax is beside the point; that it
@@ -903,7 +1016,9 @@ class TestRestartNeb:
         assert len(images) == len(partial_band)
         assert Path("restarted.traj").exists()
 
-    def test_reaches_the_same_barrier_as_an_uninterrupted_run(self, slab_endpoints):
+    def test_reaches_the_same_barrier_as_an_uninterrupted_run(
+        self, slab_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Stopping and continuing must land where running straight through does.
 
         The Al(100) hop from the README, which converges either way. Note
@@ -952,7 +1067,7 @@ class TestRestartNeb:
         assert barrier == pytest.approx(expected, abs=1e-3)
 
 
-def emt_launcher(index):
+def emt_launcher(index: int) -> PySocketIOClient:
     """Launch EMT in its own process, as a stand-in for an external code.
 
     ``PySocketIOClient`` pickles the factory into a fresh interpreter that
@@ -964,7 +1079,7 @@ def emt_launcher(index):
 
 
 @pytest.fixture
-def evaluated_endpoints(endpoints):
+def evaluated_endpoints(endpoints: tuple[Atoms, Atoms]) -> tuple[Atoms, Atoms]:
     """Endpoints carrying energies, as optimise_reactant_product leaves them.
 
     Bands built from these never reach for a socket to price an endpoint, so
@@ -978,7 +1093,7 @@ def evaluated_endpoints(endpoints):
 
 
 @pytest.fixture
-def slab_endpoints():
+def slab_endpoints() -> tuple[Atoms, Atoms]:
     """A gold adatom hopping between hollow sites on Al(100).
 
     Periodic, so EMT can report a stress, and small enough that a full
@@ -1000,30 +1115,30 @@ def slab_endpoints():
 
 @pytest.mark.usefixtures("fake_parallel_socketio")
 class TestSocketCalculators:
-    def test_opens_one_calculator_per_image(self):
+    def test_opens_one_calculator_per_image(self) -> None:
         with socket_calculators(4) as calcs:
             assert len(calcs) == 4
             assert all(isinstance(c, _FakeParallelSocketIOCalculator) for c in calcs)
 
-    def test_each_calculator_listens_on_its_own_socket(self):
+    def test_each_calculator_listens_on_its_own_socket(self) -> None:
         with socket_calculators(3) as calcs:
             names = [c.server.unixsocket for c in calcs]
 
         assert len(set(names)) == 3
 
-    def test_numbers_ports_from_the_base_upwards(self):
+    def test_numbers_ports_from_the_base_upwards(self) -> None:
         with socket_calculators(3, port=31500) as calcs:
             assert [c.server.port for c in calcs] == [31500, 31501, 31502]
 
-    def test_default_socket_names_are_unique_to_the_process(self):
+    def test_default_socket_names_are_unique_to_the_process(self) -> None:
         """Two jobs on one node must not fight over the same socket file."""
         with socket_calculators(2) as calcs:
             assert all(str(os.getpid()) in c.server.unixsocket for c in calcs)
 
-    def test_passes_the_image_index_to_the_factory(self):
+    def test_passes_the_image_index_to_the_factory(self) -> None:
         seen = []
 
-        def make_calc(index):
+        def make_calc(index: int) -> EMT:
             seen.append(index)
             return EMT()
 
@@ -1032,13 +1147,13 @@ class TestSocketCalculators:
 
         assert seen == [0, 1, 2]
 
-    def test_closes_the_calculators_on_exit(self):
+    def test_closes_the_calculators_on_exit(self) -> None:
         with socket_calculators(3) as calcs:
             assert all(c.server is not None for c in calcs)
 
         assert all(c.server is None for c in calcs)
 
-    def test_closes_the_calculators_when_the_block_raises(self):
+    def test_closes_the_calculators_when_the_block_raises(self) -> None:
         """A band that blows up mid-optimisation must not leak its clients."""
         with pytest.raises(RuntimeError, match="band diverged"):
             with socket_calculators(3) as calcs:
@@ -1046,7 +1161,7 @@ class TestSocketCalculators:
 
         assert all(c.server is None for c in calcs)
 
-    def test_forwards_launcher_timeout_and_log_settings(self):
+    def test_forwards_launcher_timeout_and_log_settings(self) -> None:
         launchers = [object(), object()]
 
         with socket_calculators(
@@ -1062,8 +1177,8 @@ class TestSocketCalculators:
             assert [c.log for c in calcs] == ["socket-0.log", "socket-1.log"]
 
     def test_closes_earlier_calculators_when_a_later_socket_fails(
-        self, fake_parallel_socketio
-    ):
+        self, fake_parallel_socketio: type[_FakeParallelSocketIOCalculator]
+    ) -> None:
         fake_parallel_socketio.fail_on = 2
 
         with pytest.raises(OSError, match="failed to bind"):
@@ -1072,24 +1187,26 @@ class TestSocketCalculators:
 
         assert [c.closed for c in fake_parallel_socketio.instances[:2]] == [True, True]
 
-    def test_rejects_both_a_port_and_a_unixsocket(self):
+    def test_rejects_both_a_port_and_a_unixsocket(self) -> None:
         with pytest.raises(ValueError, match="only one"):
             with socket_calculators(2, port=31500, unixsocket="rt-test"):
                 pass
 
-    def test_rejects_both_factories(self):
+    def test_rejects_both_factories(self) -> None:
         with pytest.raises(ValueError, match="only one"):
             with socket_calculators(2, lambda i: EMT(), make_launcher=emt_launcher):
                 pass
 
-    def test_rejects_a_non_positive_count(self):
+    def test_rejects_a_non_positive_count(self) -> None:
         with pytest.raises(ValueError, match="must be positive"):
             with socket_calculators(0):
                 pass
 
 
 @pytest.mark.integration
-def test_real_socket_calculator_round_trip(slab_endpoints, local_socket_access):
+def test_real_socket_calculator_round_trip(
+    slab_endpoints: tuple[Atoms, Atoms], local_socket_access: None
+) -> None:
     """Keep one genuine i-PI exchange behind the deterministic pool tests."""
     atoms = slab_endpoints[0].copy()
     expected = slab_endpoints[0].get_potential_energy()
@@ -1108,7 +1225,9 @@ def test_real_socket_calculator_round_trip(slab_endpoints, local_socket_access):
 
 @pytest.mark.usefixtures("fake_parallel_socketio")
 class TestPrepareParallelNeb:
-    def test_builds_a_band_of_the_requested_length(self, evaluated_endpoints):
+    def test_builds_a_band_of_the_requested_length(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = evaluated_endpoints
 
         with prepare_parallel_neb(
@@ -1117,7 +1236,9 @@ class TestPrepareParallelNeb:
             assert isinstance(neb, NEB)
             assert len(neb.images) == 5
 
-    def test_asks_ase_to_spread_the_images(self, evaluated_endpoints):
+    def test_asks_ase_to_spread_the_images(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Without this, ASE would walk the band one image at a time."""
         reactant, product = evaluated_endpoints
 
@@ -1126,7 +1247,9 @@ class TestPrepareParallelNeb:
         ) as neb:
             assert neb.parallel is True
 
-    def test_gives_each_interior_image_its_own_socket(self, evaluated_endpoints):
+    def test_gives_each_interior_image_its_own_socket(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = evaluated_endpoints
 
         with prepare_parallel_neb(
@@ -1138,7 +1261,9 @@ class TestPrepareParallelNeb:
         assert all(isinstance(c, _FakeParallelSocketIOCalculator) for c in interior)
         assert len({id(c) for c in interior}) == 4
 
-    def test_does_not_give_the_endpoints_sockets(self, evaluated_endpoints):
+    def test_does_not_give_the_endpoints_sockets(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Two more clients would idle through a run for known energies."""
         reactant, product = evaluated_endpoints
 
@@ -1149,7 +1274,9 @@ class TestPrepareParallelNeb:
 
         assert not any(isinstance(c, _FakeParallelSocketIOCalculator) for c in ends)
 
-    def test_reuses_the_endpoint_energies_it_is_given(self, evaluated_endpoints):
+    def test_reuses_the_endpoint_energies_it_is_given(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = evaluated_endpoints
         expected = [reactant.get_potential_energy(), product.get_potential_energy()]
 
@@ -1163,7 +1290,9 @@ class TestPrepareParallelNeb:
 
         assert got == pytest.approx(expected)
 
-    def test_pins_the_endpoint_energy_against_rigid_motion(self, evaluated_endpoints):
+    def test_pins_the_endpoint_energy_against_rigid_motion(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Regression: rm_ro_trans re-aligns the final image every force call.
 
         A SinglePointCalculator holding the endpoint energy refuses to give
@@ -1184,7 +1313,9 @@ class TestPrepareParallelNeb:
 
             assert endpoint.get_potential_energy() == pytest.approx(before)
 
-    def test_leaves_the_callers_endpoints_alone(self, evaluated_endpoints):
+    def test_leaves_the_callers_endpoints_alone(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = evaluated_endpoints
         calcs = (reactant.calc, product.calc)
         positions = (reactant.positions.copy(), product.positions.copy())
@@ -1196,7 +1327,9 @@ class TestPrepareParallelNeb:
         assert reactant.positions == pytest.approx(positions[0])
         assert product.positions == pytest.approx(positions[1])
 
-    def test_closes_the_sockets_on_exit(self, evaluated_endpoints):
+    def test_closes_the_sockets_on_exit(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = evaluated_endpoints
 
         with prepare_parallel_neb(
@@ -1206,14 +1339,18 @@ class TestPrepareParallelNeb:
 
         assert all(c.server is None for c in calcs)
 
-    def test_rejects_a_band_with_no_interior(self, evaluated_endpoints):
+    def test_rejects_a_band_with_no_interior(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = evaluated_endpoints
 
         with pytest.raises(ValueError, match="at least 3"):
             with prepare_parallel_neb(reactant, product, None, n_images=2):
                 pass
 
-    def test_prices_endpoints_that_arrive_without_an_energy(self, slab_endpoints):
+    def test_prices_endpoints_that_arrive_without_an_energy(
+        self, slab_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Endpoints from a file have no calculator, so a socket prices them."""
         reactant, product = slab_endpoints
         expected = [reactant.get_potential_energy(), product.get_potential_energy()]
@@ -1237,7 +1374,9 @@ class TestPrepareParallelNeb:
 
         assert got == pytest.approx(expected)
 
-    def test_ignores_an_energy_left_over_from_the_other_endpoint(self, slab_endpoints):
+    def test_ignores_an_energy_left_over_from_the_other_endpoint(
+        self, slab_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """Regression: a cached energy may belong to the other endpoint.
 
         optimise_reactant_product sends both endpoints through one calculator,
@@ -1279,7 +1418,9 @@ class TestPrepareParallelNeb:
 
         assert got == pytest.approx(expected)
 
-    def test_relaxes_the_same_band_as_the_serial_route(self, slab_endpoints):
+    def test_relaxes_the_same_band_as_the_serial_route(
+        self, slab_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """The whole point: same physics, evaluated concurrently.
 
         Runs the Al(100) hop from the README both ways and compares the
@@ -1321,7 +1462,9 @@ class TestPrepareParallelNeb:
 
 
 @pytest.mark.integration
-def test_real_parallel_neb_matches_serial(slab_endpoints, local_socket_access):
+def test_real_parallel_neb_matches_serial(
+    slab_endpoints: tuple[Atoms, Atoms], local_socket_access: None
+) -> None:
     """Exercise ASE's threaded NEB over independent real socket clients."""
     reactant, product = slab_endpoints
 
@@ -1360,21 +1503,23 @@ def test_real_parallel_neb_matches_serial(slab_endpoints, local_socket_access):
 
 @pytest.mark.usefixtures("fake_parallel_socketio")
 class TestRestartParallelNeb:
-    def test_builds_a_band_of_the_same_length(self, partial_band):
+    def test_builds_a_band_of_the_same_length(self, partial_band: list[Atoms]) -> None:
         with restart_parallel_neb(partial_band, None) as neb:
             assert isinstance(neb, NEB)
             assert len(neb.images) == len(partial_band)
 
-    def test_asks_ase_to_spread_the_images(self, partial_band):
+    def test_asks_ase_to_spread_the_images(self, partial_band: list[Atoms]) -> None:
         with restart_parallel_neb(partial_band, None) as neb:
             assert neb.parallel is True
 
-    def test_starts_from_the_band_it_was_given(self, partial_band):
+    def test_starts_from_the_band_it_was_given(self, partial_band: list[Atoms]) -> None:
         with restart_parallel_neb(partial_band, None, rm_ro_trans=False) as neb:
             for restarted, original in zip(neb.images, partial_band):
                 assert restarted.positions == pytest.approx(original.positions)
 
-    def test_gives_each_interior_image_its_own_socket(self, partial_band):
+    def test_gives_each_interior_image_its_own_socket(
+        self, partial_band: list[Atoms]
+    ) -> None:
         with restart_parallel_neb(partial_band, None) as neb:
             interior = [image.calc for image in neb.images[1:-1]]
 
@@ -1382,7 +1527,9 @@ class TestRestartParallelNeb:
         assert all(isinstance(c, _FakeParallelSocketIOCalculator) for c in interior)
         assert len({id(c) for c in interior}) == 3
 
-    def test_reuses_the_endpoint_energies_stored_with_the_band(self, partial_band):
+    def test_reuses_the_endpoint_energies_stored_with_the_band(
+        self, partial_band: list[Atoms]
+    ) -> None:
         """A band off disk carries them, so no client is needed to price them.
 
         make_calc=None here means the servers have nothing behind them: if
@@ -1402,19 +1549,23 @@ class TestRestartParallelNeb:
 
         assert got == pytest.approx(expected)
 
-    def test_does_not_give_the_endpoints_sockets(self, partial_band):
+    def test_does_not_give_the_endpoints_sockets(
+        self, partial_band: list[Atoms]
+    ) -> None:
         with restart_parallel_neb(partial_band, None) as neb:
             ends = [neb.images[0].calc, neb.images[-1].calc]
 
         assert not any(isinstance(c, _FakeParallelSocketIOCalculator) for c in ends)
 
-    def test_closes_the_sockets_on_exit(self, partial_band):
+    def test_closes_the_sockets_on_exit(self, partial_band: list[Atoms]) -> None:
         with restart_parallel_neb(partial_band, None) as neb:
             calcs = [image.calc for image in neb.images[1:-1]]
 
         assert all(c.server is None for c in calcs)
 
-    def test_closes_the_sockets_when_the_block_raises(self, partial_band):
+    def test_closes_the_sockets_when_the_block_raises(
+        self, partial_band: list[Atoms]
+    ) -> None:
         with (
             pytest.raises(RuntimeError, match="band diverged"),
             restart_parallel_neb(partial_band, None) as neb,
@@ -1424,7 +1575,7 @@ class TestRestartParallelNeb:
 
         assert all(c.server is None for c in calcs)
 
-    def test_leaves_the_callers_images_alone(self, partial_band):
+    def test_leaves_the_callers_images_alone(self, partial_band: list[Atoms]) -> None:
         positions = [image.positions.copy() for image in partial_band]
 
         with restart_parallel_neb(partial_band, None):
@@ -1433,19 +1584,21 @@ class TestRestartParallelNeb:
         for image, before in zip(partial_band, positions):
             assert image.positions == pytest.approx(before)
 
-    def test_resamples_when_asked(self, partial_band):
+    def test_resamples_when_asked(self, partial_band: list[Atoms]) -> None:
         with restart_parallel_neb(partial_band, None, n_images=7) as neb:
             assert len(neb.images) == 7
             assert len([i.calc for i in neb.images[1:-1]]) == 5
 
-    def test_rejects_a_band_with_no_interior(self, partial_band):
+    def test_rejects_a_band_with_no_interior(self, partial_band: list[Atoms]) -> None:
         with (
             pytest.raises(ValueError, match="at least 3"),
             restart_parallel_neb([partial_band[0], partial_band[-1]], None),
         ):
             pass
 
-    def test_relaxes_the_band_it_continues(self, slab_endpoints):
+    def test_relaxes_the_band_it_continues(
+        self, slab_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """End to end: stop a band early, then pick it up over sockets."""
         reactant, product = slab_endpoints
 
@@ -1476,7 +1629,9 @@ class TestRestartParallelNeb:
 
 
 class TestGetTsImage:
-    def test_returns_the_highest_energy_image(self, calc, endpoints):
+    def test_returns_the_highest_energy_image(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
         images = list(neb.images)
@@ -1486,7 +1641,9 @@ class TestGetTsImage:
         energies = [image.get_potential_energy() for image in images]
         assert ts is images[int(np.argmax(energies))]
 
-    def test_attaches_a_calculator_to_bare_images(self, calc, chain):
+    def test_attaches_a_calculator_to_bare_images(
+        self, calc: EMT, chain: list[Atoms]
+    ) -> None:
         """Images read from a file have no calculator until one is given."""
         for atoms in chain:
             atoms.calc = None
@@ -1495,7 +1652,9 @@ class TestGetTsImage:
 
         assert ts.calc is not None
 
-    def test_uses_the_energies_the_images_carry(self, slab_endpoints):
+    def test_uses_the_energies_the_images_carry(
+        self, slab_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """A parallel band comes back with its sockets already closed."""
         reactant, product = slab_endpoints
         neb = prepare_neb(
@@ -1508,7 +1667,9 @@ class TestGetTsImage:
         energies = [image.get_potential_energy() for image in images]
         assert ts is images[int(np.argmax(energies))]
 
-    def test_a_given_calculator_still_overrides(self, calc, chain):
+    def test_a_given_calculator_still_overrides(
+        self, calc: EMT, chain: list[Atoms]
+    ) -> None:
         """Passing one must re-evaluate, not defer to a stale cached energy."""
         for atoms in chain:
             atoms.calc = EMT()
@@ -1524,7 +1685,7 @@ class TestGetTsImage:
 
 class TestSummariseNeb:
     @pytest.fixture
-    def band(self):
+    def band(self) -> list[Atoms]:
         """A three-image band with a known profile, built by hand.
 
         Energies are attached directly, so the arithmetic under test is
@@ -1538,23 +1699,25 @@ class TestSummariseNeb:
             images.append(atoms)
         return images
 
-    def test_computes_the_forward_barrier(self, band):
+    def test_computes_the_forward_barrier(self, band: list[Atoms]) -> None:
         assert summarise_neb(band).barrier == pytest.approx(2.5)
 
-    def test_computes_the_reverse_barrier(self, band):
+    def test_computes_the_reverse_barrier(self, band: list[Atoms]) -> None:
         assert summarise_neb(band).reverse_barrier == pytest.approx(1.5)
 
-    def test_computes_the_reaction_energy(self, band):
+    def test_computes_the_reaction_energy(self, band: list[Atoms]) -> None:
         assert summarise_neb(band).reaction_energy == pytest.approx(1.0)
 
-    def test_finds_the_top_image(self, band):
+    def test_finds_the_top_image(self, band: list[Atoms]) -> None:
         assert summarise_neb(band).ts_index == 1
 
-    def test_reports_absolute_energies(self, band):
+    def test_reports_absolute_energies(self, band: list[Atoms]) -> None:
         """Not shifted, so the caller can reference them where they like."""
         assert summarise_neb(band).energies == pytest.approx([1.0, 3.5, 2.0])
 
-    def test_agrees_with_get_ts_image(self, calc, endpoints):
+    def test_agrees_with_get_ts_image(
+        self, calc: EMT, endpoints: tuple[Atoms, Atoms]
+    ) -> None:
         """The barrier must be the one the TS image actually sits at."""
         reactant, product = endpoints
         neb = prepare_neb(reactant, product, calc, n_images=5, geo_int=False)
@@ -1570,7 +1733,7 @@ class TestSummariseNeb:
         assert summary.barrier == pytest.approx(expected)
         assert images[summary.ts_index] is get_ts_image(images)
 
-    def test_flags_a_downhill_band_as_barrierless(self):
+    def test_flags_a_downhill_band_as_barrierless(self) -> None:
         """The top image is then an endpoint, and no saddle is there to refine."""
         images = []
         for energy in (3.0, 2.0, 1.0):
@@ -1584,26 +1747,28 @@ class TestSummariseNeb:
         assert summary.ts_index == 0
         assert summary.barrier == pytest.approx(0.0)
 
-    def test_a_real_barrier_is_not_flagged(self, band):
+    def test_a_real_barrier_is_not_flagged(self, band: list[Atoms]) -> None:
         assert summarise_neb(band).is_barrierless is False
 
-    def test_rejects_an_empty_band(self):
+    def test_rejects_an_empty_band(self) -> None:
         with pytest.raises(ValueError, match="empty band"):
             summarise_neb([])
 
-    def test_uses_the_energies_the_images_carry(self, band):
+    def test_uses_the_energies_the_images_carry(self, band: list[Atoms]) -> None:
         """No calculator needed for a band that has already been relaxed."""
         summary = summarise_neb(band, calc=None)
 
         assert summary.barrier == pytest.approx(2.5)
 
-    def test_falls_back_to_the_calculator_for_bare_images(self, calc, chain):
+    def test_falls_back_to_the_calculator_for_bare_images(
+        self, calc: EMT, chain: list[Atoms]
+    ) -> None:
         summary = summarise_neb(chain, calc)
 
         assert len(summary.energies) == len(chain)
         assert np.all(np.isfinite(summary.energies))
 
-    def test_prints_a_readable_summary(self, band):
+    def test_prints_a_readable_summary(self, band: list[Atoms]) -> None:
         text = str(summarise_neb(band))
 
         assert "Barrier:         2.500 eV" in text
@@ -1611,7 +1776,7 @@ class TestSummariseNeb:
         assert "Reaction energy: 1.000 eV" in text
         assert "TS image:        1 of 2" in text
 
-    def test_a_thermoneutral_reaction_prints_without_a_sign(self):
+    def test_a_thermoneutral_reaction_prints_without_a_sign(self) -> None:
         """-0.000 eV reads as a finding rather than as the rounding it is."""
         images = []
         for energy in (0.0, 1.0, -1e-9):
@@ -1623,7 +1788,7 @@ class TestSummariseNeb:
 
 
 class TestGetFmax:
-    def test_matches_the_largest_per_atom_force(self, calc, water):
+    def test_matches_the_largest_per_atom_force(self, calc: EMT, water: Atoms) -> None:
         water.calc = calc
 
         fmax = get_fmax(water)
@@ -1631,7 +1796,7 @@ class TestGetFmax:
         forces = water.get_forces()
         assert fmax == pytest.approx(np.linalg.norm(forces, axis=1).max())
 
-    def test_is_zero_for_a_relaxed_structure(self, calc, water):
+    def test_is_zero_for_a_relaxed_structure(self, calc: EMT, water: Atoms) -> None:
         relaxed = optimise_geom(water, calc, fmax=0.01)
         relaxed.calc = calc
 
@@ -1639,12 +1804,14 @@ class TestGetFmax:
 
 
 class TestGetVibrations:
-    def test_returns_one_frequency_per_degree_of_freedom(self, calc, water):
+    def test_returns_one_frequency_per_degree_of_freedom(
+        self, calc: EMT, water: Atoms
+    ) -> None:
         freqs = get_vibrations(water, calc)
 
         assert len(freqs) == 3 * len(water)
 
-    def test_does_not_modify_the_input(self, calc, water):
+    def test_does_not_modify_the_input(self, calc: EMT, water: Atoms) -> None:
         before = water.positions.copy()
 
         get_vibrations(water, calc)
@@ -1652,7 +1819,9 @@ class TestGetVibrations:
         assert water.positions == pytest.approx(before)
         assert water.calc is None
 
-    def test_leaves_no_cached_displacements_behind(self, calc, water, tmp_path):
+    def test_leaves_no_cached_displacements_behind(
+        self, calc: EMT, water: Atoms, tmp_path: Path
+    ) -> None:
         """A stale cache from an earlier geometry would be reused silently.
 
         ASE empties the cache but keeps the directory, which is harmless: it
@@ -1669,15 +1838,20 @@ class TestOptimiseTs:
         [({}, False), ({"internal": True}, True)],
     )
     def test_passes_internal_coordinate_flag(
-        self, monkeypatch, calc, water, sella_kwargs, expected_internal
-    ):
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        calc: EMT,
+        water: Atoms,
+        sella_kwargs: dict[str, bool],
+        expected_internal: bool,
+    ) -> None:
         seen = {}
 
         class FakeSella:
-            def __init__(self, atoms, **kwargs):
+            def __init__(self, atoms: Atoms, **kwargs: Any) -> None:
                 seen["optimizer"] = (atoms, kwargs)
 
-            def run(self, **kwargs):
+            def run(self, **kwargs: Any) -> bool:
                 return True
 
         monkeypatch.setattr(
@@ -1695,25 +1869,29 @@ class TestOptimiseTs:
 
         assert seen["optimizer"][1]["internal"] is expected_internal
 
-    def test_returns_a_structure_and_keeps_the_trajectory(self, calc, water):
+    def test_returns_a_structure_and_keeps_the_trajectory(
+        self, calc: EMT, water: Atoms
+    ) -> None:
         ts = optimise_ts(water, calc, fmax=0.5, steps=2)
 
         assert len(ts) == len(water)
         assert Path("sella.traj").exists()
 
-    def test_does_not_modify_the_input(self, calc, water):
+    def test_does_not_modify_the_input(self, calc: EMT, water: Atoms) -> None:
         before = water.positions.copy()
 
         optimise_ts(water, calc, fmax=0.5, steps=2)
 
         assert water.positions == pytest.approx(before)
 
-    def test_records_convergence_on_the_result(self, calc, water):
+    def test_records_convergence_on_the_result(self, calc: EMT, water: Atoms) -> None:
         ts = optimise_ts(water, calc, fmax=0.5, steps=2)
 
         assert ts.info["converged"] is True
 
-    def test_a_logfile_takes_sellas_log_off_stdout(self, calc, water, capsys):
+    def test_a_logfile_takes_sellas_log_off_stdout(
+        self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         optimise_ts(water, calc, fmax=0.5, steps=2, logfile="ts.log")
 
         out = capsys.readouterr().out
@@ -1721,7 +1899,7 @@ class TestOptimiseTs:
         assert "Step" not in out
         assert Path("ts.log").exists()
 
-    def test_warns_and_records_when_it_runs_out_of_steps(self, calc):
+    def test_warns_and_records_when_it_runs_out_of_steps(self, calc: EMT) -> None:
         strained = molecule("H2O")
         strained.positions[1] += [0.5, 0.0, 0.0]
 
@@ -1737,7 +1915,7 @@ class TestOptimiseTs:
 
         assert ts.info["converged"] is False
 
-    def test_raises_instead_when_asked(self, calc):
+    def test_raises_instead_when_asked(self, calc: EMT) -> None:
         strained = molecule("H2O")
         strained.positions[1] += [0.5, 0.0, 0.0]
 
@@ -1746,7 +1924,7 @@ class TestOptimiseTs:
 
 
 class TestOptimiseIrc:
-    def test_returns_both_directions(self, calc, water):
+    def test_returns_both_directions(self, calc: EMT, water: Atoms) -> None:
         with pytest.warns(ConvergenceWarning):
             forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
 
@@ -1755,7 +1933,7 @@ class TestOptimiseIrc:
         assert Path("irc_f.traj").exists()
         assert Path("irc_r.traj").exists()
 
-    def test_the_halves_stitch_into_one_path(self, calc, water):
+    def test_the_halves_stitch_into_one_path(self, calc: EMT, water: Atoms) -> None:
         """The point of returning them: stitch_path takes it from here."""
         with pytest.warns(ConvergenceWarning):
             forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)
@@ -1764,7 +1942,9 @@ class TestOptimiseIrc:
 
         assert len(path) == len(forward) + len(reverse) - 1
 
-    def test_both_directions_share_one_logfile(self, calc, water, capsys):
+    def test_both_directions_share_one_logfile(
+        self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         with pytest.warns(ConvergenceWarning):
             optimise_irc(water, calc, fmax=0.5, steps=2, logfile="irc.log")
 
@@ -1773,7 +1953,7 @@ class TestOptimiseIrc:
         assert "Step" not in out
         assert Path("irc.log").exists()
 
-    def test_reports_the_two_directions_separately(self, calc):
+    def test_reports_the_two_directions_separately(self, calc: EMT) -> None:
         """One direction commonly reaches its minimum while the other does not.
 
         Both checks run from the same line, so only the differing message
@@ -1792,7 +1972,7 @@ class TestOptimiseIrc:
         assert sum("Reverse IRC" in m for m in messages) == 1
         assert all(image.info["converged"] is False for image in (*forward, *reverse))
 
-    def test_runs_both_directions_before_raising(self, calc):
+    def test_runs_both_directions_before_raising(self, calc: EMT) -> None:
         """The reverse run is already paid for by the time the check fires."""
         strained = molecule("H2O")
         strained.positions[1] += [0.5, 0.0, 0.0]

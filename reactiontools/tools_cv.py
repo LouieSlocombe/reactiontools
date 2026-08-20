@@ -59,7 +59,9 @@ yourself -- ``wall`` in :func:`plumed_input_neb_path` -- are in whichever unit
 you asked for, and nothing checks that.
 """
 
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from ase.io import read
@@ -97,7 +99,7 @@ _ENERGY_UNIT = {"plumed": "kJ/mol", "ase": "eV"}
 _DEFAULT_HEIGHT = {"plumed": 15.0, "ase": 0.155}
 
 
-def as_positions(source):
+def as_positions(source: Any) -> np.ndarray:
     """Coordinates as a plain ``(n_atoms, 3)`` array of angstrom.
 
     Accepts whatever holds a geometry: an array of coordinates, an
@@ -142,7 +144,7 @@ def as_positions(source):
     return positions
 
 
-def _check_units(units):
+def _check_units(units: str) -> float:
     """Validate the ``units`` argument and return its length scale.
 
     Parameters
@@ -169,7 +171,7 @@ def _check_units(units):
     return _LENGTH_SCALE[units]
 
 
-def _geometry(source, units):
+def _geometry(source: Any, units: str) -> np.ndarray:
     """Coordinates in the script's own length unit.
 
     Parameters
@@ -187,7 +189,7 @@ def _geometry(source, units):
     return as_positions(source) * _check_units(units)
 
 
-def plumed_units_header(units):
+def plumed_units_header(units: str) -> str:
     """The UNITS line the script needs, if any.
 
     Parameters
@@ -204,7 +206,7 @@ def plumed_units_header(units):
     return f"{PLUMED_ASE_UNITS}\n" if units == "ase" else ""
 
 
-def _default_height(height, units):
+def _default_height(height: float | None, units: str) -> float:
     """The Gaussian height to deposit, defaulted in the script's energy unit.
 
     Parameters
@@ -223,7 +225,7 @@ def _default_height(height, units):
     return _DEFAULT_HEIGHT[units] if height is None else height
 
 
-def plumed_one_based(indices):
+def plumed_one_based(indices: Iterable[int]) -> list[int]:
     """Convert 0-based atom indices to PLUMED's 1-based convention.
 
     Order is preserved, which is what a CV needs: the builders here read their
@@ -246,7 +248,7 @@ def plumed_one_based(indices):
     return [int(index) + 1 for index in indices]
 
 
-def _distance(positions, i, j):
+def _distance(positions: np.ndarray, i: int, j: int) -> float:
     """Distance between two atoms, in whatever unit *positions* is in.
 
     Parameters
@@ -264,7 +266,10 @@ def _distance(positions, i, j):
     return float(np.linalg.norm(positions[i] - positions[j]))
 
 
-def _pt_distances(positions, idx):
+def _pt_distances(
+    positions: np.ndarray,
+    idx: Sequence[int],
+) -> tuple[float, float, float]:
     """The three distances that size a proton-transfer CV.
 
     Parameters
@@ -286,7 +291,7 @@ def _pt_distances(positions, idx):
     )
 
 
-def _size_r0(r_dh, r_ah, r_0):
+def _size_r0(r_dh: float, r_ah: float, r_0: float) -> float:
     """Size the switching function from the shorter of the two bond distances.
 
     Parameters
@@ -304,7 +309,7 @@ def _size_r0(r_dh, r_ah, r_0):
     return float(np.round(min(r_dh, r_ah) * r_0, decimals=2))
 
 
-def _wall_value(distance, wall):
+def _wall_value(distance: float, wall: float) -> float:
     """Place a wall at a multiple of the distance a pair currently sits at.
 
     Parameters
@@ -322,7 +327,7 @@ def _wall_value(distance, wall):
     return float(np.round(distance * wall, decimals=2))
 
 
-def plumed_angle_radians(angle_lim):
+def plumed_angle_radians(angle_lim: float) -> float:
     """Convert a wall angle from degrees to the radians PLUMED wants.
 
     Parameters
@@ -338,7 +343,7 @@ def plumed_angle_radians(angle_lim):
     return float(np.round(np.deg2rad(angle_lim), decimals=2))
 
 
-def switching_value(r, r_0, nn=6, mm=None):
+def switching_value(r: float, r_0: float, nn: int = 6, mm: int | None = None) -> float:
     """Evaluate PLUMED's default rational switching function.
 
     This is the same function ``COORDINATION`` applies to every pair distance,
@@ -372,7 +377,7 @@ def switching_value(r, r_0, nn=6, mm=None):
     return (1.0 - x) / (1.0 - y)
 
 
-def plumed_temperature_pair(temperature, units):
+def plumed_temperature_pair(temperature: Any, units: str) -> tuple[float, float]:
     """Temperature in kelvin and kBT in the script's energy unit.
 
     Parameters
@@ -395,19 +400,19 @@ def plumed_temperature_pair(temperature, units):
 
 
 def plumed_bias_and_fes(
-    f_opes,
-    arg,
-    pace,
-    height,
-    sigma,
-    bias,
-    temperature,
-    kt,
-    grid_bin,
-    grid_min=None,
-    grid_max=None,
-    label="metad:      ",
-):
+    f_opes: bool,
+    arg: str,
+    pace: float | str,
+    height: float | str,
+    sigma: float | str,
+    bias: float | str,
+    temperature: float,
+    kt: float,
+    grid_bin: int | str,
+    grid_min: float | str | None = None,
+    grid_max: float | str | None = None,
+    label: str = "metad:      ",
+) -> tuple[str, str]:
     """Build the metadynamics bias line and the matching FES-reconstruction command.
 
     Every builder in this module goes through here, so that the bias it emits
@@ -481,7 +486,15 @@ def plumed_bias_and_fes(
     return metad_line, fes_command
 
 
-def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix="", pad=12):
+def _pt_cv_block(
+    idx: Sequence[int],
+    r_0: float,
+    wall: float,
+    angle_lim: float,
+    kappa: float,
+    suffix: str = "",
+    pad: int = 12,
+) -> tuple[str, str]:
     """Build the PLUMED lines defining one proton-transfer CV and its walls.
 
     The coordination difference that every builder in the first two families
@@ -526,7 +539,7 @@ def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix="", pad=12):
         dist, u_wall = "dist_da", "dist_wall"
         ang, a_wall = "ang_1", "ang_wall"
 
-    def line(label, body):
+    def line(label: str, body: str) -> str:
         """Pad a label out to *pad* columns and put the action after it."""
         return f"{label + ':':<{pad}}{body}"
 
@@ -549,19 +562,19 @@ def _pt_cv_block(idx, r_0, wall, angle_lim, kappa, suffix="", pad=12):
 
 
 def plumed_input_steered(
-    cv_block,
-    cv_start,
-    cv_stop,
-    steps,
-    cv_name="cv",
-    kappa=2000.0,
-    stride=100,
-    steps_equil=0,
-    steps_relax=0,
-    colvar_file="COLVAR_SMD",
-    extra_lines=None,
-    units="plumed",
-):
+    cv_block: str,
+    cv_start: float,
+    cv_stop: float,
+    steps: int,
+    cv_name: str = "cv",
+    kappa: float = 2000.0,
+    stride: int = 100,
+    steps_equil: int = 0,
+    steps_relax: int = 0,
+    colvar_file: str = "COLVAR_SMD",
+    extra_lines: str | None = None,
+    units: str = "plumed",
+) -> tuple[str, int]:
     """Build a PLUMED input that drags a collective variable (steered MD).
 
     The centre of a harmonic restraint is moved linearly from *cv_start* to
@@ -652,22 +665,22 @@ PRINT       ARG={cv_name},smd.{cv_name}_cntr,smd.work STRIDE={stride} FILE={colv
 
 
 def plumed_input_steered_pt(
-    geometry,
-    idx,
-    steps,
-    r_0=1.1,
-    wall=1.5,
-    angle_lim=130.0,
-    kappa=2000.0,
-    stride=100,
-    cv_start=None,
-    cv_stop=None,
-    steps_equil=0,
-    steps_relax=0,
-    colvar_file="COLVAR_SMD",
-    wall_kappa=500.0,
-    units="plumed",
-):
+    geometry: Any,
+    idx: Sequence[int],
+    steps: int,
+    r_0: float = 1.1,
+    wall: float = 1.5,
+    angle_lim: float = 130.0,
+    kappa: float = 2000.0,
+    stride: int = 100,
+    cv_start: float | None = None,
+    cv_stop: float | None = None,
+    steps_equil: int = 0,
+    steps_relax: int = 0,
+    colvar_file: str = "COLVAR_SMD",
+    wall_kappa: float = 500.0,
+    units: str = "plumed",
+) -> tuple[str, int]:
     """Build a steered MD input that pulls a proton across a hydrogen bond.
 
     The collective variable is the one :func:`plumed_input_1pt` biases, the
@@ -758,23 +771,23 @@ def plumed_input_steered_pt(
 
 
 def plumed_input_1pt(
-    geometry,
-    idx,
-    temperature,
-    r_0=1.1,
-    wall=1.5,
-    angle_lim=130.0,
-    pace=500,
-    height=None,
-    sigma=0.05,
-    bias=20.0,
-    grid_min=-1.1,
-    grid_max=1.1,
-    grid_bin=200,
-    kappa=500.0,
-    f_opes=False,
-    units="plumed",
-):
+    geometry: Any,
+    idx: Sequence[int],
+    temperature: Any,
+    r_0: float = 1.1,
+    wall: float = 1.5,
+    angle_lim: float = 130.0,
+    pace: int = 500,
+    height: float | None = None,
+    sigma: float = 0.05,
+    bias: float = 20.0,
+    grid_min: float | None = -1.1,
+    grid_max: float | None = 1.1,
+    grid_bin: int = 200,
+    kappa: float = 500.0,
+    f_opes: bool = False,
+    units: str = "plumed",
+) -> tuple[str, str]:
     """Build a PLUMED input that biases a single proton transfer with metadynamics.
 
     The collective variable is the same one :func:`plumed_input_steered_pt`
@@ -879,7 +892,16 @@ PRINT       ARG=c_d,c_a,pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
     return plumed_input, fes_command
 
 
-def _two_pt_body(geometry, idx1, idx2, r_0, wall, angle_lim, kappa, units):
+def _two_pt_body(
+    geometry: Any,
+    idx1: Sequence[int],
+    idx2: Sequence[int],
+    r_0: float,
+    wall: float,
+    angle_lim: float,
+    kappa: float,
+    units: str,
+) -> str:
     """The CV and wall blocks shared by the two double-transfer builders.
 
     Parameters
@@ -928,24 +950,24 @@ def _two_pt_body(geometry, idx1, idx2, r_0, wall, angle_lim, kappa, units):
 
 
 def plumed_input_2pt_1d(
-    geometry,
-    idx1,
-    idx2,
-    temperature,
-    r_0=1.1,
-    wall=1.5,
-    angle_lim=130.0,
-    pace=500,
-    height=None,
-    sigma=0.05,
-    bias=20.0,
-    grid_min=-1.1,
-    grid_max=1.1,
-    grid_bin=200,
-    kappa=500.0,
-    f_opes=False,
-    units="plumed",
-):
+    geometry: Any,
+    idx1: Sequence[int],
+    idx2: Sequence[int],
+    temperature: Any,
+    r_0: float = 1.1,
+    wall: float = 1.5,
+    angle_lim: float = 130.0,
+    pace: int = 500,
+    height: float | None = None,
+    sigma: float = 0.05,
+    bias: float = 20.0,
+    grid_min: float | None = -1.1,
+    grid_max: float | None = 1.1,
+    grid_bin: int = 200,
+    kappa: float = 500.0,
+    f_opes: bool = False,
+    units: str = "plumed",
+) -> tuple[str, str]:
     """Build a PLUMED input that biases two proton transfers along one coordinate.
 
     Each transfer gets its own coordination-difference CV, as in
@@ -1040,24 +1062,24 @@ PRINT       ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
 
 
 def plumed_input_2pt_2d(
-    geometry,
-    idx1,
-    idx2,
-    temperature,
-    r_0=1.1,
-    wall=1.5,
-    angle_lim=130.0,
-    pace=500,
-    height=None,
-    sigma=0.05,
-    bias=20.0,
-    grid_min=-1.1,
-    grid_max=1.1,
-    grid_bin=200,
-    kappa=500.0,
-    f_opes=False,
-    units="plumed",
-):
+    geometry: Any,
+    idx1: Sequence[int],
+    idx2: Sequence[int],
+    temperature: Any,
+    r_0: float = 1.1,
+    wall: float = 1.5,
+    angle_lim: float = 130.0,
+    pace: int = 500,
+    height: float | None = None,
+    sigma: float = 0.05,
+    bias: float = 20.0,
+    grid_min: float = -1.1,
+    grid_max: float = 1.1,
+    grid_bin: int = 200,
+    kappa: float = 500.0,
+    f_opes: bool = False,
+    units: str = "plumed",
+) -> tuple[str, str]:
     """Build a PLUMED input that biases two proton transfers on a 2-D surface.
 
     Each proton transfer gets its own donor-hydrogen/acceptor-hydrogen
@@ -1152,21 +1174,21 @@ PRINT       ARG=cv_diff1,cv_diff2,metad.bias STRIDE={pace} FILE=COLVAR
 
 
 def plumed_input_neb_path(
-    temperature,
-    wall=0.1,
-    pace=500,
-    height=None,
-    sigma=0.1,
-    bias=5.0,
-    grid_min=0.0,
-    grid_max=26.0,
-    grid_bin=500,
-    kappa=500.0,
-    lambda_val=250.0,
-    neigh_size=8,
-    f_opes=False,
-    units="plumed",
-):
+    temperature: Any,
+    wall: float = 0.1,
+    pace: int = 500,
+    height: float | None = None,
+    sigma: float = 0.1,
+    bias: float = 5.0,
+    grid_min: float | None = 0.0,
+    grid_max: float | None = 26.0,
+    grid_bin: int = 500,
+    kappa: float = 500.0,
+    lambda_val: float = 250.0,
+    neigh_size: int = 8,
+    f_opes: bool = False,
+    units: str = "plumed",
+) -> tuple[str, str]:
     """Build a PLUMED input that biases progress along a reference path.
 
     When the reaction is not well described by any one geometric coordinate --

@@ -19,13 +19,17 @@ Styling comes from :mod:`reactiontools.tools_style`, so these figures and the
 free-energy ones come out looking alike.
 """
 
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from ase import Atoms
 from ase.io import read
 from ase.visualize.plot import plot_atoms
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from scipy.interpolate import make_interp_spline
 
 from .tools_fes import plot_fes_1d
@@ -49,7 +53,7 @@ _ATOM_VIEWS = {
 }
 
 
-def _save_and_show(fig, save, show, filename):
+def _save_and_show(fig: Figure, save: bool, show: bool, filename: str) -> None:
     """Write ``<filename>.png`` and ``.pdf`` when asked, then optionally show.
 
     This is the save interface shared by every plotter in this module: a
@@ -76,18 +80,18 @@ def _save_and_show(fig, save, show, filename):
 
 
 def plot_images(
-    images,
-    view="tilted",
-    rotation=None,
-    n_cols=4,
-    titles=None,
-    radii=0.8,
-    show_unit_cell=2,
-    fig_size=None,
-    save=False,
-    show=True,
-    filename="images",
-):
+    images: Atoms | Sequence[Atoms],
+    view: str = "tilted",
+    rotation: str | None = None,
+    n_cols: int = 4,
+    titles: Sequence[str] | None = None,
+    radii: float = 0.8,
+    show_unit_cell: int = 2,
+    fig_size: tuple[float, float] | None = None,
+    save: bool = False,
+    show: bool = True,
+    filename: str = "images",
+) -> tuple[Figure, np.ndarray]:
     """Plot a series of structures as a grid of panels, one per image.
 
     Each panel is titled with the index of the image, which makes it easy to
@@ -168,8 +172,14 @@ def plot_images(
 
 
 def show_atoms(
-    atoms, view="tilted", rotation=None, ax=None, save=True, show=True, filename="atoms"
-):
+    atoms: Atoms | Sequence[Atoms],
+    view: str = "tilted",
+    rotation: str | None = None,
+    ax: Axes | None = None,
+    save: bool = True,
+    show: bool = True,
+    filename: str = "atoms",
+) -> tuple[Figure, Axes]:
     """Draw one or more structures superimposed on a single axes.
 
     Unlike :func:`plot_images`, which gives every structure its own panel,
@@ -221,20 +231,20 @@ def show_atoms(
 
 
 def _plot_profile(
-    images,
-    calc,
-    fig,
-    ax,
-    save,
-    show,
-    smooth,
-    k,
-    fig_size,
-    filename,
-    label,
-    color=None,
-    annotate=False,
-):
+    images: Sequence[Atoms],
+    calc: Any,
+    fig: Figure | None,
+    ax: Axes | None,
+    save: bool,
+    show: bool,
+    smooth: bool,
+    k: int,
+    fig_size: tuple[float, float],
+    filename: str,
+    label: str | None,
+    color: str | None = None,
+    annotate: bool = False,
+) -> tuple[Figure, Axes]:
     """Draw a reaction-path energy profile in meV against path distance.
 
     Shared body of :func:`plot_neb` and :func:`plot_irc`, which differ only
@@ -288,19 +298,19 @@ def _plot_profile(
 
 
 def plot_neb(
-    images,
-    calc=None,
-    fig=None,
-    ax=None,
-    save=True,
-    show=True,
-    smooth=True,
-    k=2,
-    fig_size=(8, 3),
-    filename="neb",
-    label=None,
-    annotate=False,
-):
+    images: Sequence[Atoms],
+    calc: Any = None,
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    save: bool = True,
+    show: bool = True,
+    smooth: bool = True,
+    k: int = 2,
+    fig_size: tuple[float, float] = (8, 3),
+    filename: str = "neb",
+    label: str | None = None,
+    annotate: bool = False,
+) -> tuple[Figure, Axes]:
     """Plot a nudged elastic band energy profile.
 
     Parameters
@@ -357,19 +367,19 @@ def plot_neb(
 
 
 def plot_irc(
-    images,
-    calc=None,
-    fig=None,
-    ax=None,
-    save=True,
-    show=True,
-    smooth=True,
-    k=2,
-    fig_size=(8, 3),
-    filename="irc",
-    color="black",
-    label=None,
-):
+    images: Sequence[Atoms],
+    calc: Any = None,
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    save: bool = True,
+    show: bool = True,
+    smooth: bool = True,
+    k: int = 2,
+    fig_size: tuple[float, float] = (8, 3),
+    filename: str = "irc",
+    color: str = "black",
+    label: str | None = None,
+) -> tuple[Figure, Axes]:
     """Plot an intrinsic reaction coordinate energy profile.
 
     The same profile as :func:`plot_neb`, with defaults suited to an IRC: a
@@ -427,7 +437,14 @@ def plot_irc(
     )
 
 
-def _plot_trajectory_series(trajectories, labels, timestep, ax, frame_value, y_lab):
+def _plot_trajectory_series(
+    trajectories: str | Path | Sequence[str | Path],
+    labels: Sequence[str] | None,
+    timestep: float | None,
+    ax: Axes | None,
+    frame_value: Callable[[Atoms], float],
+    y_lab: str,
+) -> tuple[Figure, Axes]:
     """Plot a per-frame quantity against frame number or time.
 
     Shared body of :func:`plot_temperature` and :func:`plot_total_energy`,
@@ -474,7 +491,12 @@ def _plot_trajectory_series(trajectories, labels, timestep, ax, frame_value, y_l
     return fig, ax
 
 
-def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
+def plot_temperature(
+    trajectories: str | Path | Sequence[str | Path],
+    labels: Sequence[str] | None = None,
+    timestep: float | None = None,
+    ax: Axes | None = None,
+) -> tuple[Figure, Axes]:
     """Plot temperature against frame number or time for one or more runs.
 
     Parameters
@@ -503,7 +525,12 @@ def plot_temperature(trajectories, labels=None, timestep=None, ax=None):
     )
 
 
-def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
+def plot_total_energy(
+    trajectories: str | Path | Sequence[str | Path],
+    labels: Sequence[str] | None = None,
+    timestep: float | None = None,
+    ax: Axes | None = None,
+) -> tuple[Figure, Axes]:
     """Plot total energy against frame number or time for one or more runs.
 
     Parameters
@@ -540,7 +567,7 @@ def plot_total_energy(trajectories, labels=None, timestep=None, ax=None):
 _FES_UNITS = {"source_unit": "eV", "energy_unit": "meV"}
 
 
-def _expand_fes_files(files):
+def _expand_fes_files(files: str | Path | Sequence[str | Path]) -> list[Path]:
     """Resolve run paths to a flat list of ``fes.dat`` files.
 
     Parameters
@@ -570,7 +597,7 @@ def _expand_fes_files(files):
     return resolved
 
 
-def _fes_labels(files):
+def _fes_labels(files: Sequence[Path]) -> list[str]:
     """Derive legend labels for a set of PLUMED runs.
 
     Parameters
@@ -591,16 +618,16 @@ def _fes_labels(files):
 
 
 def plot_plumed(
-    file="fes.dat",
-    fig=None,
-    ax=None,
-    save=True,
-    show=True,
-    fig_size=(8, 3),
-    filename="fes",
-    x_range=None,
-    x_label="CV",
-):
+    file: str | Path = "fes.dat",
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    save: bool = True,
+    show: bool = True,
+    fig_size: tuple[float, float] = (8, 3),
+    filename: str = "fes",
+    x_range: tuple[float, float] | None = None,
+    x_label: str = "CV",
+) -> tuple[Figure, Axes]:
     """Plot a one-dimensional PLUMED free-energy surface.
 
     Parameters
@@ -652,19 +679,19 @@ def plot_plumed(
 
 
 def plot_plumed_multi(
-    files,
-    labels=None,
-    fig=None,
-    ax=None,
-    save=True,
-    show=True,
-    fig_size=(8, 3),
-    filename="fes_multi",
-    x_range=None,
-    x_label="CV",
-    mintozero=False,
-    colors=C_CYCLE,
-):
+    files: str | Path | Sequence[str | Path],
+    labels: Sequence[str] | None = None,
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    save: bool = True,
+    show: bool = True,
+    fig_size: tuple[float, float] = (8, 3),
+    filename: str = "fes_multi",
+    x_range: tuple[float, float] | None = None,
+    x_label: str = "CV",
+    mintozero: bool = False,
+    colors: Sequence[str] = C_CYCLE,
+) -> tuple[Figure, Axes]:
     """Plot the free-energy surfaces of several PLUMED runs on one axes.
 
     Parameters

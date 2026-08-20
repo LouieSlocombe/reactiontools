@@ -16,6 +16,9 @@ conversions but must not drag in matplotlib -- and importing anything from
 :mod:`reactiontools.tools_style` makes for existing at all.
 """
 
+from collections.abc import Sequence
+from typing import Any
+
 import numpy as np
 from ase.units import kB
 
@@ -53,7 +56,7 @@ _UNIT_LABELS = {
 }
 
 
-def _normalise_unit(unit):
+def _normalise_unit(unit: str | None) -> str | None:
     """Normalise an energy-unit name and validate it.
 
     Parameters
@@ -82,7 +85,7 @@ def _normalise_unit(unit):
     return key
 
 
-def unit_label(unit):
+def unit_label(unit: str | None) -> str:
     """Return the axis label for an energy unit.
 
     Parameters
@@ -102,7 +105,11 @@ def unit_label(unit):
     return rf"$F$ ({_UNIT_LABELS[key]})"
 
 
-def convert_energy(values, source=DEFAULT_ENERGY_UNIT, target=None):
+def convert_energy(
+    values: float | Sequence[float] | np.ndarray,
+    source: str = DEFAULT_ENERGY_UNIT,
+    target: str | None = None,
+) -> np.ndarray | np.float64:
     """Convert energies between the units listed in :data:`ENERGY_UNITS`.
 
     Parameters
@@ -127,7 +134,7 @@ def convert_energy(values, source=DEFAULT_ENERGY_UNIT, target=None):
     return values * (ENERGY_UNITS[source_key] / ENERGY_UNITS[target_key])
 
 
-def as_kelvin(temperature):
+def as_kelvin(temperature: Any) -> float:
     """Return a temperature in kelvin, from a bare number or an OpenMM quantity.
 
     Everything in this package works in plain kelvin, but the callers driving
@@ -153,7 +160,7 @@ def as_kelvin(temperature):
     return float(temperature)
 
 
-def thermal_energy(temperature, energy_unit=DEFAULT_ENERGY_UNIT):
+def thermal_energy(temperature: Any, energy_unit: str = DEFAULT_ENERGY_UNIT) -> float:
     """Return kBT at *temperature*, in *energy_unit*.
 
     This is the ``--kt`` that ``plumed sum_hills`` and the bundled OPES

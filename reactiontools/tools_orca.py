@@ -47,7 +47,7 @@ import tempfile
 from dataclasses import dataclass, field
 from math import exp, sqrt
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import pandas as pd
 from ase import Atoms
@@ -149,21 +149,21 @@ def _terminated_normally(out: Path) -> bool:
 
 
 def orca_calc_preset(
-    orca_path=None,
-    directory=None,
-    calc_type="DFT",
-    xc="r2SCAN-3c",
-    charge=0,
-    multiplicity=1,
-    basis_set="",
-    n_procs=1,
-    f_solv=False,
-    f_disp=False,
-    atom_list=None,
-    calc_extra=None,
-    blocks_extra=None,
-    scf_option=None,
-):
+    orca_path: str | Path | None = None,
+    directory: str | None = None,
+    calc_type: str = "DFT",
+    xc: str = "r2SCAN-3c",
+    charge: int = 0,
+    multiplicity: int = 1,
+    basis_set: str = "",
+    n_procs: int = 1,
+    f_solv: bool | str | None = False,
+    f_disp: bool | str | None = False,
+    atom_list: str | None = None,
+    calc_extra: str | None = None,
+    blocks_extra: str | None = None,
+    scf_option: str | None = None,
+) -> ORCA:
     """Build an ASE ORCA calculator from a small set of common presets.
 
     Assembles the ORCA "simple input" line and block section for one of a
@@ -366,18 +366,18 @@ orca_preset_ccsd_gold = {
 
 
 def orca_optimise_atoms(
-    atoms,
-    charge=0,
-    multiplicity=1,
-    orca_path=None,
-    xc="r2SCAN-3c",
-    basis_set="",
-    tight_opt=True,
-    tight_scf=False,
-    f_solv=False,
-    f_disp=False,
-    n_procs=1,
-):
+    atoms: Atoms,
+    charge: int = 0,
+    multiplicity: int = 1,
+    orca_path: str | Path | None = None,
+    xc: str = "r2SCAN-3c",
+    basis_set: str = "",
+    tight_opt: bool = True,
+    tight_scf: bool = False,
+    f_solv: bool | str | None = False,
+    f_disp: bool | str | None = False,
+    n_procs: int = 1,
+) -> Atoms:
     """Optimise a geometry at the DFT level with ORCA.
 
     Builds a DFT calculator via :func:`orca_calc_preset` with an
@@ -444,7 +444,7 @@ def orca_optimise_atoms(
         return read(orca_file, format="xyz")
 
 
-def _extract_conformer_info(filepath: str | Path):
+def _extract_conformer_info(filepath: str | Path) -> pd.DataFrame:
     """Parse the conformer ensemble table from an ORCA GOAT output file.
 
     Parameters
@@ -503,8 +503,13 @@ def _extract_conformer_info(filepath: str | Path):
 
 
 def orca_calculate_goat(
-    atoms, charge=0, multiplicity=1, orca_path=None, n_procs=1, method="XTB"
-):
+    atoms: Atoms,
+    charge: int = 0,
+    multiplicity: int = 1,
+    orca_path: str | Path | None = None,
+    n_procs: int = 1,
+    method: str = "XTB",
+) -> tuple[list[Atoms], pd.DataFrame]:
     """Run ORCA's GOAT conformer search and collect the resulting ensemble.
 
     Worth running before a band is built: a NEB between two arbitrary
@@ -576,7 +581,7 @@ class _QuietOrcaTemplate(OrcaTemplate):
     it is pure noise. Only stdout is captured -- exceptions still propagate.
     """
 
-    def read_results(self, directory):
+    def read_results(self, directory: str | Path) -> dict[str, Any]:
         """Read ORCA results as ASE would, discarding anything printed.
 
         Parameters
@@ -1307,8 +1312,8 @@ def sella_ts_search(
     steps: int = 200,
     trajectory: Optional[str] = "ts_search.traj",
     internal: bool = False,
-    **calc_kwargs,
-):
+    **calc_kwargs: Any,
+) -> Atoms:
     """Locate a saddle point with Sella, using ORCA only for energy+gradient.
 
     Sella accumulates curvature from the gradients it already needs, so this

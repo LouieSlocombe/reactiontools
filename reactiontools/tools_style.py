@@ -12,9 +12,13 @@ need it, and the former imports the latter -- putting the styling in
 """
 
 import os
+from collections.abc import Sequence
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 __all__ = ["ax_plot", "n_plot"]
 
@@ -23,7 +27,7 @@ __all__ = ["ax_plot", "n_plot"]
 plt.rcParams["axes.linewidth"] = 2.0
 
 
-def n_plot(xlab, ylab, xs=14, ys=14):
+def n_plot(xlab: str, ylab: str, xs: int = 14, ys: int = 14) -> None:
     """Style the current axes, as :func:`ax_plot` would.
 
     Parameters
@@ -40,7 +44,14 @@ def n_plot(xlab, ylab, xs=14, ys=14):
     ax_plot(plt.gcf(), plt.gca(), xlab, ylab, xs=xs, ys=ys)
 
 
-def ax_plot(fig, ax, xlab, ylab, xs=14, ys=14):
+def ax_plot(
+    fig: Figure,
+    ax: Axes,
+    xlab: str | None,
+    ylab: str | None,
+    xs: int = 14,
+    ys: int = 14,
+) -> None:
     """Style one axes: ticks inward on all four sides, minor ticks on, labels.
 
     The tight-layout pass is skipped when the figure manages its own layout
@@ -78,7 +89,14 @@ def ax_plot(fig, ax, xlab, ylab, xs=14, ys=14):
         fig.tight_layout()
 
 
-def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
+def _style_axes(
+    fig: Figure,
+    axes: Axes | Sequence[Axes] | np.ndarray,
+    x_lab: str | None = None,
+    y_lab: str | None = None,
+    xs: int = 14,
+    ys: int = 14,
+) -> None:
     """Apply :func:`ax_plot` styling to one or more axes.
 
     Only the left-most axes keeps the y-label so that shared-axis panels do
@@ -100,7 +118,13 @@ def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
         ax_plot(fig, ax, x_lab, y_lab if i == 0 else None, xs=xs, ys=ys)
 
 
-def _finalise(fig, filename=None, show=False, dpi=600, formats=("png", "pdf")):
+def _finalise(
+    fig: Figure,
+    filename: str | Path | None = None,
+    show: bool = False,
+    dpi: int = 600,
+    formats: Sequence[str] = ("png", "pdf"),
+) -> None:
     """Optionally save and/or display a figure.
 
     Parameters

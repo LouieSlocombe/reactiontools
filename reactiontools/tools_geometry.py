@@ -20,8 +20,10 @@ measures what remains.
 """
 
 import warnings
+from collections.abc import Callable, Iterable, Sequence
 from itertools import permutations
 from numbers import Integral
+from typing import Any, TextIO
 
 import numpy as np
 from ase import Atoms
@@ -41,7 +43,10 @@ from .tools_reaction import _check_converged, get_neb_path, quick_guess_path
 _SEED_MIN_ALIGNMENT = 0.5
 
 
-def _alignment_positions(points, name):
+def _alignment_positions(
+    points: Sequence[Sequence[float]] | np.ndarray,
+    name: str,
+) -> np.ndarray:
     """Return a validated ``(n, 3)`` floating-point coordinate array.
 
     Parameters
@@ -78,7 +83,10 @@ def _alignment_positions(points, name):
     return positions
 
 
-def _alignment_weights(weights, count):
+def _alignment_weights(
+    weights: Sequence[float] | np.ndarray | None,
+    count: int,
+) -> np.ndarray:
     """Return validated weights for a rigid fit or RMSD calculation.
 
     Parameters
@@ -121,7 +129,11 @@ def _alignment_weights(weights, count):
     return weights
 
 
-def kabsch_transform(mobile_positions, reference_positions, weights=None):
+def kabsch_transform(
+    mobile_positions: Sequence[Sequence[float]] | np.ndarray,
+    reference_positions: Sequence[Sequence[float]] | np.ndarray,
+    weights: Sequence[float] | np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Find the best proper rigid transform from one point set to another.
 
     The points correspond by row. The returned transform uses NumPy's row
@@ -179,7 +191,11 @@ def kabsch_transform(mobile_positions, reference_positions, weights=None):
     return rotation, translation
 
 
-def _atom_indices(atoms, indices, name):
+def _atom_indices(
+    atoms: Atoms,
+    indices: int | Iterable[int] | None,
+    name: str,
+) -> np.ndarray:
     """Validate an alignment selection and return it as an integer array.
 
     Parameters
@@ -235,8 +251,12 @@ def _atom_indices(atoms, indices, name):
 
 
 def _atom_alignment_data(
-    mobile, reference, mobile_indices, reference_indices, weights
-):
+    mobile: Atoms,
+    reference: Atoms,
+    mobile_indices: int | Iterable[int] | None,
+    reference_indices: int | Iterable[int] | None,
+    weights: str | Sequence[float] | np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Resolve atom selections and weights shared by alignment operations.
 
     Parameters
@@ -299,9 +319,9 @@ def _atom_alignment_data(
 def align_atom_sets(
     mobile: Atoms,
     reference: Atoms,
-    mobile_indices=None,
-    reference_indices=None,
-    weights=None,
+    mobile_indices: int | Iterable[int] | None = None,
+    reference_indices: int | Iterable[int] | None = None,
+    weights: str | Sequence[float] | np.ndarray | None = None,
 ) -> Atoms:
     """Rigidly superpose one atom set on a corresponding reference set.
 
@@ -364,9 +384,9 @@ def align_atom_sets(
 def atom_set_rmsd(
     mobile: Atoms,
     reference: Atoms,
-    mobile_indices=None,
-    reference_indices=None,
-    weights=None,
+    mobile_indices: int | Iterable[int] | None = None,
+    reference_indices: int | Iterable[int] | None = None,
+    weights: str | Sequence[float] | np.ndarray | None = None,
     align: bool = False,
 ) -> float:
     """Calculate the RMSD between corresponding atoms, optionally after fitting.
@@ -480,7 +500,10 @@ def bonded_cluster_indices_no_anchor_hub(
 
 
 def get_dimer_bonded_cluster_indices(
-    atoms: Atoms, anchors: list[int], mults=None, multi_h: float = 1.3
+    atoms: Atoms,
+    anchors: list[int],
+    mults: Sequence[float] | None = None,
+    multi_h: float = 1.3,
 ) -> list[int]:
     """Collect the atoms of both halves of a dimer, as one index list.
 
@@ -527,7 +550,9 @@ def get_dimer_bonded_cluster_indices(
     return sorted(set(base_a + base_b))
 
 
-def _pca_frame(positions):
+def _pca_frame(
+    positions: Sequence[Sequence[float]] | np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     """Fit a right-handed frame to a set of points by PCA.
 
     For a roughly planar group the two largest-variance axes span the plane
@@ -566,7 +591,11 @@ def _pca_frame(positions):
     return origin, R
 
 
-def _orient_normal_toward(R, origin, target_point):
+def _orient_normal_toward(
+    R: np.ndarray,
+    origin: Sequence[float] | np.ndarray,
+    target_point: Sequence[float] | np.ndarray,
+) -> np.ndarray:
     """Flip a frame's normal so it points at a target.
 
     SVD fixes each axis only up to a sign, so two fragments fitted
@@ -595,7 +624,12 @@ def _orient_normal_toward(R, origin, target_point):
     return R
 
 
-def _rigid_transform(points, anchor_pos, R_target, new_anchor_pos):
+def _rigid_transform(
+    points: Sequence[Sequence[float]] | np.ndarray,
+    anchor_pos: Sequence[float] | np.ndarray,
+    R_target: np.ndarray,
+    new_anchor_pos: Sequence[float] | np.ndarray,
+) -> np.ndarray:
     """Rotate points about one anchor and translate them onto another.
 
     Parameters
@@ -701,12 +735,12 @@ def optimize_with_fixed_anchors(
     baseA_idxs: list,
     baseB_idxs: list,
     anchor_indices: list,
-    calc,
+    calc: Any,
     fmax: float = 0.05,
     steps: int = 1000,
     raise_on_unconverged: bool = False,
-    optimiser=BFGS,
-    logfile="-",
+    optimiser: Callable[..., Any] = BFGS,
+    logfile: str | TextIO | None = "-",
 ) -> Atoms:
     """Relax the two fragments while holding their anchors still.
 
@@ -792,10 +826,10 @@ def get_best_flip_and_face_bases(
     baseB_idxs: list,
     anchors: list,
     optimise_after: bool = True,
-    calc=None,
+    calc: Any = None,
     raise_on_unconverged: bool = False,
-    optimiser=BFGS,
-    logfile="-",
+    optimiser: Callable[..., Any] = BFGS,
+    logfile: str | TextIO | None = "-",
 ) -> Atoms:
     """Search the reflection signs for the tightest flipped structure.
 
@@ -909,7 +943,12 @@ def get_best_flip_and_face_bases(
     return swapped
 
 
-def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index):
+def swap_bonding_configuration(
+    atoms: Atoms,
+    donor_index: int | Iterable[int],
+    hydrogen_index: int | Iterable[int],
+    acceptor_index: int | Iterable[int],
+) -> Atoms:
     """Swap one or more donor-H...acceptor bonds to donor...H-acceptor.
 
     Builds the product end state of one or more proton transfers. Each hydrogen
@@ -947,7 +986,7 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
     IndexError
         If an atom index is out of range.
     """
-    def as_indices(value, name):
+    def as_indices(value: int | Iterable[int], name: str) -> list[int]:
         """Normalise one index argument to a list of plain integers.
 
         Parameters
@@ -993,7 +1032,7 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
     acceptors = as_indices(acceptor_index, "acceptor_index")
     transfer_count = len(hydrogens)
 
-    def one_per_hydrogen(indices, name):
+    def one_per_hydrogen(indices: list[int], name: str) -> list[int]:
         """Broadcast a shared index over the hydrogens, or check the count.
 
         Parameters
@@ -1088,7 +1127,11 @@ class SeedWarning(UserWarning):
     """
 
 
-def _seed_clash(atoms, radii_sum, clash_scale):
+def _seed_clash(
+    atoms: Atoms,
+    radii_sum: np.ndarray,
+    clash_scale: float,
+) -> tuple[int, int, float, float] | None:
     """Find the worst-compressed contact in a structure, if there is one.
 
     The geometric stand-in for an energy: with no calculator to say a step has
@@ -1123,16 +1166,16 @@ def _seed_clash(atoms, radii_sum, clash_scale):
 
 
 def seed_product_from_ts(
-    reactant,
-    ts,
-    n_images=25,
-    push=1.0,
-    n_steps=10,
-    tangent_images=2,
-    weights="masses",
-    clash_scale=0.7,
-    return_path=False,
-):
+    reactant: Atoms,
+    ts: Atoms,
+    n_images: int = 25,
+    push: float = 1.0,
+    n_steps: int = 10,
+    tangent_images: int = 2,
+    weights: str | Sequence[float] | np.ndarray | None = "masses",
+    clash_scale: float | None = 0.7,
+    return_path: bool = False,
+) -> Atoms | tuple[Atoms, list[Atoms]]:
     """Seed the far end state by stepping past a transition state.
 
     Geodesically interpolates from ``reactant`` to ``ts``, reads the direction

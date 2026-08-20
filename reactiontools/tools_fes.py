@@ -44,12 +44,18 @@ module.
 
 import os
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.axes import Axes
+from matplotlib.colors import Colormap
+from matplotlib.contour import ContourSet
+from matplotlib.figure import Figure
 
 from .tools_style import _finalise, _style_axes, ax_plot
 from .tools_units import (
@@ -108,7 +114,7 @@ class PlumedData:
     fields: list[str] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
 
-    def index(self, name):
+    def index(self, name: str | int) -> int:
         """Return the column index of a field.
 
         Parameters
@@ -140,7 +146,7 @@ class PlumedData:
             raise KeyError(f"Field {name!r} not found. Available fields: {self.fields}")
         return self.fields.index(name)
 
-    def column(self, name):
+    def column(self, name: str | int) -> np.ndarray:
         """Return a single column by field name or index.
 
         Parameters
@@ -155,7 +161,7 @@ class PlumedData:
         """
         return self.data[:, self.index(name)]
 
-    def label(self, index, default=""):
+    def label(self, index: int, default: str = "") -> str:
         """Return the field name of a column, falling back to *default*.
 
         Parameters
@@ -172,7 +178,7 @@ class PlumedData:
         """
         return self.fields[index] if index < len(self.fields) else default
 
-    def to_dataframe(self):
+    def to_dataframe(self) -> pd.DataFrame:
         """Return the data as a :class:`pandas.DataFrame`.
 
         Returns
@@ -185,7 +191,7 @@ class PlumedData:
         return pd.DataFrame(self.data, columns=names)
 
 
-def read_plumed_file(path, drop_der=True):
+def read_plumed_file(path: str | Path, drop_der: bool = True) -> PlumedData:
     """Read a PLUMED-style data file.
 
     Handles the files produced by ``plumed sum_hills``, ``PRINT``/``COLVAR``
@@ -288,7 +294,7 @@ class FES:
     energy_label: str | None = None
     regular: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Coerce and validate the arrays, then name unlabelled variables.
 
         Raises
@@ -328,16 +334,16 @@ class FES:
                 )
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         """int: Number of collective variables (1 or 2)."""
         return len(self.cvs)
 
     @property
-    def label(self):
+    def label(self) -> str:
         """str: Label to use for the free-energy axis or colour bar."""
         return self.energy_label or unit_label(self.energy_unit)
 
-    def finite_range(self):
+    def finite_range(self) -> tuple[float, float]:
         """Return the range spanned by the finite energies.
 
         Returns
@@ -350,7 +356,11 @@ class FES:
             return float("nan"), float("nan")
         return float(np.min(self.energy[finite])), float(np.max(self.energy[finite]))
 
-    def slice_at(self, value, axis=0):
+    def slice_at(
+        self,
+        value: float,
+        axis: int = 0,
+    ) -> tuple[np.ndarray, np.ndarray, float]:
         """Take a 1-D cut through a 2-D surface at a fixed value of one CV.
 
         Parameters
@@ -397,7 +407,11 @@ class FES:
         )
 
 
-def _grid_from_columns(x, y, z):
+def _grid_from_columns(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
     """Reshape scattered column data onto a regular grid when possible.
 
     Parameters
@@ -426,7 +440,12 @@ def _grid_from_columns(x, y, z):
     )
 
 
-def _fes_from_plumed(path, columns=None, cv_labels=None, energy_label=None):
+def _fes_from_plumed(
+    path: str | Path,
+    columns: Sequence[str | int] | None = None,
+    cv_labels: Sequence[str] | None = None,
+    energy_label: str | None = None,
+) -> FES:
     """Build an :class:`FES` from a PLUMED FES file.
 
     Parameters
@@ -492,7 +511,11 @@ def _fes_from_plumed(path, columns=None, cv_labels=None, energy_label=None):
     )
 
 
-def _fes_from_array(source, cv_labels=None, energy_label=None):
+def _fes_from_array(
+    source: np.ndarray | Sequence[Any],
+    cv_labels: Sequence[str] | None = None,
+    energy_label: str | None = None,
+) -> FES:
     """Build an :class:`FES` from in-memory arrays.
 
     The following layouts are recognised:
@@ -585,15 +608,15 @@ def _fes_from_array(source, cv_labels=None, energy_label=None):
 
 
 def as_fes(
-    source,
-    energy_unit=None,
-    source_unit=DEFAULT_ENERGY_UNIT,
-    shift_min_to_zero=True,
-    max_energy=None,
-    columns=None,
-    cv_labels=None,
-    energy_label=None,
-):
+    source: FES | str | Path | np.ndarray | Sequence[Any],
+    energy_unit: str | None = None,
+    source_unit: str | None = DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero: bool = True,
+    max_energy: float | None = None,
+    columns: Sequence[str | int] | None = None,
+    cv_labels: Sequence[str] | None = None,
+    energy_label: str | None = None,
+) -> FES:
     """Coerce anything FES-shaped into a prepared :class:`FES`.
 
     This is the single entry point used by every plotting function, so all
@@ -680,7 +703,10 @@ def as_fes(
     return fes
 
 
-def fes_series_files(directory=".", pattern=r"^fes_?(\d+)\.dat$"):
+def fes_series_files(
+    directory: str | Path = ".",
+    pattern: str = r"^fes_?(\d+)\.dat$",
+) -> list[Path]:
     r"""Find the numbered free-energy surfaces in a directory, in index order.
 
     The counterpart of :func:`~reactiontools.tools_plumed.sum_hills_files` for
@@ -731,12 +757,12 @@ def fes_series_files(directory=".", pattern=r"^fes_?(\d+)\.dat$"):
 
 
 def load_fes_series(
-    directory=".",
-    energy_unit="eV",
-    source_unit=DEFAULT_ENERGY_UNIT,
-    pattern=r"^fes_?(\d+)\.dat$",
-    verbose=True,
-):
+    directory: str | Path = ".",
+    energy_unit: str | None = "eV",
+    source_unit: str | None = DEFAULT_ENERGY_UNIT,
+    pattern: str = r"^fes_?(\d+)\.dat$",
+    verbose: bool = True,
+) -> list[FES]:
     r"""Load the numbered free-energy surfaces in a directory, in index order.
 
     :func:`fes_series_files` followed by :func:`as_fes` on each, so 1-D and
@@ -772,7 +798,7 @@ def load_fes_series(
     return surfaces
 
 
-def _as_fes_list(sources, **kwargs):
+def _as_fes_list(sources: Any, **kwargs: Any) -> list[FES]:
     """Coerce one source or a collection of sources into a list of surfaces.
 
     Parameters
@@ -800,7 +826,7 @@ def _as_fes_list(sources, **kwargs):
     return fes_list
 
 
-def _looks_like_fes_array(array):
+def _looks_like_fes_array(array: np.ndarray) -> bool:
     """Return True when an array can stand on its own as a free-energy surface.
 
     Used to tell ``[fes_a, fes_b]`` (a collection) apart from
@@ -825,7 +851,7 @@ def _looks_like_fes_array(array):
     return False
 
 
-def _is_single_source(source):
+def _is_single_source(source: Any) -> bool:
     """Return True when *source* is one FES rather than a collection of them.
 
     A tuple of matching coordinate/value arrays is one surface -- ``(x, F)``,
@@ -865,7 +891,11 @@ def _is_single_source(source):
     return True
 
 
-def _resolve_labels(labels, count, template=None):
+def _resolve_labels(
+    labels: Sequence[Any] | None,
+    count: int,
+    template: str | None = None,
+) -> list[str | None]:
     """Build one label per dataset.
 
     Parameters
@@ -907,7 +937,11 @@ def _resolve_labels(labels, count, template=None):
     return resolved
 
 
-def _keep_last(fes_list, label_list, max_datasets):
+def _keep_last(
+    fes_list: list[FES],
+    label_list: list[str | None],
+    max_datasets: int | None,
+) -> tuple[list[FES], list[str | None]]:
     """Keep only the last *max_datasets* surfaces and their labels.
 
     Trimming happens after label resolution, so a convergence series
@@ -944,7 +978,7 @@ def _keep_last(fes_list, label_list, max_datasets):
     return fes_list, label_list
 
 
-def _default_colors(count):
+def _default_colors(count: int) -> list[str | tuple[float, ...]]:
     """Pick one colour per surface from the active colour cycle, repeating.
 
     Parameters
@@ -961,7 +995,10 @@ def _default_colors(count):
     return [cycle[i % len(cycle)] for i in range(count)]
 
 
-def _resolve_colors(colors, count):
+def _resolve_colors(
+    colors: str | Sequence[str | tuple[float, ...]] | None,
+    count: int,
+) -> list[str | tuple[float, ...]]:
     """Return exactly one colour per dataset, rejecting silent truncation.
 
     Parameters
@@ -992,7 +1029,10 @@ def _resolve_colors(colors, count):
     return colors
 
 
-def _figure_from_axes(fig, axes):
+def _figure_from_axes(
+    fig: Figure | None,
+    axes: Axes | Sequence[Axes] | np.ndarray,
+) -> Figure:
     """Resolve and validate the figure which owns supplied axes.
 
     Parameters
@@ -1024,7 +1064,10 @@ def _figure_from_axes(fig, axes):
     return owner
 
 
-def _shared_levels(fes_list, levels):
+def _shared_levels(
+    fes_list: Sequence[FES],
+    levels: int | Sequence[float] | np.ndarray,
+) -> np.ndarray | int:
     """Build contour levels spanning every surface in *fes_list*.
 
     Sharing the levels is what makes a single colour bar meaningful across
@@ -1081,7 +1124,7 @@ def _shared_levels(fes_list, levels):
     return np.linspace(low, high, levels)
 
 
-def _draw_fes_contour(axis, fes, filled, **kwargs):
+def _draw_fes_contour(axis: Axes, fes: FES, filled: bool, **kwargs: Any) -> ContourSet:
     """Draw one regular or triangulated FES with a common validation path.
 
     Parameters
@@ -1122,7 +1165,10 @@ def _draw_fes_contour(axis, fes, filled, **kwargs):
     )
 
 
-def _default_grid_size(n_panels, fig_size):
+def _default_grid_size(
+    n_panels: int,
+    fig_size: tuple[float, float] | None,
+) -> tuple[float, float]:
     """Pick a figure size that grows with the number of panels.
 
     Parameters
@@ -1145,7 +1191,7 @@ def _default_grid_size(n_panels, fig_size):
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def _format_energy(value):
+def _format_energy(value: float) -> str:
     """Format an energy, without a sign on a value that rounds to zero.
 
     A barrier that comes out a hair below zero reads as a finding rather than
@@ -1165,7 +1211,7 @@ def _format_energy(value):
     return "0.000" if text == "-0.000" else text
 
 
-def _basin_mask(fes, basin, name):
+def _basin_mask(fes: FES, basin: Sequence[float], name: str) -> np.ndarray:
     """Select the sampled grid points of a 1-D surface inside a CV window.
 
     Parameters
@@ -1199,7 +1245,12 @@ def _basin_mask(fes, basin, name):
     return inside
 
 
-def _basin_free_energy(fes, mask, kt, reference):
+def _basin_free_energy(
+    fes: FES,
+    mask: np.ndarray,
+    kt: float | None,
+    reference: float,
+) -> float:
     """Free energy of a basin: its minimum, or the Boltzmann integral over it.
 
     Parameters
@@ -1262,7 +1313,7 @@ class FESSummary:
     reverse_barrier: float
     energy_unit: str | None = None
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Report the barriers, the basin difference and where they sit."""
         unit = f" {self.energy_unit}" if self.energy_unit else ""
         return (
@@ -1274,7 +1325,13 @@ class FESSummary:
         )
 
 
-def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
+def summarise_fes(
+    source: FES | str | Path | np.ndarray | Sequence[Any],
+    basin_a: Sequence[float],
+    basin_b: Sequence[float],
+    temperature: float | None = None,
+    **kwargs: Any,
+) -> FESSummary:
     """Measure the barrier and basin free-energy difference off a 1-D surface.
 
     The two basins are given as windows on the collective variable rather
@@ -1386,7 +1443,13 @@ def summarise_fes(source, basin_a, basin_b, temperature=None, **kwargs):
     )
 
 
-def fes_convergence(sources, basin_a, basin_b, temperature=None, **kwargs):
+def fes_convergence(
+    sources: FES | str | Path | np.ndarray | Sequence[Any],
+    basin_a: Sequence[float],
+    basin_b: Sequence[float],
+    temperature: float | None = None,
+    **kwargs: Any,
+) -> list[FESSummary]:
     """Summarise each surface of a series, to see whether the numbers settle.
 
     A metadynamics run is converged when the barrier and the basin difference
@@ -1432,24 +1495,24 @@ def fes_convergence(sources, basin_a, basin_b, temperature=None, **kwargs):
 
 
 def plot_fes_1d(
-    sources,
-    fig=None,
-    ax=None,
-    labels=None,
-    label_template=None,
-    max_datasets=None,
-    energy_unit=None,
-    source_unit=DEFAULT_ENERGY_UNIT,
-    shift_min_to_zero=True,
-    max_energy=None,
-    columns=None,
-    x_lab=None,
-    y_lab=None,
-    filename=None,
-    show=False,
-    fig_size=(8, 3),
-    **plot_kwargs,
-):
+    sources: FES | str | Path | np.ndarray | Sequence[Any],
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    labels: Sequence[Any] | None = None,
+    label_template: str | None = None,
+    max_datasets: int | None = None,
+    energy_unit: str | None = None,
+    source_unit: str | None = DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero: bool = True,
+    max_energy: float | None = None,
+    columns: Sequence[str | int] | None = None,
+    x_lab: str | None = None,
+    y_lab: str | None = None,
+    filename: str | Path | None = None,
+    show: bool = False,
+    fig_size: tuple[float, float] = (8, 3),
+    **plot_kwargs: Any,
+) -> tuple[Figure, Axes]:
     """Plot one or more 1-D free-energy profiles on a single axes.
 
     This covers a single profile, a convergence series over time and a
@@ -1543,27 +1606,27 @@ def plot_fes_1d(
 
 
 def plot_fes_2d(
-    sources,
-    fig=None,
-    ax=None,
-    labels=None,
-    label_template=None,
-    max_datasets=None,
-    energy_unit=None,
-    source_unit=DEFAULT_ENERGY_UNIT,
-    shift_min_to_zero=True,
-    max_energy=None,
-    columns=None,
-    levels=30,
-    cmap=None,
-    x_lab=None,
-    y_lab=None,
-    colorbar=True,
-    filename=None,
-    show=False,
-    fig_size=None,
-    **contour_kwargs,
-):
+    sources: FES | str | Path | np.ndarray | Sequence[Any],
+    fig: Figure | None = None,
+    ax: Axes | Sequence[Axes] | np.ndarray | None = None,
+    labels: Sequence[Any] | None = None,
+    label_template: str | None = None,
+    max_datasets: int | None = None,
+    energy_unit: str | None = None,
+    source_unit: str | None = DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero: bool = True,
+    max_energy: float | None = None,
+    columns: Sequence[str | int] | None = None,
+    levels: int | Sequence[float] | np.ndarray = 30,
+    cmap: str | Colormap | None = None,
+    x_lab: str | None = None,
+    y_lab: str | None = None,
+    colorbar: bool = True,
+    filename: str | Path | None = None,
+    show: bool = False,
+    fig_size: tuple[float, float] | None = None,
+    **contour_kwargs: Any,
+) -> tuple[Figure, np.ndarray]:
     """Plot one or more 2-D free-energy surfaces as filled contours.
 
     A single surface gives one panel; several surfaces are drawn side by
@@ -1694,7 +1757,11 @@ def plot_fes_2d(
     return fig, axes[:n_panels]
 
 
-def _path_coordinates(source, columns=None, cv_labels=None):
+def _path_coordinates(
+    source: str | Path | PlumedData | np.ndarray | Sequence[Any],
+    columns: Sequence[str | int] | None = None,
+    cv_labels: Sequence[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Read the two CV coordinates of a path.
 
     Parameters
@@ -1773,28 +1840,28 @@ def _path_coordinates(source, columns=None, cv_labels=None):
 
 
 def plot_fes_path(
-    source,
-    path,
-    fig=None,
-    ax=None,
-    energy_unit=None,
-    source_unit=DEFAULT_ENERGY_UNIT,
-    shift_min_to_zero=True,
-    max_energy=None,
-    columns=None,
-    path_columns=None,
-    levels=30,
-    cmap=None,
-    x_lab=None,
-    y_lab=None,
-    colorbar=True,
-    path_label="Path",
-    path_kwargs=None,
-    filename=None,
-    show=False,
-    fig_size=(6, 5),
-    **contour_kwargs,
-):
+    source: FES | str | Path | np.ndarray | Sequence[Any],
+    path: str | Path | PlumedData | np.ndarray | Sequence[Any],
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    energy_unit: str | None = None,
+    source_unit: str | None = DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero: bool = True,
+    max_energy: float | None = None,
+    columns: Sequence[str | int] | None = None,
+    path_columns: Sequence[str | int] | None = None,
+    levels: int | Sequence[float] | np.ndarray = 30,
+    cmap: str | Colormap | None = None,
+    x_lab: str | None = None,
+    y_lab: str | None = None,
+    colorbar: bool = True,
+    path_label: str | None = "Path",
+    path_kwargs: Mapping[str, Any] | None = None,
+    filename: str | Path | None = None,
+    show: bool = False,
+    fig_size: tuple[float, float] = (6, 5),
+    **contour_kwargs: Any,
+) -> tuple[Figure, Axes]:
     """Plot a path through collective-variable space over a 2-D FES.
 
     The path can come straight from a PLUMED ``COLVAR`` file. If its header
@@ -1888,25 +1955,25 @@ def plot_fes_path(
 
 
 def plot_fes_2d_overlay(
-    sources,
-    fig=None,
-    ax=None,
-    labels=None,
-    label_template=None,
-    energy_unit=None,
-    source_unit=DEFAULT_ENERGY_UNIT,
-    shift_min_to_zero=True,
-    max_energy=None,
-    columns=None,
-    levels=6,
-    colors=None,
-    x_lab=None,
-    y_lab=None,
-    filename=None,
-    show=False,
-    fig_size=(5, 4),
-    **contour_kwargs,
-):
+    sources: FES | str | Path | np.ndarray | Sequence[Any],
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    labels: Sequence[Any] | None = None,
+    label_template: str | None = None,
+    energy_unit: str | None = None,
+    source_unit: str | None = DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero: bool = True,
+    max_energy: float | None = None,
+    columns: Sequence[str | int] | None = None,
+    levels: int | Sequence[float] | np.ndarray = 6,
+    colors: str | Sequence[str | tuple[float, ...]] | None = None,
+    x_lab: str | None = None,
+    y_lab: str | None = None,
+    filename: str | Path | None = None,
+    show: bool = False,
+    fig_size: tuple[float, float] = (5, 4),
+    **contour_kwargs: Any,
+) -> tuple[Figure, Axes]:
     """Overlay the contour lines of several 2-D free-energy surfaces.
 
     Drawing the surfaces on the same axes in different colours makes small
@@ -2011,27 +2078,27 @@ def plot_fes_2d_overlay(
 
 
 def plot_fes_slices(
-    sources,
-    at,
-    axis=0,
-    fig=None,
-    ax=None,
-    labels=None,
-    energy_unit=None,
-    source_unit=DEFAULT_ENERGY_UNIT,
-    shift_min_to_zero=True,
-    max_energy=None,
-    columns=None,
-    slice_format="{label}, {cv}$={value:.2f}$",
-    colors=None,
-    linestyles=("-", "--", ":", "-."),
-    x_lab=None,
-    y_lab=None,
-    filename=None,
-    show=False,
-    fig_size=(8, 3),
-    **plot_kwargs,
-):
+    sources: FES | str | Path | np.ndarray | Sequence[Any],
+    at: float | Sequence[float] | np.ndarray,
+    axis: int = 0,
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    labels: Sequence[Any] | None = None,
+    energy_unit: str | None = None,
+    source_unit: str | None = DEFAULT_ENERGY_UNIT,
+    shift_min_to_zero: bool = True,
+    max_energy: float | None = None,
+    columns: Sequence[str | int] | None = None,
+    slice_format: str = "{label}, {cv}$={value:.2f}$",
+    colors: str | Sequence[str | tuple[float, ...]] | None = None,
+    linestyles: Sequence[str] = ("-", "--", ":", "-."),
+    x_lab: str | None = None,
+    y_lab: str | None = None,
+    filename: str | Path | None = None,
+    show: bool = False,
+    fig_size: tuple[float, float] = (8, 3),
+    **plot_kwargs: Any,
+) -> tuple[Figure, Axes]:
     """Plot 1-D cuts through 2-D free-energy surfaces at fixed CV values.
 
     Each surface gets its own colour and each requested cut its own line
@@ -2160,7 +2227,10 @@ _PREPARE_KWARGS = (
 )
 
 
-def plot_fes(sources, **kwargs):
+def plot_fes(
+    sources: FES | str | Path | np.ndarray | Sequence[Any],
+    **kwargs: Any,
+) -> tuple[Figure, Axes | np.ndarray]:
     """Plot a free-energy surface, dispatching on its dimensionality.
 
     Sends 1-D data to :func:`plot_fes_1d` and 2-D data to
@@ -2192,7 +2262,13 @@ def plot_fes(sources, **kwargs):
     return plot_fes_2d(fes_list, **kwargs)
 
 
-def plot_plumed_fes(path, ax=None, shift_min_to_zero=True, levels=30, **kwargs):
+def plot_plumed_fes(
+    path: str | Path,
+    ax: Axes | None = None,
+    shift_min_to_zero: bool = True,
+    levels: int = 30,
+    **kwargs: Any,
+) -> tuple[Figure, Axes | np.ndarray]:
     """Plot a PLUMED free-energy surface from a data file.
 
     Thin wrapper around :func:`plot_fes` kept for the example and test
@@ -2233,15 +2309,15 @@ def plot_plumed_fes(path, ax=None, shift_min_to_zero=True, levels=30, **kwargs):
 
 
 def plot_plumed_colvar(
-    path,
-    x_axis="time",
-    columns=None,
-    fig=None,
-    axes=None,
-    filename=None,
-    show=False,
-    figsize=(10, 8),
-):
+    path: str | Path,
+    x_axis: str = "time",
+    columns: Sequence[str] | None = None,
+    fig: Figure | None = None,
+    axes: Axes | Sequence[Axes] | np.ndarray | None = None,
+    filename: str | Path | None = None,
+    show: bool = False,
+    figsize: tuple[float, float] = (10, 8),
+) -> tuple[Figure, np.ndarray]:
     """Plot collective variables from a PLUMED COLVAR file.
 
     Reads the ``#! FIELDS`` header to determine the column names and creates
@@ -2327,20 +2403,20 @@ def plot_plumed_colvar(
 
 
 def plot_fes_convergence(
-    sources,
-    basin_a,
-    basin_b,
-    times=None,
-    temperature=None,
-    fig=None,
-    ax=None,
-    x_lab=None,
-    y_lab=None,
-    filename=None,
-    show=False,
-    fig_size=(8, 3),
-    **kwargs,
-):
+    sources: FES | str | Path | np.ndarray | Sequence[Any],
+    basin_a: Sequence[float],
+    basin_b: Sequence[float],
+    times: Sequence[float] | np.ndarray | None = None,
+    temperature: float | None = None,
+    fig: Figure | None = None,
+    ax: Axes | None = None,
+    x_lab: str | None = None,
+    y_lab: str | None = None,
+    filename: str | Path | None = None,
+    show: bool = False,
+    fig_size: tuple[float, float] = (8, 3),
+    **kwargs: Any,
+) -> tuple[Figure, Axes]:
     """Plot how the barrier and the basin difference settle over a series.
 
     The convergence test that matters: a run is done when these two numbers

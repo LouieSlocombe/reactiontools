@@ -13,6 +13,7 @@ that produced them.
 import os
 from math import exp, sqrt
 from pathlib import Path
+from typing import Any, NoReturn
 
 import numpy as np
 import pytest
@@ -66,13 +67,13 @@ DATA = Path(__file__).parent / "data"
 
 
 @pytest.fixture
-def fad():
+def fad() -> Atoms:
     """Formic acid dimer, the reference geometry for the ORCA tests."""
     return read(DATA / "fad.xyz")
 
 
 @pytest.fixture
-def fake_orca(tmp_path):
+def fake_orca(tmp_path: Path) -> Path:
     """Provide a stand-in binary that passes _resolve_orca's ELF check.
 
     Returns
@@ -87,7 +88,7 @@ def fake_orca(tmp_path):
 
 
 @pytest.fixture
-def external_xtb(monkeypatch, tmp_path):
+def external_xtb(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Pretend an external xtb driver is installed, via $XTBEXE.
 
     Returns
@@ -103,13 +104,13 @@ def external_xtb(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def no_external_xtb(monkeypatch):
+def no_external_xtb(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pretend no external xtb driver exists anywhere on this machine."""
     monkeypatch.delenv("XTBEXE", raising=False)
     monkeypatch.setattr("reactiontools.tools_orca.shutil.which", lambda name: None)
 
 
-def keywords(fake_orca, **kwargs) -> str:
+def keywords(fake_orca: Path, **kwargs: Any) -> str:
     """Return the ORCA ``!`` line that orca_cheap_calculator would write.
 
     Parameters
@@ -133,7 +134,7 @@ def keywords(fake_orca, **kwargs) -> str:
 
 @pytest.mark.integration
 @orca_required
-def test_orca_calc_preset(fad):
+def test_orca_calc_preset(fad: Atoms) -> None:
     fad.calc = orca_calc_preset()
     energy = fad.get_potential_energy()
 
@@ -142,7 +143,7 @@ def test_orca_calc_preset(fad):
 
 @pytest.mark.integration
 @orca_required
-def test_orca_optimise_atoms(fad):
+def test_orca_optimise_atoms(fad: Atoms) -> None:
     opt_atoms = orca_optimise_atoms(fad)
     opt_atoms.calc = orca_calc_preset()
     energy = opt_atoms.get_potential_energy()
@@ -153,7 +154,7 @@ def test_orca_optimise_atoms(fad):
 
 @pytest.mark.integration
 @orca_required
-def test_orca_calculate_goat(fad):
+def test_orca_calculate_goat(fad: Atoms) -> None:
     conformers, df = orca_calculate_goat(fad)
 
     assert len(conformers) == len(df)
@@ -163,7 +164,9 @@ def test_orca_calculate_goat(fad):
 class TestResolveOrca:
     """Binary discovery, shared by every calculator in the module."""
 
-    def test_orca_path_env_may_be_the_binary_itself(self, fake_orca, monkeypatch):
+    def test_orca_path_env_may_be_the_binary_itself(
+        self, fake_orca: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("ASE_ORCA_COMMAND", raising=False)
         monkeypatch.delenv("ORCA_COMMAND", raising=False)
         monkeypatch.delenv("ORCA_DIR", raising=False)
@@ -171,7 +174,9 @@ class TestResolveOrca:
 
         assert _resolve_orca(None) == str(fake_orca)
 
-    def test_orca_path_env_may_be_the_install_directory(self, fake_orca, monkeypatch):
+    def test_orca_path_env_may_be_the_install_directory(
+        self, fake_orca: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("ASE_ORCA_COMMAND", raising=False)
         monkeypatch.delenv("ORCA_COMMAND", raising=False)
         monkeypatch.delenv("ORCA_DIR", raising=False)
@@ -179,14 +184,14 @@ class TestResolveOrca:
 
         assert _resolve_orca(None) == str(fake_orca)
 
-    def test_screen_reader_is_rejected(self):
+    def test_screen_reader_is_rejected(self) -> None:
         screen_reader = "/usr/bin/orca"
         if not Path(screen_reader).is_file():
             pytest.skip("no /usr/bin/orca on this machine")
         with pytest.raises(RuntimeError, match="screen reader"):
             _resolve_orca(screen_reader)
 
-    def test_missing_binary_raises(self):
+    def test_missing_binary_raises(self) -> None:
         with pytest.raises(FileNotFoundError):
             _resolve_orca("/nonexistent/path/to/orca")
 
@@ -194,7 +199,7 @@ class TestResolveOrca:
 class TestOrcaCalcPreset:
     """The input assembly is pure string work, so it runs without ORCA."""
 
-    def test_builds_the_simple_input_line(self, fake_orca):
+    def test_builds_the_simple_input_line(self, fake_orca: Path) -> None:
         calc = orca_calc_preset(
             orca_path=fake_orca,
             xc="PBE0",
@@ -211,7 +216,7 @@ class TestOrcaCalcPreset:
         assert "%pal nprocs 4 end" in blocks
         assert 'SMDSOLVENT "TOLUENE"' in blocks
 
-    def test_defaults_solvation_and_dispersion_keywords(self, fake_orca):
+    def test_defaults_solvation_and_dispersion_keywords(self, fake_orca: Path) -> None:
         """``True`` picks the default; a string is passed through as given."""
         default = orca_calc_preset(orca_path=fake_orca, f_solv=True, f_disp=True)
 
@@ -222,18 +227,20 @@ class TestOrcaCalcPreset:
 
         assert "D3BJ" in named.parameters["orcasimpleinput"]
 
-    def test_omits_solvation_and_dispersion_by_default(self, fake_orca):
+    def test_omits_solvation_and_dispersion_by_default(self, fake_orca: Path) -> None:
         calc = orca_calc_preset(orca_path=fake_orca)
 
         assert "SMD" not in calc.parameters["orcablocks"]
         assert "D4" not in calc.parameters["orcasimpleinput"]
 
-    def test_uses_an_unrestricted_reference_when_open_shell(self, fake_orca):
+    def test_uses_an_unrestricted_reference_when_open_shell(
+        self, fake_orca: Path
+    ) -> None:
         calc = orca_calc_preset(orca_path=fake_orca, multiplicity=3)
 
         assert calc.parameters["orcasimpleinput"].startswith("UKS ")
 
-    def test_builds_a_qmmm_region(self, fake_orca):
+    def test_builds_a_qmmm_region(self, fake_orca: Path) -> None:
         calc = orca_calc_preset(
             orca_path=fake_orca, calc_type="QM/XTB2", atom_list="0:5"
         )
@@ -241,7 +248,7 @@ class TestOrcaCalcPreset:
         assert calc.parameters["orcasimpleinput"].startswith("QM/XTB2 ")
         assert "%QMMM QMATOMS {0:5} END END" in calc.parameters["orcablocks"]
 
-    def test_rejects_a_bogus_binary_at_construction(self):
+    def test_rejects_a_bogus_binary_at_construction(self) -> None:
         """Routing through the resolver moves the failure up front."""
         with pytest.raises(FileNotFoundError):
             orca_calc_preset(orca_path="/nonexistent/orca")
@@ -256,7 +263,7 @@ class TestPresets:
     change every result taken with it.
     """
 
-    def test_dft_cheap_is_blyp_in_the_gas_phase(self, fake_orca):
+    def test_dft_cheap_is_blyp_in_the_gas_phase(self, fake_orca: Path) -> None:
         calc = orca_calc_preset(orca_path=fake_orca, **orca_preset_dft_cheap)
 
         assert calc.parameters["orcasimpleinput"].split() == [
@@ -266,7 +273,7 @@ class TestPresets:
         ]
         assert "SMD" not in calc.parameters["orcablocks"]
 
-    def test_dft_gold_is_b3lyp_with_d4_in_water(self, fake_orca):
+    def test_dft_gold_is_b3lyp_with_d4_in_water(self, fake_orca: Path) -> None:
         calc = orca_calc_preset(orca_path=fake_orca, **orca_preset_dft_gold)
 
         assert calc.parameters["orcasimpleinput"].split() == [
@@ -277,12 +284,14 @@ class TestPresets:
         ]
         assert 'SMDSOLVENT "WATER"' in calc.parameters["orcablocks"]
 
-    def test_xtb_names_the_method_and_takes_no_basis(self, fake_orca):
+    def test_xtb_names_the_method_and_takes_no_basis(self, fake_orca: Path) -> None:
         calc = orca_calc_preset(orca_path=fake_orca, **orca_preset_xtb)
 
         assert calc.parameters["orcasimpleinput"].split() == ["XTB2", "EnGrad"]
 
-    def test_mp2_gold_uses_the_dlpno_approximation_and_an_aux_basis(self, fake_orca):
+    def test_mp2_gold_uses_the_dlpno_approximation_and_an_aux_basis(
+        self, fake_orca: Path
+    ) -> None:
         calc = orca_calc_preset(orca_path=fake_orca, **orca_preset_mp2_gold)
 
         assert calc.parameters["orcasimpleinput"].split() == [
@@ -292,7 +301,7 @@ class TestPresets:
             "EnGrad",
         ]
 
-    def test_ccsd_gold_is_canonical_rather_than_dlpno(self, fake_orca):
+    def test_ccsd_gold_is_canonical_rather_than_dlpno(self, fake_orca: Path) -> None:
         """``'CCSD(T)'`` is passed through as an ORCA keyword, unlike
         ``calc_type='CCSD'`` which builds the DLPNO approximation."""
         calc = orca_calc_preset(orca_path=fake_orca, **orca_preset_ccsd_gold)
@@ -304,7 +313,9 @@ class TestPresets:
         ]
         assert "DLPNO" not in calc.parameters["orcasimpleinput"]
 
-    def test_a_keyword_after_the_splat_overrides_the_preset(self, fake_orca):
+    def test_a_keyword_after_the_splat_overrides_the_preset(
+        self, fake_orca: Path
+    ) -> None:
         calc = orca_calc_preset(orca_path=fake_orca, **orca_preset_dft_cheap, n_procs=8)
 
         assert "%pal nprocs 8 end" in calc.parameters["orcablocks"]
@@ -313,21 +324,25 @@ class TestPresets:
 class TestOrcaCheapCalculator:
     """Keyword assembly for the xTB / "3c" screening tier."""
 
-    def test_every_method_maps_to_its_orca_keyword(self, fake_orca, external_xtb):
+    def test_every_method_maps_to_its_orca_keyword(
+        self, fake_orca: Path, external_xtb: Path
+    ) -> None:
         for alias, (keyword, _) in CHEAP_METHODS.items():
             assert keyword in keywords(fake_orca, method=alias, native=False).split()
 
-    def test_unknown_method_is_rejected(self, fake_orca):
+    def test_unknown_method_is_rejected(self, fake_orca: Path) -> None:
         with pytest.raises(ValueError, match="pick one of"):
             keywords(fake_orca, method="ccsd(t)")
 
-    def test_method_alias_is_case_insensitive(self, fake_orca):
+    def test_method_alias_is_case_insensitive(self, fake_orca: Path) -> None:
         assert "r2SCAN-3c" in keywords(fake_orca, method="R2SCAN-3C ")
         assert "NATIVE-XTB2" in keywords(fake_orca, method=" GFN2-XTB ")
 
     # --- native vs external xTB ----------------------------------------------
 
-    def test_gfn_levels_default_to_the_native_implementation(self, fake_orca):
+    def test_gfn_levels_default_to_the_native_implementation(
+        self, fake_orca: Path
+    ) -> None:
         for alias, (plain, spin_polarised) in NATIVE_XTB_METHODS.items():
             assert plain in keywords(fake_orca, method=alias).split()
             assert plain in keywords(fake_orca, method=alias, native=True).split()
@@ -336,28 +351,34 @@ class TestOrcaCheapCalculator:
                 in keywords(fake_orca, method=alias, spin_polarised=True).split()
             )
 
-    def test_external_route_writes_the_plain_keyword(self, fake_orca, external_xtb):
+    def test_external_route_writes_the_plain_keyword(
+        self, fake_orca: Path, external_xtb: Path
+    ) -> None:
         line = keywords(fake_orca, method="gfn2-xtb", native=False).split()
         assert "XTB2" in line
         assert "NATIVE-XTB2" not in line
 
-    def test_gfn_ff_is_external_only(self, fake_orca, external_xtb):
+    def test_gfn_ff_is_external_only(self, fake_orca: Path, external_xtb: Path) -> None:
         assert "XTBFF" in keywords(fake_orca, method="gfn-ff").split()
         with pytest.raises(ValueError, match="no native ORCA implementation"):
             keywords(fake_orca, method="gfn-ff", native=True)
 
-    def test_native_is_ignored_for_the_composites(self, fake_orca, no_external_xtb):
+    def test_native_is_ignored_for_the_composites(
+        self, fake_orca: Path, no_external_xtb: None
+    ) -> None:
         for native in (True, False, "auto"):
             assert (
                 "r2SCAN-3c"
                 in keywords(fake_orca, method="r2scan-3c", native=native).split()
             )
 
-    def test_bad_native_value_is_rejected(self, fake_orca):
+    def test_bad_native_value_is_rejected(self, fake_orca: Path) -> None:
         with pytest.raises(ValueError, match="native must be True, False or 'auto'"):
             keywords(fake_orca, native="yes")
 
-    def test_spin_polarisation_needs_the_native_route(self, fake_orca, external_xtb):
+    def test_spin_polarisation_needs_the_native_route(
+        self, fake_orca: Path, external_xtb: Path
+    ) -> None:
         with pytest.raises(ValueError, match="needs ORCA's native xTB"):
             keywords(fake_orca, method="gfn2-xtb", native=False, spin_polarised=True)
         with pytest.raises(ValueError, match="needs ORCA's native xTB"):
@@ -366,8 +387,8 @@ class TestOrcaCheapCalculator:
             keywords(fake_orca, method="r2scan-3c", spin_polarised=True)
 
     def test_missing_external_driver_is_reported_up_front(
-        self, fake_orca, no_external_xtb
-    ):
+        self, fake_orca: Path, no_external_xtb: None
+    ) -> None:
         with pytest.raises(FileNotFoundError, match="native=True"):
             keywords(fake_orca, method="gfn2-xtb", native=False)
         with pytest.raises(FileNotFoundError, match="no native implementation"):
@@ -375,7 +396,9 @@ class TestOrcaCheapCalculator:
         # The native route never touches the external interface, so it still builds.
         assert "NATIVE-XTB2" in keywords(fake_orca, method="gfn2-xtb").split()
 
-    def test_xtb_block_belongs_to_the_external_interface(self, fake_orca, external_xtb):
+    def test_xtb_block_belongs_to_the_external_interface(
+        self, fake_orca: Path, external_xtb: Path
+    ) -> None:
         with pytest.raises(ValueError, match="%xtb block"):
             keywords(fake_orca, method="gfn2-xtb", extra_blocks="%xtb ETemp 300 end")
         calc = orca_cheap_calculator(
@@ -388,26 +411,28 @@ class TestOrcaCheapCalculator:
 
     # --- keyword line and blocks ---------------------------------------------
 
-    def test_engrad_is_requested_by_default(self, fake_orca):
+    def test_engrad_is_requested_by_default(self, fake_orca: Path) -> None:
         assert "EnGrad" in keywords(fake_orca).split()
         assert "EnGrad" not in keywords(fake_orca, forces=False).split()
 
-    def test_solvent_model_defaults_per_method(self, fake_orca, external_xtb):
+    def test_solvent_model_defaults_per_method(
+        self, fake_orca: Path, external_xtb: Path
+    ) -> None:
         assert "ALPB(water)" in keywords(fake_orca, method="gfn2-xtb", solvent="water")
         assert "ALPB(water)" in keywords(fake_orca, method="gfn-ff", solvent="water")
         assert "CPCM(water)" in keywords(fake_orca, method="r2scan-3c", solvent="water")
         assert "CPCM(water)" in keywords(fake_orca, method="hf-3c", solvent="water")
 
-    def test_solvent_model_can_be_overridden(self, fake_orca):
+    def test_solvent_model_can_be_overridden(self, fake_orca: Path) -> None:
         assert "SMD(toluene)" in keywords(
             fake_orca, method="b97-3c", solvent="toluene", solvent_model="SMD"
         )
 
-    def test_no_solvent_keyword_without_a_solvent(self, fake_orca):
+    def test_no_solvent_keyword_without_a_solvent(self, fake_orca: Path) -> None:
         for token in ("CPCM", "ALPB", "SMD"):
             assert token not in keywords(fake_orca)
 
-    def test_charge_multiplicity_and_blocks(self, fake_orca):
+    def test_charge_multiplicity_and_blocks(self, fake_orca: Path) -> None:
         calc = orca_cheap_calculator(
             "hf-3c",
             orca_path=fake_orca,
@@ -428,7 +453,7 @@ class TestOrcaCheapCalculator:
         assert "%maxcore 2000" in blocks
         assert "%scf MaxIter 300 end" in blocks
 
-    def test_quiet_template_is_opt_out(self, fake_orca):
+    def test_quiet_template_is_opt_out(self, fake_orca: Path) -> None:
         assert isinstance(
             orca_cheap_calculator(orca_path=fake_orca).template, _QuietOrcaTemplate
         )
@@ -439,8 +464,10 @@ class TestOrcaCheapCalculator:
 class TestQuietTemplate:
     """The stdout-suppressing wrapper around ASE's ORCA template."""
 
-    def test_swallows_the_engrad_print(self, monkeypatch, capsys):
-        def read(self, directory):
+    def test_swallows_the_engrad_print(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def read(self, directory: str | Path) -> dict[str, float]:
             print("ORCA does not by default supply the forces")
             return {"energy": 1.0}
 
@@ -448,11 +475,13 @@ class TestQuietTemplate:
         assert _QuietOrcaTemplate().read_results("somewhere") == {"energy": 1.0}
         assert capsys.readouterr().out == ""
 
-    def test_still_propagates_errors(self, monkeypatch, capsys):
+    def test_still_propagates_errors(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         class Boom(OSError):
             pass
 
-        def read(self, directory):
+        def read(self, directory: str | Path) -> NoReturn:
             print("noise")
             raise Boom("real failure")
 
@@ -466,8 +495,12 @@ class TestFindXtb:
     """Discovery of the external xtb driver, mirroring ORCA's own search."""
 
     def test_searches_where_orca_does(
-        self, fake_orca, tmp_path, no_external_xtb, monkeypatch
-    ):
+        self,
+        fake_orca: Path,
+        tmp_path: Path,
+        no_external_xtb: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         assert _find_xtb(fake_orca) is None
 
         sibling = fake_orca.parent / "otool_xtb"
@@ -482,7 +515,7 @@ class TestFindXtb:
         assert _find_xtb(fake_orca) == str(elsewhere)
 
 
-def geometry_line(method, **kwargs) -> list[str]:
+def geometry_line(method: str, **kwargs: Any) -> list[str]:
     """Return the geometry-stage ``!`` line as a list of keywords.
 
     Parameters
@@ -512,7 +545,7 @@ def geometry_line(method, **kwargs) -> list[str]:
 class TestGeometryKeywords:
     """The gold standard's geometry / thermochemistry stage."""
 
-    def test_takes_native_xtb_and_its_numerical_hessian(self):
+    def test_takes_native_xtb_and_its_numerical_hessian(self) -> None:
         line = geometry_line("gfn2-xtb")
         assert "NATIVE-XTB2" in line
         # Native xTB has no analytic Hessian, and ORCA aborts rather than fall back.
@@ -522,7 +555,7 @@ class TestGeometryKeywords:
             "def2-TZVP" not in line and "RIJCOSX" not in line and "def2/J" not in line
         )
 
-    def test_keeps_the_analytic_hessian_for_everything_else(self):
+    def test_keeps_the_analytic_hessian_for_everything_else(self) -> None:
         composite = geometry_line("r2SCAN-3c")
         assert composite[:1] == ["r2SCAN-3c"]
         assert "Freq" in composite and "NumFreq" not in composite
@@ -532,7 +565,7 @@ class TestGeometryKeywords:
         assert functional[:4] == ["PBE0", "def2-TZVP", "RIJCOSX", "def2/J"]
         assert "OptTS" in functional and "TightOpt" not in functional
 
-    def test_passes_orca_keywords_through(self):
+    def test_passes_orca_keywords_through(self) -> None:
         assert "XTB2" in geometry_line("XTB2")
         assert "TightOpt" in geometry_line("XTB2")
         assert geometry_line("wB97X-3c", optimise=False, frequencies=False) == [
@@ -540,14 +573,14 @@ class TestGeometryKeywords:
             "TightSCF",
         ]
 
-    def test_is_native_xtb(self):
+    def test_is_native_xtb(self) -> None:
         assert _is_native_xtb("NATIVE-XTB2")
         assert _is_native_xtb("native-spxtb1 TightSCF")
         assert not _is_native_xtb("XTB2")
         assert not _is_native_xtb("r2SCAN-3c")
 
 
-def mechanism_input(fake_orca, **kwargs):
+def mechanism_input(fake_orca: Path, **kwargs: Any) -> tuple[str, str]:
     """Return the simple-input and block strings from orca_calculator."""
     calc = orca_calculator(orca_path=fake_orca, **kwargs)
     return calc.parameters["orcasimpleinput"], calc.parameters["orcablocks"]
@@ -556,7 +589,9 @@ def mechanism_input(fake_orca, **kwargs):
 class TestOrcaCalculator:
     """Offline coverage of every mechanism-workflow configuration branch."""
 
-    def test_default_is_an_ase_gradient_at_the_documented_level(self, fake_orca):
+    def test_default_is_an_ase_gradient_at_the_documented_level(
+        self, fake_orca: Path
+    ) -> None:
         simple, blocks = mechanism_input(fake_orca)
 
         assert simple.split()[:6] == [
@@ -579,19 +614,21 @@ class TestOrcaCalculator:
             ("slow", ["SlowConv"], ["NOSOSCF"]),
         ],
     )
-    def test_scf_strategies(self, fake_orca, strategy, included, excluded):
+    def test_scf_strategies(
+        self, fake_orca: Path, strategy: str, included: list[str], excluded: list[str]
+    ) -> None:
         simple, _ = mechanism_input(fake_orca, scf_strategy=strategy)
 
         assert all(keyword in simple.split() for keyword in included)
         assert all(keyword not in simple.split() for keyword in excluded)
 
-    def test_rejects_unknown_task_and_scf_strategy(self, fake_orca):
+    def test_rejects_unknown_task_and_scf_strategy(self, fake_orca: Path) -> None:
         with pytest.raises(ValueError, match="task must be one of"):
             orca_calculator(task="dance")
         with pytest.raises(ValueError, match="scf_strategy"):
             orca_calculator(orca_path=fake_orca, scf_strategy="reckless")
 
-    def test_restart_solvation_and_population_controls(self, fake_orca):
+    def test_restart_solvation_and_population_controls(self, fake_orca: Path) -> None:
         simple, blocks = mechanism_input(
             fake_orca,
             solvent="water",
@@ -608,7 +645,9 @@ class TestOrcaCalculator:
         assert '%moinp "previous.gbw"' in blocks
         assert "%output" in blocks and "%nbo" in blocks
 
-    def test_open_shell_singlet_needs_atoms_and_breaks_symmetry(self, fake_orca):
+    def test_open_shell_singlet_needs_atoms_and_breaks_symmetry(
+        self, fake_orca: Path
+    ) -> None:
         with pytest.raises(ValueError, match="atoms= is required"):
             orca_calculator(
                 orca_path=fake_orca,
@@ -625,7 +664,7 @@ class TestOrcaCalculator:
         assert "UKS" in simple.split()
         assert "%scf rotate" in blocks
 
-    def test_saddle_controls_share_one_geom_block(self, fake_orca):
+    def test_saddle_controls_share_one_geom_block(self, fake_orca: Path) -> None:
         simple, blocks = mechanism_input(
             fake_orca,
             task="optts+freq",
@@ -645,7 +684,9 @@ class TestOrcaCalculator:
         assert "MaxIter 80" in blocks
         assert "%freq Temp 310" in blocks and "Increment 0.01" in blocks
 
-    def test_stored_hessian_takes_precedence_over_calculating_one(self, fake_orca):
+    def test_stored_hessian_takes_precedence_over_calculating_one(
+        self, fake_orca: Path
+    ) -> None:
         _, blocks = mechanism_input(
             fake_orca,
             task="optts",
@@ -656,7 +697,7 @@ class TestOrcaCalculator:
         assert 'InHessName "start.hess"' in blocks
         assert "Calc_Hess" not in blocks
 
-    def test_neb_and_irc_requirements_are_encoded(self, fake_orca):
+    def test_neb_and_irc_requirements_are_encoded(self, fake_orca: Path) -> None:
         with pytest.raises(ValueError, match="neb_product"):
             orca_calculator(orca_path=fake_orca, task="neb-ts")
 
@@ -679,7 +720,7 @@ class TestOrcaCalculator:
         assert "%irc MaxIter 90 Direction both" in irc_blocks
         assert 'Hess_Filename "ts.hess"' in irc_blocks
 
-    def test_scan_coordinate_is_put_in_the_geom_block(self, fake_orca):
+    def test_scan_coordinate_is_put_in_the_geom_block(self, fake_orca: Path) -> None:
         _, blocks = mechanism_input(
             fake_orca,
             task="scan",
@@ -694,20 +735,23 @@ class TestOrcaCalculator:
     [({}, False), ({"internal": True}, True)],
 )
 def test_sella_search_wires_the_calculator_and_optimizer(
-    monkeypatch, water, sella_kwargs, expected_internal
-):
+    monkeypatch: pytest.MonkeyPatch,
+    water: Atoms,
+    sella_kwargs: dict[str, bool],
+    expected_internal: bool,
+) -> None:
     configured = object()
     seen = {}
 
-    def fake_calculator(**kwargs):
+    def fake_calculator(**kwargs: Any) -> object:
         seen["calculator"] = kwargs
         return configured
 
     class FakeSella:
-        def __init__(self, atoms, **kwargs):
+        def __init__(self, atoms: Atoms, **kwargs: Any) -> None:
             seen["optimizer"] = (atoms, kwargs)
 
-        def run(self, **kwargs):
+        def run(self, **kwargs: Any) -> None:
             seen["run"] = kwargs
 
     monkeypatch.setattr(tools_orca, "orca_calculator", fake_calculator)
@@ -793,7 +837,7 @@ Final Gibbs free energy          ...    -76.05984259 Eh
 class TestOrcaOutputParsing:
     """The gold standard's regex sweep over captured ORCA outputs."""
 
-    def test_parse_dlpno_ccsdt(self):
+    def test_parse_dlpno_ccsdt(self) -> None:
         vals = _parse_orca(DLPNO_OUT)
         assert vals["scf"] == pytest.approx(-76.05793814)
         assert vals["cc_corr"] == pytest.approx(-0.295030127)
@@ -806,12 +850,12 @@ class TestOrcaOutputParsing:
             -0.303795559, abs=1e-9
         )
 
-    def test_parse_rimp2_ignores_scs(self):
+    def test_parse_rimp2_ignores_scs(self) -> None:
         vals = _parse_orca(RIMP2_OUT)
         assert vals["mp2_corr"] == pytest.approx(-0.280144219)
         assert _correlation_energy(vals) == pytest.approx(-0.280144219)
 
-    def test_parse_thermochemistry(self):
+    def test_parse_thermochemistry(self) -> None:
         vals = _parse_orca(FREQ_OUT)
         assert vals["zpe"] == pytest.approx(0.02154960)
         assert vals["gibbs_corr"] == pytest.approx(-0.00190445)
@@ -823,7 +867,7 @@ class TestOrcaOutputParsing:
 class TestCbsExtrapolation:
     """Two-point CBS extrapolation maths and basis-set bookkeeping."""
 
-    def test_extrapolation_recovers_the_limit(self):
+    def test_extrapolation_recovers_the_limit(self) -> None:
         alpha, beta = _cbs_params("cc", (3, 4))
 
         e_cbs, amp = -76.0670, 2.5
@@ -836,13 +880,13 @@ class TestCbsExtrapolation:
         hi = c_cbs + amp * 4.0**-beta
         assert _extrapolate_corr(lo, hi, 3, 4, beta) == pytest.approx(c_cbs, abs=1e-10)
 
-    def test_extrapolation_is_bracketed_by_the_two_bases(self):
+    def test_extrapolation_is_bracketed_by_the_two_bases(self) -> None:
         # CBS limits must lie beyond the larger basis, never between the two.
         alpha, beta = _cbs_params("cc", (3, 4))
         assert _extrapolate_scf(-76.0600, -76.0650, 3, 4, alpha) < -76.0650
         assert _extrapolate_corr(-0.2800, -0.2950, 3, 4, beta) < -0.2950
 
-    def test_basis_names(self):
+    def test_basis_names(self) -> None:
         assert _basis_name("cc", 3) == "cc-pVTZ"
         assert _basis_name("aug-cc", 4) == "aug-cc-pVQZ"
         assert _basis_name("def2", 3) == "def2-TZVPP"
@@ -853,7 +897,9 @@ class TestCbsExtrapolation:
 
 
 class TestOrcaOutputHelpers:
-    def test_normal_termination_requires_a_readable_banner(self, tmp_path):
+    def test_normal_termination_requires_a_readable_banner(
+        self, tmp_path: Path
+    ) -> None:
         missing = tmp_path / "missing.out"
         incomplete = tmp_path / "incomplete.out"
         complete = tmp_path / "complete.out"
@@ -874,14 +920,16 @@ class TestOrcaOutputHelpers:
             ({"final_sp": -76.3, "scf": -76.0}, -0.3),
         ],
     )
-    def test_correlation_energy_accepts_orcas_output_variants(self, values, expected):
+    def test_correlation_energy_accepts_orcas_output_variants(
+        self, values: dict[str, float], expected: float
+    ) -> None:
         assert _correlation_energy(values) == pytest.approx(expected)
 
-    def test_correlation_energy_rejects_unrecognised_output(self):
+    def test_correlation_energy_rejects_unrecognised_output(self) -> None:
         with pytest.raises(ValueError, match="no correlation energy"):
             _correlation_energy({"scf": -76.0})
 
-    def test_basis_errors_name_the_bad_family_or_cardinal(self):
+    def test_basis_errors_name_the_bad_family_or_cardinal(self) -> None:
         with pytest.raises(ValueError, match="unknown basis family"):
             _basis_name("made-up", 3)
         with pytest.raises(ValueError, match="no def2 basis"):
@@ -889,7 +937,7 @@ class TestOrcaOutputHelpers:
 
 
 class TestGoldStandardResult:
-    def test_derived_energies_and_summary(self):
+    def test_derived_energies_and_summary(self) -> None:
         result = GoldStandard(
             atoms=Atoms("H2"),
             charge=-1,
@@ -915,13 +963,13 @@ class TestGoldStandardResult:
         assert "CCSD(T)/CBS" in text
         assert "-321.0 cm^-1" in text
 
-    def test_thermal_properties_are_none_without_frequency_corrections(self):
+    def test_thermal_properties_are_none_without_frequency_corrections(self) -> None:
         result = GoldStandard(atoms=Atoms("H"), e_total=-0.5)
 
         assert result.enthalpy is None
         assert result.gibbs is None
 
-    def test_reaction_energy_supports_each_energy_level(self):
+    def test_reaction_energy_supports_each_energy_level(self) -> None:
         reactant = GoldStandard(
             Atoms("H"),
             e_total=-1.0,
@@ -945,7 +993,7 @@ class TestGoldStandardResult:
             0.09 * EH_TO_KCAL
         )
 
-    def test_reaction_energy_rejects_missing_thermochemistry(self):
+    def test_reaction_energy_rejects_missing_thermochemistry(self) -> None:
         bare = GoldStandard(Atoms("H"), e_total=-1.0)
 
         with pytest.raises(ValueError, match="run with frequencies=True"):
@@ -954,7 +1002,7 @@ class TestGoldStandardResult:
             reaction_energy([bare], [bare], "entropy")
 
 
-def _write_completed_stage(root, name, output):
+def _write_completed_stage(root: Path, name: str, output: str) -> None:
     directory = root / name
     directory.mkdir(parents=True)
     (directory / "orca.out").write_text(output)
@@ -963,7 +1011,9 @@ def _write_completed_stage(root, name, output):
 class TestOrcaGoldStandard:
     """Exercise the compound workflow from reusable captured ORCA outputs."""
 
-    def test_mp2_cbs_plus_coupled_cluster_correction(self, fake_orca, water, tmp_path):
+    def test_mp2_cbs_plus_coupled_cluster_correction(
+        self, fake_orca: Path, water: Atoms, tmp_path: Path
+    ) -> None:
         root = tmp_path / "gold"
         _write_completed_stage(root, "mp2_3", RIMP2_OUT)
         _write_completed_stage(root, "mp2_4", RIMP2_OUT)
@@ -989,7 +1039,9 @@ class TestOrcaGoldStandard:
         assert result.e_total == pytest.approx(result.e_hf_cbs + result.e_corr_cbs)
         assert "MP2" in result.levels["correlation"]
 
-    def test_direct_coupled_cluster_extrapolation(self, fake_orca, water, tmp_path):
+    def test_direct_coupled_cluster_extrapolation(
+        self, fake_orca: Path, water: Atoms, tmp_path: Path
+    ) -> None:
         root = tmp_path / "direct-cc"
         _write_completed_stage(root, "cc_3", DLPNO_OUT)
         _write_completed_stage(root, "cc_4", DLPNO_OUT)
@@ -1012,7 +1064,9 @@ class TestOrcaGoldStandard:
         )
         assert "DLPNO-CCSD(T)/CBS" in result.levels["correlation"]
 
-    def test_geometry_and_thermochemistry_are_reused(self, fake_orca, water, tmp_path):
+    def test_geometry_and_thermochemistry_are_reused(
+        self, fake_orca: Path, water: Atoms, tmp_path: Path
+    ) -> None:
         root = tmp_path / "with-geometry"
         _write_completed_stage(root, "opt", FREQ_OUT)
         moved = water.copy()
@@ -1042,8 +1096,8 @@ class TestOrcaGoldStandard:
         assert "CPCM(water)" in result.levels["geometry"]
 
     def test_non_tabulated_cc_cardinal_adds_a_matching_mp2_stage(
-        self, fake_orca, water, tmp_path
-    ):
+        self, fake_orca: Path, water: Atoms, tmp_path: Path
+    ) -> None:
         root = tmp_path / "extra-mp2"
         _write_completed_stage(root, "mp2_3", RIMP2_OUT)
         _write_completed_stage(root, "mp2_4", RIMP2_OUT)

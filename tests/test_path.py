@@ -8,6 +8,9 @@ The frame-selection functions are NumPy-only; trajectory readers use MDTraj.
 """
 
 import os
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -23,7 +26,11 @@ from reactiontools import (
 from .conftest import PT_ACCEPTOR, PT_DONOR, PT_HYDROGEN
 
 
-def write_colvar(path, cv, fields=("time", "pt_cv", "smd.pt_cv_cntr", "smd.work")):
+def write_colvar(
+    path: str | Path,
+    cv: Sequence[float] | np.ndarray,
+    fields: tuple[str, ...] = ("time", "pt_cv", "smd.pt_cv_cntr", "smd.work"),
+) -> None:
     """Write a COLVAR file holding *cv*, in the layout a steered run leaves."""
     with open(path, "w") as handle:
         handle.write("#! FIELDS " + " ".join(fields) + "\n")
@@ -31,7 +38,13 @@ def write_colvar(path, cv, fields=("time", "pt_cv", "smd.pt_cv_cntr", "smd.work"
             handle.write(f"{i * 0.05:.4f} {value:.6f} {value:.6f} {0.1 * i:.6f}\n")
 
 
-def fake_steered_traj(path, template_pdb, n_frames=60, noise=0.0, seed=0):
+def fake_steered_traj(
+    path: str | Path,
+    template_pdb: str | Path,
+    n_frames: int = 60,
+    noise: float = 0.0,
+    seed: int = 0,
+) -> tuple[Any, np.ndarray]:
     """
     Fake the trajectory of a proton being dragged across a hydrogen bond.
 
@@ -58,21 +71,21 @@ def fake_steered_traj(path, template_pdb, n_frames=60, noise=0.0, seed=0):
 
 
 class TestSelectFramesByCv:
-    def test_it_spans_the_range_evenly(self):
+    def test_it_spans_the_range_evenly(self) -> None:
         cv = np.linspace(-1.0, 1.0, 101)
 
         picks = select_frames_by_cv(cv, 11)
 
         assert list(picks) == list(range(0, 101, 10))
 
-    def test_it_honours_explicit_limits(self):
+    def test_it_honours_explicit_limits(self) -> None:
         cv = np.linspace(-1.0, 1.0, 101)
 
         picks = select_frames_by_cv(cv, 3, cv_start=-0.5, cv_stop=0.5)
 
         assert [round(cv[i], 2) for i in picks] == [-0.5, 0.0, 0.5]
 
-    def test_it_moves_forwards_through_a_noisy_pull(self):
+    def test_it_moves_forwards_through_a_noisy_pull(self) -> None:
         rng = np.random.default_rng(1)
         cv = np.linspace(-1.0, 1.0, 200) + rng.normal(scale=0.1, size=200)
 
@@ -81,13 +94,13 @@ class TestSelectFramesByCv:
         assert np.all(np.diff(picks) > 0), "frames must be ordered along the path"
         assert len(picks) == 15
 
-    def test_it_needs_enough_frames(self):
+    def test_it_needs_enough_frames(self) -> None:
         with pytest.raises(ValueError, match="Cannot pick"):
             select_frames_by_cv(np.linspace(0.0, 1.0, 5), 10)
 
 
 class TestSelectFramesByMsd:
-    def test_it_spaces_frames_by_displacement(self):
+    def test_it_spaces_frames_by_displacement(self) -> None:
         # One atom that accelerates, so equal spacing in displacement is very
         # much not equal spacing in frame number
         n_frames = 100
@@ -103,14 +116,14 @@ class TestSelectFramesByMsd:
 
 
 class TestCvFromColvar:
-    def test_it_drops_the_row_written_at_step_zero(self, tmp_path):
+    def test_it_drops_the_row_written_at_step_zero(self, tmp_path: Path) -> None:
         colvar = tmp_path / "COLVAR_SMD"
         cv = np.linspace(0.0, 1.0, 21)
         write_colvar(colvar, cv)
 
         assert np.allclose(cv_from_colvar(str(colvar), 20, cv_name="pt_cv"), cv[1:])
 
-    def test_it_resamples_a_mismatched_stride(self, tmp_path):
+    def test_it_resamples_a_mismatched_stride(self, tmp_path: Path) -> None:
         colvar = tmp_path / "COLVAR_SMD"
         write_colvar(colvar, np.linspace(0.0, 1.0, 51))
 
@@ -122,7 +135,9 @@ class TestCvFromColvar:
 
 
 class TestEstimatePathLambda:
-    def test_it_reports_inverse_square_nanometres_by_default(self, tmp_path, pt_pdb):
+    def test_it_reports_inverse_square_nanometres_by_default(
+        self, tmp_path: Path, pt_pdb: Path
+    ) -> None:
         import mdtraj as md
 
         path_file = tmp_path / "path.pdb"
@@ -134,7 +149,9 @@ class TestEstimatePathLambda:
 
         assert estimate_path_lambda(str(path_file)) == pytest.approx(2.3 / msd_nm2)
 
-    def test_angstrom_gives_a_lambda_a_hundred_times_smaller(self, tmp_path, pt_pdb):
+    def test_angstrom_gives_a_lambda_a_hundred_times_smaller(
+        self, tmp_path: Path, pt_pdb: Path
+    ) -> None:
         # LAMBDA has units of inverse squared length, so switching from
         # nanometres to angstrom is a factor of 100, not 10.
         path_file = tmp_path / "path.pdb"
@@ -145,20 +162,24 @@ class TestEstimatePathLambda:
 
         assert in_angstrom == pytest.approx(in_nm / 100.0)
 
-    def test_an_unknown_length_unit_is_rejected(self, tmp_path, pt_pdb):
+    def test_an_unknown_length_unit_is_rejected(
+        self, tmp_path: Path, pt_pdb: Path
+    ) -> None:
         path_file = tmp_path / "path.pdb"
         fake_steered_traj(path_file, pt_pdb, n_frames=2)
 
         with pytest.raises(ValueError, match="Unknown length unit"):
             estimate_path_lambda(str(path_file), length_unit="bohr")
 
-    def test_a_single_frame_path_is_an_error(self, tmp_path, pt_pdb):
+    def test_a_single_frame_path_is_an_error(
+        self, tmp_path: Path, pt_pdb: Path
+    ) -> None:
         with pytest.raises(ValueError, match="at least two"):
             estimate_path_lambda(str(pt_pdb))
 
 
 class TestPathFromSteeredMd:
-    def test_it_writes_a_pathmsd_reference(self, tmp_path, pt_pdb):
+    def test_it_writes_a_pathmsd_reference(self, tmp_path: Path, pt_pdb: Path) -> None:
         import mdtraj as md
 
         traj_file = tmp_path / "smd_steps.pdb"
@@ -188,7 +209,7 @@ class TestPathFromSteeredMd:
         assert to_donor[0] < to_acceptor[0]
         assert to_donor[-1] > to_acceptor[-1]
 
-    def test_it_works_without_a_colvar(self, tmp_path, pt_pdb):
+    def test_it_works_without_a_colvar(self, tmp_path: Path, pt_pdb: Path) -> None:
         import mdtraj as md
 
         traj_file = tmp_path / "smd_steps.pdb"
@@ -207,7 +228,7 @@ class TestPathFromSteeredMd:
 
         assert md.load(str(output)).n_frames == 6
 
-    def test_it_checks_the_template_matches(self, tmp_path, pt_pdb):
+    def test_it_checks_the_template_matches(self, tmp_path: Path, pt_pdb: Path) -> None:
         traj_file = tmp_path / "smd_steps.pdb"
         fake_steered_traj(traj_file, pt_pdb, n_frames=20)
 
@@ -222,7 +243,9 @@ class TestPathFromSteeredMd:
                 atom_line="ATOM",
             )
 
-    def test_it_wants_more_frames_than_images(self, tmp_path, pt_pdb):
+    def test_it_wants_more_frames_than_images(
+        self, tmp_path: Path, pt_pdb: Path
+    ) -> None:
         traj_file = tmp_path / "smd_steps.pdb"
         fake_steered_traj(traj_file, pt_pdb, n_frames=5)
 
@@ -237,8 +260,8 @@ class TestPathFromSteeredMd:
             )
 
     def test_a_wrong_atom_line_is_caught_rather_than_writing_a_short_path(
-        self, tmp_path, pt_pdb
-    ):
+        self, tmp_path: Path, pt_pdb: Path
+    ) -> None:
         # ASE writes ATOM records; asking for HETATM would silently carry no
         # atoms into the reference, so this must fail loudly.
         traj_file = tmp_path / "smd_steps.pdb"

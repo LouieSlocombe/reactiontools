@@ -29,6 +29,8 @@ only when needed. The frame-selection functions (:func:`select_frames_by_cv`,
 """
 
 import os
+from collections.abc import Sequence
+from types import ModuleType
 
 import numpy as np
 
@@ -54,7 +56,7 @@ _MDTRAJ_HINT = (
 _LENGTH_PER_NM = {"nm": 1.0, "a": 10.0}
 
 
-def _import_mdtraj(name):
+def _import_mdtraj(name: str) -> ModuleType:
     """Import mdtraj, or explain how to get it.
 
     Imported here rather than at module scope so that the frame-selection
@@ -82,7 +84,7 @@ def _import_mdtraj(name):
     return mdtraj
 
 
-def _length_scale(length_unit):
+def _length_scale(length_unit: str) -> float:
     """Nanometres per unit of *length_unit*, validated.
 
     Parameters
@@ -110,7 +112,7 @@ def _length_scale(length_unit):
     return _LENGTH_PER_NM[key]
 
 
-def estimate_path_lambda(pdb_path, length_unit="nm"):
+def estimate_path_lambda(pdb_path: str, length_unit: str = "nm") -> float:
     """Estimate the LAMBDA a reference path should be given in ``PATHMSD``.
 
     ``LAMBDA`` sets how sharply ``path.sss`` tells neighbouring frames apart.
@@ -193,7 +195,11 @@ def estimate_path_lambda(pdb_path, length_unit="nm"):
     return ideal_lambda
 
 
-def cv_from_colvar(colvar_file, n_frames, cv_name=None):
+def cv_from_colvar(
+    colvar_file: str,
+    n_frames: int,
+    cv_name: str | None = None,
+) -> np.ndarray:
     """Read a CV from a PLUMED COLVAR file, one value per trajectory frame.
 
     PLUMED and OpenMM disagree about when to write: ``PRINT`` fires at step 0
@@ -235,7 +241,10 @@ def cv_from_colvar(colvar_file, n_frames, cv_name=None):
     return np.interp(frame_fraction, colvar_fraction, cv)
 
 
-def _nearest_monotone(series, targets):
+def _nearest_monotone(
+    series: Sequence[float] | np.ndarray,
+    targets: Sequence[float] | np.ndarray,
+) -> np.ndarray:
     """Pick the entry of *series* closest to each target, never going backwards.
 
     Searching the whole series for each target would let a noisy trajectory
@@ -278,7 +287,12 @@ def _nearest_monotone(series, targets):
     return np.asarray(picks)
 
 
-def select_frames_by_cv(cv, n_images, cv_start=None, cv_stop=None):
+def select_frames_by_cv(
+    cv: Sequence[float] | np.ndarray,
+    n_images: int,
+    cv_start: float | None = None,
+    cv_stop: float | None = None,
+) -> np.ndarray:
     """Choose the frames that are evenly spaced along a collective variable.
 
     Parameters
@@ -302,7 +316,7 @@ def select_frames_by_cv(cv, n_images, cv_start=None, cv_stop=None):
     return _nearest_monotone(cv, np.linspace(start, stop, n_images))
 
 
-def select_frames_by_msd(xyz, n_images):
+def select_frames_by_msd(xyz: np.ndarray, n_images: int) -> np.ndarray:
     """Choose the frames that are evenly spaced along the trajectory itself.
 
     Distance is measured as the RMSD between consecutive frames accumulated
@@ -327,7 +341,11 @@ def select_frames_by_msd(xyz, n_images):
     return _nearest_monotone(arc, np.linspace(0.0, arc[-1], n_images))
 
 
-def _smooth_frames(xyz, picks, window):
+def _smooth_frames(
+    xyz: np.ndarray,
+    picks: Sequence[int] | np.ndarray,
+    window: int,
+) -> np.ndarray:
     """Average each selected frame with its neighbours to damp thermal noise.
 
     Parameters
@@ -357,21 +375,21 @@ def _smooth_frames(xyz, picks, window):
 
 
 def path_from_steered_md(
-    traj_file,
-    template_pdb="index_atoms.pdb",
-    output_file="neb_path.pdb",
-    colvar_file="COLVAR_SMD",
-    cv_name=None,
-    n_images=15,
-    atom_indices=None,
-    top=None,
-    cv_start=None,
-    cv_stop=None,
-    smooth=0,
-    align=True,
-    atom_line="HETATM",
-    length_unit="nm",
-):
+    traj_file: str,
+    template_pdb: str = "index_atoms.pdb",
+    output_file: str = "neb_path.pdb",
+    colvar_file: str | None = "COLVAR_SMD",
+    cv_name: str | None = None,
+    n_images: int = 15,
+    atom_indices: Sequence[int] | np.ndarray | None = None,
+    top: str | None = None,
+    cv_start: float | None = None,
+    cv_stop: float | None = None,
+    smooth: int = 0,
+    align: bool = True,
+    atom_line: str | tuple[str, ...] = "HETATM",
+    length_unit: str = "nm",
+) -> float:
     """Estimate a path collective variable from a steered MD trajectory.
 
     Frames evenly spaced along the CV are pulled out of the trajectory,
