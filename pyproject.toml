@@ -55,8 +55,20 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 
+[project.optional-dependencies]
+# Mirrors the Sphinx half of docs/requirements.txt, which is what ReadTheDocs
+# installs; keep the two in step.
+docs = [
+  "sphinx>=8.1",
+  "furo",
+  "myst-parser>=4.0",
+  "sphinx-copybutton",
+  "sphinx-design",
+]
+
 [project.urls]
 Homepage = "https://github.com/LouieSlocombe/reactiontools"
+Documentation = "https://reactiontools.readthedocs.io"
 Repository = "https://github.com/LouieSlocombe/reactiontools"
 
 [tool.setuptools]

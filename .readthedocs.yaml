@@ -1,0 +1,19 @@
+# https://docs.readthedocs.io/en/stable/config-file/v2.html
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    # Matches build_tools/environment.yml; satisfies requires-python >= 3.11.
+    python: "3.13"
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: true
+
+python:
+  install:
+    # reactiontools itself is deliberately not installed: docs/conf.py imports
+    # it from the checkout, which keeps the two git+https dependencies and a
+    # compiled mdtraj out of the build. See autodoc_mock_imports in conf.py.
+    - requirements: docs/requirements.txt

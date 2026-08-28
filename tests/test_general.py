@@ -1,6 +1,7 @@
 """Package-level tests: the public surface and the layering beneath it."""
 
 import ast
+import inspect
 from pathlib import Path
 
 import pytest
@@ -191,20 +192,70 @@ def test_public_api_is_complete() -> None:
     assert expected <= set(reactiontools.__all__)
 
 
-def test_every_public_name_is_documented() -> None:
-    """__all__ and the README API reference must not drift apart.
+def _constant_is_documented(name: str) -> bool:
+    """Whether autodoc would find a description for a module-level constant.
 
-    Every public name is meant to appear in four places: the module, the
-    grouped __all__, the README table and a test. The first three are easy to
-    keep in step by hand right up until they are not.
+    ``__doc__`` is no use here: a dict or str constant inherits its type's
+    docstring, so every one of them would look documented. Sphinx instead
+    reads a ``#:`` comment block above the assignment, a trailing ``#:``
+    comment, or a string literal directly after it -- which is what this looks
+    for, in whichever module defines *name*.
+
+    Parameters
+    ----------
+    name : str
+        Name of the constant, as re-exported from the package root.
+
+    Returns
+    -------
+    bool
+        True if a description would be picked up, or if *name* is not a
+        module-level assignment anywhere in the package.
     """
-    readme = (_PACKAGE.parent / "README.md").read_text()
+    for source in sorted(_PACKAGE.glob("*.py")) + [_PACKAGE / "opes" / "__init__.py"]:
+        lines = source.read_text().splitlines()
+        tree = ast.parse("\n".join(lines))
+        for i, node in enumerate(tree.body):
+            targets = (
+                [node.target] if isinstance(node, ast.AnnAssign) else
+                getattr(node, "targets", [])
+            )
+            if not any(getattr(t, "id", None) == name for t in targets):
+                continue
+            above = lines[node.lineno - 2].strip() if node.lineno > 1 else ""
+            trailing = lines[node.lineno - 1]
+            following = tree.body[i + 1] if i + 1 < len(tree.body) else None
+            return (
+                above.startswith("#:")
+                or "  #:" in trailing
+                or (
+                    isinstance(following, ast.Expr)
+                    and isinstance(following.value, ast.Constant)
+                    and isinstance(following.value.value, str)
+                )
+            )
+    return True
 
-    missing = [
-        name
-        for name in reactiontools.__all__
-        if name != "__version__" and f"`{name}" not in readme
-    ]
+
+def test_every_public_name_is_documented() -> None:
+    """__all__ and the rendered documentation must not drift apart.
+
+    The API reference is generated from these docstrings by Sphinx autodoc, so
+    a public name without one is a hole in the published documentation rather
+    than merely an undocumented function. This used to check the README's
+    hand-written API tables; those were deleted once the docstrings began
+    generating the reference, and this is their successor.
+    """
+    missing = []
+    for name in reactiontools.__all__:
+        if name == "__version__":
+            continue
+        obj = getattr(reactiontools, name)
+        if inspect.isfunction(obj) or inspect.isclass(obj):
+            if not (obj.__doc__ or "").strip():
+                missing.append(name)
+        elif not _constant_is_documented(name):
+            missing.append(name)
     assert not missing
 
 

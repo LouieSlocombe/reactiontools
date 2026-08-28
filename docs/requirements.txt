@@ -1,0 +1,19 @@
+# The environment ReadTheDocs builds in. reactiontools itself is NOT installed:
+# docs/conf.py puts the repository root on sys.path, and the flat layout makes
+# `import reactiontools` work straight from the checkout. That keeps the two
+# git+https dependencies and a compiled mdtraj out of the build entirely -- see
+# autodoc_mock_imports in conf.py.
+
+sphinx>=8.1
+furo
+myst-parser>=4.0
+sphinx-copybutton
+sphinx-design
+
+# Light runtime dependencies, present so autodoc renders real signatures and
+# intersphinx resolves the ASE and NumPy references the docstrings already use.
+ase>=3.23
+matplotlib
+numpy
+pandas
+scipy
