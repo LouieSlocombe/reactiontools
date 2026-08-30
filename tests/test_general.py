@@ -158,6 +158,7 @@ def test_public_api_is_complete() -> None:
         "prepare_neb",
         "socket_calculators",
         "prepare_parallel_neb",
+        "prepare_threaded_neb",
         "optimise_neb",
         "get_ts_image",
         "optimise_ts",

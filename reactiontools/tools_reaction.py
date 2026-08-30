@@ -1225,6 +1225,126 @@ def prepare_parallel_neb(
         yield band
 
 
+def prepare_threaded_neb(
+    reactant: Atoms,
+    product: Atoms,
+    make_calc: Callable[[int], Calculator],
+    n_images: int = 5,
+    climb: bool = True,
+    rm_ro_trans: bool = True,
+    geo_int: bool = True,
+    k: float = 2.0,
+) -> NEB:
+    """Build a NEB whose images evaluate concurrently, without sockets.
+
+    :func:`prepare_parallel_neb` gets its concurrency from i-PI socket
+    clients, which needs a calculator ASE can launch as one (e.g.
+    ``Espresso``); a file-based calculator such as ORCA cannot be. This
+    variant reaches the same overlap through ASE's threaded NEB: one thread
+    per interior image, each running its own calculator. That only helps
+    when the calculator releases the GIL while it works -- true of anything
+    that blocks in a subprocess, exactly the file-based codes the socket
+    route excludes -- and every image must get its own working directory or
+    the external processes overwrite each other's files.
+
+    As in the socket variant, the endpoints are pinned to a fixed energy,
+    reusing one they already carry if there is one -- normally left behind
+    by :func:`optimise_reactant_product` or :func:`optimise_geom` -- and
+    otherwise pricing them once through ``make_calc``. Without pinning,
+    ``rm_ro_trans`` would have the band recompute the final endpoint on
+    every step, for an energy that rigid-body motion cannot change.
+
+    Because the parallelism is threads, this must run as a single process;
+    under ``mpirun`` ASE would distribute the images over MPI ranks instead.
+
+    Parameters
+    ----------
+    reactant : ase.Atoms
+        Initial state. Not modified; the band is built from a copy.
+    product : ase.Atoms
+        Final state. Not modified.
+    make_calc : callable
+        Called as ``make_calc(index)`` to build the calculator for interior
+        image ``index``, counting from zero. Give each one its own working
+        directory.
+    n_images : int, optional
+        Total number of images, including endpoints. Must be at least three.
+    climb : bool, optional
+        Enable the climbing-image NEB variant.
+    rm_ro_trans : bool, optional
+        Remove rigid-body rotation and translation during interpolation.
+    geo_int : bool, optional
+        Use geodesic interpolation before NEB construction.
+    k : float, optional
+        Spring constant passed to ASE's NEB.
+
+    Returns
+    -------
+    ase.mep.NEB
+        Configured band, primed by one concurrent sweep and ready for
+        :func:`optimise_neb`. There are no sockets to close, so unlike the
+        socket variants this is a plain function, not a context manager.
+
+    Raises
+    ------
+    ValueError
+        If ``n_images`` is less than three.
+    RuntimeError
+        If more than one MPI rank is running.
+    ImportError
+        If ``geo_int`` is ``True`` and geodesic_interpolate is not installed.
+
+    Examples
+    --------
+    Each image runs ORCA in its own directory::
+
+        def make_calc(index):
+            return orca_cheap_calculator(
+                method="gfn2-xtb", directory=f"img{index:02d}/orca"
+            )
+
+        neb = prepare_threaded_neb(reactant, product, make_calc, n_images=7)
+        images = optimise_neb(neb, fmax=0.05)
+    """
+    if n_images - 2 < 1:
+        raise ValueError(
+            f"n_images must be at least 3 to leave an interior image to "
+            f"relax, got {n_images}"
+        )
+    _require_single_rank("prepare_threaded_neb")
+
+    # Read the endpoint energies before copying: Atoms.copy() drops the
+    # calculator, and with it the energy the endpoint optimisation left.
+    energies = [_cached_energy(reactant), _cached_energy(product)]
+
+    neb = _build_band(
+        reactant.copy(),
+        product.copy(),
+        n_images,
+        climb,
+        rm_ro_trans,
+        geo_int,
+        k,
+        parallel=True,
+    )
+
+    # Pricing (when needed) runs before the interior sweep, so borrowing
+    # interior image 0's calculator cannot race with it.
+    for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
+        if energy is None:
+            endpoint.calc = make_calc(0)
+            energy = endpoint.get_potential_energy()
+        endpoint.calc = _FixedEnergy(energy)
+
+    for index, image in enumerate(neb.images[1:-1]):
+        image.calc = make_calc(index)
+
+    # Evaluate through the NEB itself, so parallel=True runs the images
+    # concurrently -- the first sweep the optimiser would otherwise pay.
+    neb.get_forces()
+    return neb
+
+
 @contextmanager
 def restart_parallel_neb(
     images: Sequence[Atoms],

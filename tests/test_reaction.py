@@ -35,6 +35,7 @@ from reactiontools import (
     optimise_ts,
     prepare_neb,
     prepare_parallel_neb,
+    prepare_threaded_neb,
     resample_path,
     restart_neb,
     restart_parallel_neb,
@@ -1499,6 +1500,171 @@ def test_real_parallel_neb_matches_serial(
     assert [image.get_potential_energy() for image in parallel] == pytest.approx(
         [image.get_potential_energy() for image in serial], abs=1e-6
     )
+
+
+class TestPrepareThreadedNeb:
+    def test_builds_a_band_of_the_requested_length(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        reactant, product = evaluated_endpoints
+
+        neb = prepare_threaded_neb(
+            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
+        )
+
+        assert isinstance(neb, NEB)
+        assert len(neb.images) == 5
+
+    def test_asks_ase_to_spread_the_images(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        """Without this, ASE would walk the band one image at a time."""
+        reactant, product = evaluated_endpoints
+
+        neb = prepare_threaded_neb(
+            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
+        )
+
+        assert neb.parallel is True
+
+    def test_gives_each_interior_image_its_own_calculator(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        """A shared calculator is exactly the race this function exists to avoid."""
+        reactant, product = evaluated_endpoints
+        built: dict[int, EMT] = {}
+
+        def make_calc(index: int) -> EMT:
+            built[index] = EMT()
+            return built[index]
+
+        neb = prepare_threaded_neb(reactant, product, make_calc, n_images=6, geo_int=False)
+
+        interior = [image.calc for image in neb.images[1:-1]]
+        assert sorted(built) == [0, 1, 2, 3]
+        assert [id(c) for c in interior] == [id(built[i]) for i in range(4)]
+
+    def test_reuses_the_endpoint_energies_it_is_given(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        reactant, product = evaluated_endpoints
+        expected = [reactant.get_potential_energy(), product.get_potential_energy()]
+
+        def make_calc(index: int) -> EMT:
+            return EMT()
+
+        neb = prepare_threaded_neb(reactant, product, make_calc, n_images=5, geo_int=False)
+
+        got = [
+            neb.images[0].get_potential_energy(),
+            neb.images[-1].get_potential_energy(),
+        ]
+        assert got == pytest.approx(expected)
+
+    def test_pins_the_endpoint_energy_against_rigid_motion(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        """rm_ro_trans re-aligns the final image every force call; see
+        TestPrepareParallelNeb.test_pins_the_endpoint_energy_against_rigid_motion."""
+        reactant, product = evaluated_endpoints
+
+        neb = prepare_threaded_neb(
+            reactant,
+            product,
+            lambda index: EMT(),
+            n_images=5,
+            geo_int=False,
+            rm_ro_trans=True,
+        )
+
+        endpoint = neb.images[-1]
+        before = endpoint.get_potential_energy()
+        endpoint.rotate(30, "z")
+        endpoint.positions += [1.0, 2.0, 3.0]
+
+        assert endpoint.get_potential_energy() == pytest.approx(before)
+
+    def test_leaves_the_callers_endpoints_alone(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        reactant, product = evaluated_endpoints
+        calcs = (reactant.calc, product.calc)
+        positions = (reactant.positions.copy(), product.positions.copy())
+
+        prepare_threaded_neb(
+            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
+        )
+
+        assert (reactant.calc, product.calc) == calcs
+        assert reactant.positions == pytest.approx(positions[0])
+        assert product.positions == pytest.approx(positions[1])
+
+    def test_prices_endpoints_that_arrive_without_an_energy(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        """Endpoints from a file have no calculator, so the factory prices them."""
+        reactant, product = evaluated_endpoints
+        expected = [reactant.get_potential_energy(), product.get_potential_energy()]
+        for atoms in (reactant, product):
+            atoms.calc = None
+
+        neb = prepare_threaded_neb(
+            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
+        )
+
+        got = [
+            neb.images[0].get_potential_energy(),
+            neb.images[-1].get_potential_energy(),
+        ]
+        assert got == pytest.approx(expected)
+
+    def test_rejects_a_band_with_no_interior(
+        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        reactant, product = evaluated_endpoints
+
+        with pytest.raises(ValueError, match="at least 3"):
+            prepare_threaded_neb(reactant, product, lambda index: EMT(), n_images=2)
+
+    def test_relaxes_the_same_band_as_the_serial_route(
+        self, slab_endpoints: tuple[Atoms, Atoms]
+    ) -> None:
+        """The whole point: same physics, evaluated in threads."""
+        reactant, product = slab_endpoints
+
+        threaded = optimise_neb(
+            prepare_threaded_neb(
+                reactant,
+                product,
+                lambda index: EMT(),
+                n_images=5,
+                climb=True,
+                rm_ro_trans=False,
+                geo_int=False,
+            ),
+            fmax=0.05,
+            steps=200,
+            ts_traj="threaded.traj",
+        )
+
+        serial = optimise_neb(
+            prepare_neb(
+                reactant,
+                product,
+                EMT(),
+                n_images=5,
+                climb=True,
+                rm_ro_trans=False,
+                geo_int=False,
+            ),
+            fmax=0.05,
+            steps=200,
+            ts_traj="serial.traj",
+        )
+
+        assert [image.get_potential_energy() for image in threaded] == pytest.approx(
+            [image.get_potential_energy() for image in serial], abs=1e-6
+        )
 
 
 @pytest.mark.usefixtures("fake_parallel_socketio")
