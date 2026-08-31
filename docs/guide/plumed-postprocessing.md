@@ -136,3 +136,28 @@ usable error — it aborts the process on a failed internal assertion,
 
 Anything without its own keyword goes through `extra`, for example
 `extra=["--fmt", "%14.9f"]`.
+
+## Combining independent walkers
+
+Several independent OPES runs of the same system — walkers — are combined at
+analysis time by reweighting: every `COLVAR` row carries the bias its own
+walker collected it under, so the merged samples reweight as one. Merge sorted
+by time to treat them as a single series (what `stride` and `skiprows`
+expect), or unsorted to keep each walker contiguous and get cross-walker error
+bars from `blocks`:
+
+```python
+from reactiontools import combine_colvar_files, run_opes_reweighting
+
+combine_colvar_files(
+    [f"walker_{i:03d}/COLVAR" for i in range(4)], sort_by_time=False
+)
+run_opes_reweighting(
+    sigma=0.1, kt=2.494, cv="phi",
+    grid_min=-3.14, grid_max=3.14, grid_bin=100, blocks=4,
+)
+```
+
+For a single run, `run_opes_reweighting` is instead a cross-check on
+`run_opes_fes`: one surface from the samples, one from the bias's own running
+estimate, and daylight between them means the run is not converged.

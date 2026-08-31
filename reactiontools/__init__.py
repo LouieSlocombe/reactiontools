@@ -166,11 +166,13 @@ from .tools_plotting import (
 )
 from .tools_plumed import (
     PLUMED_ASE_UNITS,
+    combine_colvar_files,
     find_molecules,
     plumed_calculator,
     plumed_metad_input,
     plumed_selection,
     run_opes_fes,
+    run_opes_reweighting,
     run_sum_hills,
     sum_hills_files,
 )
@@ -287,6 +289,8 @@ __all__ = [
     "plumed_calculator",
     "find_molecules",
     "run_opes_fes",
+    "run_opes_reweighting",
+    "combine_colvar_files",
     "run_sum_hills",
     "sum_hills_files",
     # tools_cv

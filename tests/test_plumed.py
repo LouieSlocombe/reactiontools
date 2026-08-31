@@ -15,6 +15,7 @@ from ase.md.langevin import Langevin
 
 from reactiontools import (
     PLUMED_ASE_UNITS,
+    combine_colvar_files,
     find_molecules,
     plumed_calculator,
     plumed_metad_input,
@@ -750,3 +751,108 @@ class TestSumHillsFiles:
         self._touch(tmp_path, ["fes.dat0.dat", "fes.dat1.dat"])
 
         assert len(sum_hills_files()) == 2
+
+
+class TestCombineColvarFiles:
+    HEADER = [
+        "#! FIELDS time cv_x metad.bias",
+        "#! SET min_cv_x -pi",
+        "#! SET max_cv_x pi",
+    ]
+
+    @staticmethod
+    def _write(path: Path, header: Sequence[str], rows: Sequence[str]) -> Path:
+        path.write_text("\n".join([*header, *rows]) + "\n")
+        return path
+
+    def test_merges_sorted_by_time_keeping_one_header_block(
+        self, tmp_path: Path
+    ) -> None:
+        first = self._write(tmp_path / "COLVAR.0", self.HEADER,
+                            ["0.0 0.1 0.0", "2.0 0.3 0.2"])
+        second = self._write(tmp_path / "COLVAR.1", self.HEADER,
+                             ["1.0 0.2 0.1"])
+
+        merged = combine_colvar_files([first, second], tmp_path / "COLVAR")
+
+        lines = merged.read_text().splitlines()
+        assert lines[:3] == self.HEADER
+        assert lines[3:] == ["0.0 0.1 0.0", "1.0 0.2 0.1", "2.0 0.3 0.2"]
+
+    def test_unsorted_mode_keeps_walkers_contiguous(self, tmp_path: Path) -> None:
+        # The cat-recipe layout --blocks wants: one block per walker.
+        first = self._write(tmp_path / "COLVAR.0", self.HEADER,
+                            ["0.0 0.1 0.0", "2.0 0.3 0.2"])
+        second = self._write(tmp_path / "COLVAR.1", self.HEADER,
+                             ["1.0 0.2 0.1"])
+
+        merged = combine_colvar_files([first, second], tmp_path / "COLVAR",
+                                      sort_by_time=False)
+
+        assert merged.read_text().splitlines()[3:] == [
+            "0.0 0.1 0.0", "2.0 0.3 0.2", "1.0 0.2 0.1"
+        ]
+
+    def test_the_time_sort_is_stable(self, tmp_path: Path) -> None:
+        # Walkers print on the same stride, so equal times are the common
+        # case, and a stable sort keeps each instant in walker order.
+        first = self._write(tmp_path / "COLVAR.0", self.HEADER,
+                            ["1.0 0.1 0.0"])
+        second = self._write(tmp_path / "COLVAR.1", self.HEADER,
+                             ["1.0 0.2 0.1"])
+
+        merged = combine_colvar_files([first, second], tmp_path / "COLVAR")
+
+        assert merged.read_text().splitlines()[3:] == [
+            "1.0 0.1 0.0", "1.0 0.2 0.1"
+        ]
+
+    def test_interior_reheaders_and_blank_lines_are_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        # A restarted walker re-prints its header block mid-file.
+        first = self._write(
+            tmp_path / "COLVAR.0", self.HEADER,
+            ["0.0 0.1 0.0", "", *self.HEADER, "1.0 0.2 0.1"],
+        )
+
+        merged = combine_colvar_files([first], tmp_path / "COLVAR")
+
+        lines = merged.read_text().splitlines()
+        assert lines == [*self.HEADER, "0.0 0.1 0.0", "1.0 0.2 0.1"]
+
+    def test_mismatched_header_blocks_are_rejected(self, tmp_path: Path) -> None:
+        first = self._write(tmp_path / "COLVAR.0", self.HEADER, ["0.0 0.1 0.0"])
+        second = self._write(tmp_path / "COLVAR.1",
+                             ["#! FIELDS time cv_y metad.bias"],
+                             ["0.0 0.1 0.0"])
+
+        with pytest.raises(ValueError, match="different header block"):
+            combine_colvar_files([first, second], tmp_path / "COLVAR")
+
+    def test_a_file_without_a_fields_header_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        bare = self._write(tmp_path / "COLVAR.0", [], ["0.0 0.1 0.0"])
+
+        with pytest.raises(ValueError, match="FIELDS header"):
+            combine_colvar_files([bare], tmp_path / "COLVAR")
+
+    def test_no_files_is_an_error(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            combine_colvar_files([], tmp_path / "COLVAR")
+
+    def test_refuses_to_overwrite_an_input(self, tmp_path: Path) -> None:
+        first = self._write(tmp_path / "COLVAR", self.HEADER, ["0.0 0.1 0.0"])
+
+        with pytest.raises(ValueError, match="one of the inputs"):
+            combine_colvar_files([first], tmp_path / "COLVAR")
+
+    def test_a_non_numeric_time_is_rejected_when_sorting(
+        self, tmp_path: Path
+    ) -> None:
+        first = self._write(tmp_path / "COLVAR.0", self.HEADER,
+                            ["oops 0.1 0.0"])
+
+        with pytest.raises(ValueError, match="non-numeric time"):
+            combine_colvar_files([first], tmp_path / "COLVAR")

@@ -12,6 +12,9 @@ into a free-energy surface for :mod:`reactiontools.tools_fes` to plot.
 :func:`run_sum_hills`. OPES deposits no hills to add up, writing a running
 estimate of the bias to a ``STATE`` file instead, so the surface is read back
 out of that by one of the scripts bundled in :mod:`reactiontools.opes`.
+:func:`run_opes_reweighting` rebuilds the surface from the ``COLVAR`` samples
+and their bias column instead, which is how several independent walkers are
+combined into one estimate -- :func:`combine_colvar_files` does the merge.
 
 Only :func:`plumed_calculator` needs the plumed Python module; only
 :func:`run_sum_hills` needs the ``plumed`` executable. The rest is string
@@ -565,6 +568,99 @@ def run_sum_hills(
     return cmd_str
 
 
+def combine_colvar_files(
+    colvar_files: Sequence[str | Path],
+    outfile: str | Path = "COLVAR",
+    sort_by_time: bool = True,
+) -> Path:
+    """Merge several ``COLVAR`` files into one, keeping a single header.
+
+    The merge :func:`run_opes_reweighting` wants for independent walkers,
+    done the two ways the bundled script's own notes describe. Sorted by
+    time (``sort -gs COLVAR.*``), the walkers interleave into one series,
+    which is what ``stride`` and ``skiprows`` expect -- a stride then samples
+    across walkers, and skipped rows discard every walker's transient
+    together. Unsorted (``cat COLVAR.*``), the walkers stay contiguous, so
+    ``blocks`` set to the number of walkers gives one block per walker and
+    the error bars come from their scatter.
+
+    Parameters
+    ----------
+    colvar_files : sequence of path-like
+        The ``COLVAR`` files, one per walker. Their header blocks -- the
+        leading ``#! FIELDS`` line and any ``#! SET`` lines after it -- must
+        be identical, since one copy speaks for all of them.
+    outfile : str or path-like, optional
+        The merged file to write. Must not be one of the inputs.
+    sort_by_time : bool, optional
+        Stable-sort the rows on their first column. Default True; pass
+        False for the contiguous per-walker layout ``blocks`` wants.
+
+    Returns
+    -------
+    pathlib.Path
+        The merged file.
+
+    Raises
+    ------
+    ValueError
+        If no files are given, *outfile* is one of the inputs, a file does
+        not open with a ``#! FIELDS`` header, the headers disagree, or a
+        row's time is not a number.
+    """
+    paths = [Path(path) for path in colvar_files]
+    if not paths:
+        raise ValueError("combine_colvar_files needs at least one COLVAR file")
+    target = Path(outfile)
+    for path in paths:
+        if path.resolve() == target.resolve():
+            raise ValueError(
+                f"outfile {target} is one of the inputs; it would be "
+                "overwritten while being read"
+            )
+
+    header: list[str] | None = None
+    rows: list[tuple[float, str]] = []
+    for path in paths:
+        lines = path.read_text().splitlines()
+        block = []
+        for line in lines:
+            if not line.startswith("#"):
+                break
+            block.append(line)
+        if not block or not block[0].startswith("#! FIELDS"):
+            raise ValueError(f"{path} does not start with a #! FIELDS header")
+        if header is None:
+            header = block
+        elif block != header:
+            raise ValueError(
+                f"{path} has a different header block from {paths[0]}; "
+                "only walkers printing the same fields can be combined"
+            )
+        for line in lines[len(block):]:
+            # A restarted walker re-prints its header mid-file; one copy at
+            # the top speaks for all of them.
+            if not line.strip() or line.startswith("#"):
+                continue
+            if sort_by_time:
+                try:
+                    time = float(line.split()[0])
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{path} has a non-numeric time in row {line!r}"
+                    ) from exc
+            else:
+                time = 0.0
+            rows.append((time, line))
+
+    if sort_by_time:
+        rows.sort(key=lambda row: row[0])
+    assert header is not None
+    content = "\n".join([*header, *(line for _, line in rows)])
+    target.write_text(content + "\n")
+    return target
+
+
 def _opes_fes_command(
     state: str | Path = "STATE",
     outfile: str | Path = "fes.dat",
@@ -695,6 +791,234 @@ def run_opes_fes(
         grid_max=grid_max,
         grid_bin=grid_bin,
         kt=kt,
+        extra=extra,
+    )
+    cmd_str = " ".join(cmd)
+
+    if verbose:
+        print(f"Running: {cmd_str}", flush=True)
+
+    subprocess.run(cmd, check=True)
+    return cmd_str
+
+
+def _opes_reweighting_command(
+    sigma: float | str | Sequence[float],
+    kt: float,
+    colvar: str | Path = "COLVAR",
+    outfile: str | Path = "fes.dat",
+    cv: str | int | Sequence[str | int] | None = None,
+    bias: str | None = None,
+    grid_min: float | str | Sequence[float] | None = None,
+    grid_max: float | str | Sequence[float] | None = None,
+    grid_bin: int | str | Sequence[int] | None = None,
+    blocks: int | None = None,
+    stride: int | None = None,
+    skiprows: int | None = None,
+    extra: Sequence[str] | None = None,
+) -> list[str]:
+    """Build the command line that reweights ``COLVAR`` samples into a FES.
+
+    The bundled ``FES_from_Reweighting.py`` weights every sample by its own
+    recorded bias, so *sigma* -- the kernel width of its density estimate --
+    and *kt* are required by the script and therefore lead here.
+
+    Parameters
+    ----------
+    sigma : float or sequence of float
+        Kernel bandwidth of the weighted density estimate, one value per
+        collective variable. A fraction of the OPES ``SIGMA`` is the usual
+        starting point.
+    kt : float
+        Thermal energy in the energy units of the ``COLVAR`` file -- kJ/mol
+        for a run driven from OpenMM, which is what
+        :func:`~reactiontools.tools_units.thermal_energy` returns by default.
+    colvar : str or path-like, optional
+        The ``COLVAR`` file, or the merged one
+        :func:`combine_colvar_files` wrote.
+    outfile : str or path-like, optional
+        Free-energy surface file to write, as read by
+        :func:`~reactiontools.as_fes`.
+    cv : str, int, or sequence, optional
+        Collective variable to bin, by column name or 1-based column
+        number; two entries make a two-dimensional surface. Default is the
+        script's, column 2 -- the first variable after the time.
+    bias : str or None, optional
+        Bias column to weight by. The script's default matches any column
+        containing ``.bias``, which finds what the
+        :mod:`reactiontools.tools_cv` builders print; ``'NO'`` disables
+        the weighting entirely.
+    grid_min, grid_max : float or sequence of float, optional
+        Bounds of the output grid, one per collective variable. Both must
+        be given together, or neither.
+    grid_bin : int or sequence of int, optional
+        Number of bins per collective variable.
+    blocks : int or None, optional
+        Split the samples into this many blocks and add an uncertainty
+        column from their scatter. On a file merged with
+        ``sort_by_time=False``, one block per walker makes that the
+        cross-walker error.
+    stride : int or None, optional
+        Also write the surface every *stride* samples, numbered like
+        :func:`run_sum_hills`'s convergence series. The script treats this
+        and *blocks* as alternatives.
+    skiprows : int or None, optional
+        Initial rows to discard, the transient before the bias settled.
+    extra : sequence of str, optional
+        Further arguments appended to the command line -- ``--reverse``,
+        ``--nomintozero``, ``--fmt`` and the rest.
+
+    Returns
+    -------
+    list of str
+        The command, as an argument list.
+
+    Raises
+    ------
+    ValueError
+        If only one of *grid_min* and *grid_max* is given, or both *blocks*
+        and *stride* are.
+    """
+    if (grid_min is None) != (grid_max is None):
+        raise ValueError(
+            "Give both grid_min and grid_max or neither; "
+            "FES_from_Reweighting.py needs the two bounds together to size "
+            "its grid."
+        )
+    if blocks is not None and stride is not None:
+        raise ValueError(
+            "FES_from_Reweighting.py treats --blocks and --stride as "
+            "alternatives; pass one or the other."
+        )
+
+    # sys.executable, not "python3": the scripts need this environment's
+    # pandas, and whatever "python3" resolves to on PATH may not have it.
+    cmd = [
+        sys.executable,
+        str(script_path("FES_from_Reweighting.py")),
+        "--colvar",
+        str(colvar),
+        "--outfile",
+        str(outfile),
+        "--sigma",
+        _grid_bound(sigma),
+        "--kt",
+        f"{float(kt):.6g}",
+    ]
+    if cv is not None:
+        cmd += ["--cv", _grid_bound(cv)]
+    if bias is not None:
+        cmd += ["--bias", str(bias)]
+    if grid_min is not None:
+        cmd += ["--min", _grid_bound(grid_min), "--max", _grid_bound(grid_max)]
+    if grid_bin is not None:
+        cmd += ["--bin", _grid_bound(grid_bin)]
+    if blocks is not None:
+        cmd += ["--blocks", str(blocks)]
+    if stride is not None:
+        cmd += ["--stride", str(stride)]
+    if skiprows is not None:
+        cmd += ["--skiprows", str(skiprows)]
+    if extra:
+        cmd += [str(item) for item in extra]
+    return cmd
+
+
+def run_opes_reweighting(
+    sigma: float | str | Sequence[float],
+    kt: float,
+    colvar: str | Path = "COLVAR",
+    outfile: str | Path = "fes.dat",
+    cv: str | int | Sequence[str | int] | None = None,
+    bias: str | None = None,
+    grid_min: float | Sequence[float] | None = None,
+    grid_max: float | Sequence[float] | None = None,
+    grid_bin: int | Sequence[int] | None = None,
+    blocks: int | None = None,
+    stride: int | None = None,
+    skiprows: int | None = None,
+    extra: Sequence[str] | None = None,
+    verbose: bool = True,
+) -> str:
+    """Rebuild a free-energy surface by reweighting ``COLVAR`` samples.
+
+    The reweighting counterpart of :func:`run_opes_fes`: that reads the
+    bias's own running estimate out of the ``STATE`` file, this rebuilds
+    the surface from the samples and the bias they were collected under.
+    For a single run the two should agree, and their disagreement is a
+    convergence check. For several independent walkers this is the one
+    that combines them -- each sample carries its own walker's bias, so
+    the merged file :func:`combine_colvar_files` writes is reweighted as
+    one: sorted by time for a single series (*stride*, *skiprows*),
+    concatenated per walker for cross-walker error bars (*blocks*).
+
+    Paths are resolved by the script, so this acts on the current working
+    directory unless absolute paths are given.
+
+    Parameters
+    ----------
+    sigma : float or sequence of float
+        Kernel bandwidth of the weighted density estimate, one value per
+        collective variable. A fraction of the OPES ``SIGMA`` is the usual
+        starting point.
+    kt : float
+        Thermal energy in the energy units of the ``COLVAR`` file. See
+        :func:`~reactiontools.tools_units.thermal_energy`.
+    colvar : str or path-like, optional
+        The ``COLVAR`` file, or the merged one
+        :func:`combine_colvar_files` wrote.
+    outfile : str or path-like, optional
+        Free-energy surface file to write, as read by
+        :func:`~reactiontools.as_fes`.
+    cv : str, int, or sequence, optional
+        Collective variable to bin, by column name or 1-based column
+        number; two entries make a two-dimensional surface.
+    bias : str or None, optional
+        Bias column to weight by; the script's default matches any column
+        containing ``.bias``.
+    grid_min, grid_max : float or sequence of float, optional
+        Bounds of the output grid, one per collective variable.
+    grid_bin : int or sequence of int, optional
+        Number of bins per collective variable.
+    blocks : int or None, optional
+        Number of blocks for the uncertainty column -- one per walker on
+        an unsorted merge.
+    stride : int or None, optional
+        Also write the surface every *stride* samples, as a convergence
+        series.
+    skiprows : int or None, optional
+        Initial rows to discard, the transient before the bias settled.
+    extra : sequence of str, optional
+        Further arguments appended to the command line.
+    verbose : bool, optional
+        Print the command being run.
+
+    Returns
+    -------
+    str
+        The command line that was run.
+
+    Raises
+    ------
+    ValueError
+        If only one of *grid_min* and *grid_max* is given, or both
+        *blocks* and *stride* are.
+    subprocess.CalledProcessError
+        If the script exits non-zero.
+    """
+    cmd = _opes_reweighting_command(
+        sigma=sigma,
+        kt=kt,
+        colvar=colvar,
+        outfile=outfile,
+        cv=cv,
+        bias=bias,
+        grid_min=grid_min,
+        grid_max=grid_max,
+        grid_bin=grid_bin,
+        blocks=blocks,
+        stride=stride,
+        skiprows=skiprows,
         extra=extra,
     )
     cmd_str = " ".join(cmd)
