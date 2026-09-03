@@ -6,14 +6,15 @@ from typing import Any
 import numpy as np
 import pytest
 from ase import Atoms
-from ase.build import molecule
+from ase.build import add_adsorbate, fcc100, molecule
 from ase.calculators.emt import EMT
-from ase.constraints import FixAtoms
+from ase.constraints import FixAtoms, FixCartesian
 from ase.optimize import FIRE
 
 from reactiontools import (
     ConvergenceError,
     ConvergenceWarning,
+    SeedSummary,
     SeedWarning,
     align_atom_sets,
     atom_set_rmsd,
@@ -22,7 +23,9 @@ from reactiontools import (
     get_best_flip_and_face_bases,
     get_dimer_bonded_cluster_indices,
     kabsch_transform,
+    optimise_geom,
     optimize_with_fixed_anchors,
+    seed_minima_from_ts,
     seed_product_from_ts,
     swap_bonding_configuration,
 )
@@ -30,6 +33,8 @@ from reactiontools.tools_geometry import (
     _orient_normal_toward,
     _pca_frame,
     _rigid_transform,
+    _same_minimum,
+    _should_align,
 )
 
 
@@ -1177,3 +1182,369 @@ class TestSeedProductFromTs:
 
         with pytest.raises(ValueError, match=message):
             seed_product_from_ts(reactant, ts, **kwargs)
+
+
+class _FailsAfterPricing(EMT):
+    """Evaluates the transition state, then raises on every relaxation.
+
+    A calculator that fell over on the input structure would never reach the
+    loop, so failing only afterwards is what exercises the all-failed path.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def calculate(self, *args: Any, **kwargs: Any) -> None:
+        self.calls += 1
+        if self.calls > 1:
+            raise ValueError("scf did not converge")
+        super().calculate(*args, **kwargs)
+
+
+class _FailsOnce(EMT):
+    """Raises on one relaxation and behaves for the rest."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def calculate(self, *args: Any, **kwargs: Any) -> None:
+        self.calls += 1
+        if self.calls == 2:
+            raise ValueError("scf did not converge")
+        super().calculate(*args, **kwargs)
+
+
+@pytest.fixture
+def hop_ts() -> Atoms:
+    """A gold adatom at the bridge site on Al(100), between two hollow sites.
+
+    The saddle of the hop the quickstart runs as a band, built directly instead:
+    relax the adatom in a hollow, shift it a quarter of the cell along x -- half
+    a hop, since the cell is two hollows wide -- and relax again with its x
+    pinned. The pin comes off before the structure is handed over, or the
+    reaction coordinate itself would be constrained and nothing could roll
+    anywhere.
+
+    Periodic and constrained, so ``align`` is inferred off.
+    """
+    slab = fcc100("Al", size=(2, 2, 3))
+    add_adsorbate(slab, "Au", 1.7, "hollow")
+    slab.center(axis=2, vacuum=4.0)
+    mask = [atom.tag > 1 for atom in slab]
+    slab.set_constraint(FixAtoms(mask=mask))
+
+    hollow = optimise_geom(slab, EMT(), fmax=0.01, logfile=None)
+    bridge = hollow.copy()
+    bridge.positions[-1, 0] += bridge.cell[0, 0] / 4
+    bridge.set_constraint(
+        [FixAtoms(mask=mask), FixCartesian(len(bridge) - 1, mask=(1, 0, 0))]
+    )
+
+    ts = optimise_geom(bridge, EMT(), fmax=0.01, logfile=None)
+    ts.set_constraint(FixAtoms(mask=mask))
+    return ts
+
+
+@pytest.fixture
+def hop_summary(hop_ts: Atoms) -> SeedSummary:
+    """One rattle of the `hop_ts` saddle, shared by the tests that only read it."""
+    return seed_minima_from_ts(hop_ts, EMT(), n_directions=3)
+
+
+class TestShouldAlign:
+    def test_a_free_molecule_drifts_and_so_is_fitted(self) -> None:
+        assert _should_align(molecule("H2O")) is True
+
+    def test_a_periodic_cell_does_not_follow_a_rotation_so_is_not_fitted(self) -> None:
+        atoms = molecule("H2O")
+        atoms.set_cell([10.0, 10.0, 10.0])
+        atoms.pbc = True
+
+        assert _should_align(atoms) is False
+
+    def test_a_pinned_atom_already_fixes_the_frame(self) -> None:
+        atoms = molecule("H2O")
+        atoms.set_constraint(FixAtoms(indices=[0]))
+
+        assert _should_align(atoms) is False
+
+
+class TestSameMinimum:
+    def test_a_rigidly_rotated_copy_is_the_same_minimum_once_fitted(self) -> None:
+        """The whole reason `align` exists: a rattle leaves rigid drift behind
+        that no optimiser removes, and it is bigger than the basin it hides."""
+        atoms = molecule("C2H4")
+        rotated = atoms.copy()
+        rotated.rotate(35, "z")
+        rotated.translate([0.4, -0.2, 0.1])
+        every = np.arange(len(atoms))
+
+        assert _same_minimum(rotated, 1.0, atoms, 1.0, every, 0.3, 0.01, True)
+        assert not _same_minimum(rotated, 1.0, atoms, 1.0, every, 0.3, 0.01, False)
+
+    def test_structures_far_apart_in_energy_are_different_minima(self) -> None:
+        atoms = molecule("C2H4")
+        every = np.arange(len(atoms))
+
+        assert not _same_minimum(atoms, 1.0, atoms, 5.0, every, 0.3, 0.01, True)
+
+    def test_degenerate_energies_do_not_merge_structures_that_differ(self) -> None:
+        """A symmetric reaction has two ends of exactly equal energy, so the
+        energy test can never be the one that tells them apart."""
+        atoms = molecule("C2H4")
+        moved = atoms.copy()
+        moved.positions[0, 0] += 1.5
+        every = np.arange(len(atoms))
+
+        assert not _same_minimum(moved, 1.0, atoms, 1.0, every, 0.3, 0.01, True)
+
+
+class TestSeedMinimaFromTs:
+    def test_rejects_asking_for_no_directions(self, water: Atoms, calc: EMT) -> None:
+        with pytest.raises(ValueError, match="n_directions must be at least 1"):
+            seed_minima_from_ts(water, calc, n_directions=0)
+
+    def test_rejects_a_displacement_that_moves_nothing(
+        self, water: Atoms, calc: EMT
+    ) -> None:
+        with pytest.raises(ValueError, match="stdev must be positive"):
+            seed_minima_from_ts(water, calc, stdev=0.0)
+
+    def test_rejects_a_negative_tolerance(self, water: Atoms, calc: EMT) -> None:
+        with pytest.raises(ValueError, match="rmsd_tol must not be negative"):
+            seed_minima_from_ts(water, calc, rmsd_tol=-0.1)
+
+    def test_rejects_an_atom_outside_the_structure(
+        self, water: Atoms, calc: EMT
+    ) -> None:
+        with pytest.raises(IndexError, match="out of range"):
+            seed_minima_from_ts(water, calc, indices=[99])
+
+    def test_rejects_a_force_criterion_nothing_can_meet(
+        self, water: Atoms, calc: EMT
+    ) -> None:
+        with pytest.raises(ValueError, match="fmax must be positive"):
+            seed_minima_from_ts(water, calc, fmax=0.0)
+
+    def test_rejects_a_relaxation_with_no_steps_to_take(
+        self, water: Atoms, calc: EMT
+    ) -> None:
+        with pytest.raises(ValueError, match="steps must be at least 1"):
+            seed_minima_from_ts(water, calc, steps=0)
+
+    def test_rejects_a_negative_energy_tolerance(
+        self, water: Atoms, calc: EMT
+    ) -> None:
+        with pytest.raises(ValueError, match="energy_tol must not be negative"):
+            seed_minima_from_ts(water, calc, energy_tol=-0.1)
+
+    def test_finds_the_hollow_site_either_side_of_the_bridge(
+        self, hop_summary: SeedSummary
+    ) -> None:
+        assert len(hop_summary.minima) == 2
+
+    def test_reports_the_two_sites_as_the_pair_the_saddle_connects(
+        self, hop_summary: SeedSummary
+    ) -> None:
+        assert hop_summary.connecting == (0, 1)
+
+    def test_the_two_sites_sit_a_hop_apart(self, hop_summary: SeedSummary) -> None:
+        """The point of the whole thing: the adatom ends up in a different
+        hollow depending on which way it was pushed."""
+        first, second = hop_summary.connecting_minima
+        hop = second.positions[-1, 0] - first.positions[-1, 0]
+
+        assert abs(abs(hop) - first.cell[0, 0] / 2) < 0.2
+
+    def test_the_barrier_matches_the_band_that_the_saddle_came_from(
+        self, hop_summary: SeedSummary
+    ) -> None:
+        """0.374 eV is what the quickstart's climbing-image NEB reports."""
+        assert hop_summary.barriers == pytest.approx([0.374, 0.374], abs=0.01)
+
+    def test_each_minimum_records_what_the_rattle_measured(
+        self, hop_summary: SeedSummary
+    ) -> None:
+        for minimum in hop_summary.minima:
+            assert minimum.info["converged"] is True
+            assert minimum.info["seed_count"] == 3
+            assert minimum.info["seed_barrier"] > 0
+            assert minimum.info["seed_rmsd_ts"] > 0
+
+    def test_the_minima_keep_the_cell_the_boundary_conditions_and_the_constraint(
+        self, hop_ts: Atoms, hop_summary: SeedSummary
+    ) -> None:
+        """Everything here survives a round trip through a trajectory file."""
+        for minimum in hop_summary.minima:
+            assert minimum.get_chemical_symbols() == hop_ts.get_chemical_symbols()
+            assert np.allclose(minimum.cell, hop_ts.cell)
+            assert np.array_equal(minimum.pbc, hop_ts.pbc)
+            assert minimum.constraints
+
+    def test_holds_a_constrained_atom_still(
+        self, hop_ts: Atoms, hop_summary: SeedSummary
+    ) -> None:
+        fixed = hop_ts.constraints[0].index
+
+        for minimum in hop_summary.minima:
+            assert np.allclose(minimum.positions[fixed], hop_ts.positions[fixed])
+
+    def test_does_not_modify_its_input(self, hop_ts: Atoms) -> None:
+        before = hop_ts.positions.copy()
+
+        seed_minima_from_ts(hop_ts, EMT(), n_directions=2)
+
+        assert np.allclose(hop_ts.positions, before)
+
+    def test_the_same_seed_finds_the_same_minima(self, hop_ts: Atoms) -> None:
+        first = seed_minima_from_ts(hop_ts, EMT(), n_directions=2, seed=7)
+        second = seed_minima_from_ts(hop_ts, EMT(), n_directions=2, seed=7)
+
+        assert np.allclose(first.minima[0].positions, second.minima[0].positions)
+
+    def test_a_tiny_displacement_comes_back_onto_the_saddle_and_says_so(
+        self, hop_ts: Atoms
+    ) -> None:
+        """The failure a naive version gets wrong: the force at a converged
+        saddle is already under any usable fmax, so too small a push relaxes
+        straight back onto it."""
+        with pytest.warns(SeedWarning, match="Raise stdev"):
+            summary = seed_minima_from_ts(hop_ts, EMT(), n_directions=3, stdev=0.02)
+
+        assert summary.n_stalled == 6
+        assert summary.minima == []
+        assert summary.connecting is None
+
+    def test_without_mirroring_nothing_can_bracket_the_saddle(
+        self, hop_ts: Atoms
+    ) -> None:
+        with pytest.warns(SeedWarning, match="mirror=False"):
+            summary = seed_minima_from_ts(
+                hop_ts, EMT(), n_directions=3, mirror=False
+            )
+
+        assert summary.n_relaxations == 3
+        assert summary.connecting is None
+
+    def test_displacing_only_the_adatom_still_finds_both_sites(
+        self, hop_ts: Atoms
+    ) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SeedWarning)
+            summary = seed_minima_from_ts(
+                hop_ts, EMT(), n_directions=3, indices=[len(hop_ts) - 1]
+            )
+
+        assert summary.connecting == (0, 1)
+
+    def test_alignment_can_be_asked_for_rather_than_inferred(
+        self, hop_ts: Atoms
+    ) -> None:
+        """Fitting is near-identity here, twelve of thirteen atoms being pinned,
+        so asking for it explicitly finds the same two sites the inference does."""
+        summary = seed_minima_from_ts(hop_ts, EMT(), n_directions=3, align=True)
+
+        assert len(summary.minima) == 2
+
+    def test_keeping_the_trajectories_leaves_one_file_per_relaxation(
+        self, hop_ts: Atoms, tmp_path: Any
+    ) -> None:
+        """Each relaxation needs its own name, or keeping them keeps the last."""
+        seed_minima_from_ts(hop_ts, EMT(), n_directions=2, keep_traj=True)
+
+        assert len(list(tmp_path.glob("seed_minima_*.traj"))) == 4
+
+    def test_the_trajectories_are_cleared_away_by_default(
+        self, hop_ts: Atoms, tmp_path: Any
+    ) -> None:
+        seed_minima_from_ts(hop_ts, EMT(), n_directions=2)
+
+        assert list(tmp_path.glob("seed_minima_*.traj")) == []
+
+    def test_a_relaxation_that_runs_out_of_steps_is_reported(
+        self, hop_ts: Atoms
+    ) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SeedWarning)
+            with pytest.warns(ConvergenceWarning, match="Rattled relaxations"):
+                summary = seed_minima_from_ts(
+                    hop_ts, EMT(), n_directions=1, steps=1
+                )
+
+        assert summary.n_unconverged == 2
+
+    def test_an_unconverged_relaxation_can_be_promoted_to_an_error(
+        self, hop_ts: Atoms
+    ) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SeedWarning)
+            with pytest.raises(ConvergenceError):
+                seed_minima_from_ts(
+                    hop_ts, EMT(), n_directions=1, steps=1, raise_on_unconverged=True
+                )
+
+    def test_a_calculator_that_fails_on_everything_is_not_silently_empty(
+        self, hop_ts: Atoms
+    ) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SeedWarning)
+            with pytest.raises(RuntimeError, match="raised on all"):
+                seed_minima_from_ts(hop_ts, _FailsAfterPricing(), n_directions=2)
+
+    def test_one_failed_relaxation_does_not_lose_the_others(
+        self, hop_ts: Atoms
+    ) -> None:
+        with pytest.warns(SeedWarning, match="failed with"):
+            summary = seed_minima_from_ts(
+                hop_ts, _FailsOnce(), n_directions=3
+            )
+
+        assert summary.n_failed == 1
+        assert summary.minima
+
+
+class TestSeedSummary:
+    def test_it_prints_the_barriers_and_the_connecting_pair(self) -> None:
+        minima = []
+        for barrier in (0.374, 0.372):
+            atoms = molecule("H2O")
+            atoms.info.update(
+                seed_count=3, seed_barrier=barrier, seed_rmsd_ts=0.8, converged=True
+            )
+            minima.append(atoms)
+        summary = SeedSummary(
+            ts_energy=3.689,
+            ts_fmax=0.005,
+            minima=minima,
+            connecting=(0, 1),
+            n_directions=3,
+            n_relaxations=6,
+            n_stalled=0,
+            n_unconverged=0,
+            n_failed=0,
+        )
+
+        printed = str(summary)
+
+        assert "Minima found:  2" in printed
+        assert "barrier 0.374 eV" in printed
+        assert "Connecting:    minima 0 and 1" in printed
+        assert "0 stalled, 0 unconverged, 0 failed" in printed
+
+    def test_it_says_so_when_nothing_bracketed_the_saddle(self) -> None:
+        summary = SeedSummary(
+            ts_energy=0.0,
+            ts_fmax=0.3,
+            minima=[],
+            connecting=None,
+            n_directions=1,
+            n_relaxations=2,
+            n_stalled=2,
+            n_unconverged=0,
+            n_failed=0,
+        )
+
+        assert "nothing bracketed the saddle" in str(summary)
+        assert summary.connecting_minima is None

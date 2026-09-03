@@ -167,7 +167,9 @@ def test_public_api_is_complete() -> None:
         "quick_guess_path",
         "quick_guess_ts",
         # tools_geometry
+        "SeedSummary",
         "SeedWarning",
+        "seed_minima_from_ts",
         "seed_product_from_ts",
         "bonded_cluster_indices_no_anchor_hub",
         "get_dimer_bonded_cluster_indices",

@@ -1,8 +1,9 @@
 # Building end states
 
-A band needs two endpoints. These are the two ways of getting the second
-one when you have only the first: build it from what the reaction is known
-to do, or step past a transition state that is already to hand.
+A band needs two endpoints. These are the ways of getting the second one when
+you have only the first: build it from what the reaction is known to do, or
+step past a transition state that is already to hand. The last of them needs no
+end state at all -- given a saddle and a calculator, it finds both.
 
 ## Building a flipped end state
 
@@ -62,6 +63,64 @@ the transition state it started from. `seed_product_from_ts` only warns
 driving two atoms through each other, or one that went nowhere. Pass
 `return_path=True` for the whole band it built, reactant through saddle to
 seed, to plot or to hand to `restart_neb`.
+
+## Rattling a transition state into both end states
+
+`seed_product_from_ts` still needs an end state to read a direction off.
+`seed_minima_from_ts` needs only the saddle. It displaces the structure at
+random, relaxes what comes out, and repeats: a saddle is downhill in one
+direction and uphill in every other, so a structure nudged off it rolls into
+one of the two states it connects.
+
+Each direction is stepped both ways, because a displacement and its negative
+roll to *opposite* sides of a saddle. That is what brackets the reaction rather
+than sampling one basin twice, and the pair the search most often brackets is
+what comes back:
+
+```python
+from reactiontools import prepare_neb, seed_minima_from_ts
+
+summary = seed_minima_from_ts(ts, calc)
+print(summary)
+
+reactant, product = summary.connecting_minima
+neb = prepare_neb(reactant, product, calc, n_images=7)
+```
+
+```
+TS energy:     3.689 eV
+TS max force:  0.005 eV/A
+Minima found:  2
+  0  barrier 0.374 eV   0.403 A from the TS   3 of 6
+  1  barrier 0.372 eV   0.398 A from the TS   3 of 6
+Connecting:    minima 0 and 1
+Discarded:     0 stalled, 0 unconverged, 0 failed
+```
+
+`stdev` is the one knob that matters. Too small and every relaxation converges
+straight back onto the saddle, because the force there is already below any
+`fmax` worth asking for -- so loosening `fmax` cannot rescue it, and the
+`SeedWarning` you get says to raise `stdev` instead. ASE's own `Atoms.rattle`
+defaults to 0.001 Å, which would stall every time; the 0.1 Å default here
+clears a converged saddle reliably. Too large and the structure lands somewhere
+the saddle never connected to.
+
+The cost is `2 * n_directions` relaxations, ten by default. `indices` is worth
+setting for anything large, on two counts: an isotropic rattle otherwise spends
+most of its amplitude on atoms with nothing to do with the reaction, and the
+RMSD that tells two minima apart dilutes as one over the square root of the
+atom count until a real hop measures smaller than the scatter a loose `fmax`
+leaves behind.
+
+`align` decides whether rigid drift is fitted out before any of that is
+measured, and is inferred: off for a periodic cell or a pinned substrate, whose
+frame is already fixed, and on for a free molecule, which would otherwise have
+one basin fragment into several as the rattle's leftover translation and
+rotation -- which no optimiser removes, the force along a rigid mode being zero
+-- pile up.
+
+Nothing here checks that `ts` is a saddle; `get_vibrations` does that, and costs
+more than the whole search. `ts_fmax` on the summary is the cheap stand-in.
 
 `optimise_irc` answers the same question properly, by following the true
 reaction coordinate downhill from a converged saddle, and costs hundreds of

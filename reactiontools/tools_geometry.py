@@ -13,7 +13,10 @@ moving one or more hydrogens across their hydrogen bonds. Where those two build
 a product out of what the reaction is known to do,
 :func:`seed_product_from_ts` builds one out of a transition state instead,
 stepping past the saddle along the geodesic that reaches it -- no calculator,
-and no need to have guessed the mechanism first. For structures that
+and no need to have guessed the mechanism first. :func:`seed_minima_from_ts`
+needs no end state at all: it rattles the saddle at random and relaxes what
+comes out, from enough directions to fall into both of the basins it connects,
+and reports them as a :class:`SeedSummary`. For structures that
 already describe the same atoms, :func:`align_atom_sets` superposes one on the
 other with the optimal rigid Kabsch transform, and :func:`atom_set_rmsd`
 measures what remains.
@@ -21,18 +24,28 @@ measures what remains.
 
 import warnings
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from itertools import permutations
 from numbers import Integral
+from pathlib import Path
 from typing import Any, TextIO
 
 import numpy as np
 from ase import Atoms
+from ase.calculators.calculator import Calculator
 from ase.constraints import FixAtoms
 from ase.data import covalent_radii
 from ase.neighborlist import NeighborList, natural_cutoffs
 from ase.optimize import BFGS
 
-from .tools_reaction import _check_converged, get_neb_path, quick_guess_path
+from .tools_reaction import (
+    _cached_energy,
+    _check_converged,
+    get_fmax,
+    get_neb_path,
+    optimise_geom,
+    quick_guess_path,
+)
 
 #: Cosine below which the direction a path arrives at the saddle in counts as
 #: unrelated to the direction the reaction is going in overall -- 0.5 is 60
@@ -1124,6 +1137,11 @@ class SeedWarning(UserWarning):
     ``warnings.simplefilter("error", SeedWarning)`` in a batch script, where a
     seed that is really a second copy of the reactant would otherwise be
     carried into everything downstream.
+
+    :func:`seed_minima_from_ts` warns it for the same reason: a rattle that
+    found one side of a saddle rather than both has still found a minimum, and
+    a search that has not answered the question it was run to ask should say so
+    without discarding what it did find.
     """
 
 
@@ -1471,3 +1489,665 @@ def seed_product_from_ts(
     if return_path:
         return seed, list(path) + extrapolated
     return seed
+
+
+@dataclass
+class SeedSummary:
+    """What rattling a transition state found on either side of it.
+
+    Returned by :func:`seed_minima_from_ts`. The numbers describing an
+    individual minimum ride on that structure's ``info``, as everywhere else in
+    this package; what is collected here is the search as a whole.
+
+    Attributes
+    ----------
+    ts_energy : float
+        Potential energy of the transition state as handed over, in eV. Every
+        barrier is measured down from it.
+    ts_fmax : float
+        Maximum force on the transition state as handed over, in eV/Å. Free,
+        since the energy above had to be evaluated anyway, and the one number
+        that separates "the rattle failed" from "that was never a saddle": a
+        structure sitting at 0.3 eV/Å is somewhere on a slope, and the
+        structures found below it are wherever the slope happened to run out.
+    minima : list of ase.Atoms
+        The distinct minima the rattles relaxed into, lowest energy first.
+        Empty when every relaxation stalled or failed. Each carries
+        ``info["converged"]`` from its relaxation, plus ``info["seed_count"]``,
+        how many relaxations landed in it; ``info["seed_barrier"]``, how far it
+        sits below the transition state in eV; and ``info["seed_rmsd_ts"]``,
+        how far it moved to get there in Å.
+    connecting : tuple of int or None
+        Indices into ``minima`` of the pair the search most often landed either
+        side of, or None when no mirrored pair ever bracketed the saddle --
+        which is the headline failure, and what ``mirror=False`` guarantees.
+    n_directions : int
+        Number of random directions drawn.
+    n_relaxations : int
+        Number of relaxations run, which is twice ``n_directions`` when the
+        directions were mirrored.
+    n_stalled : int
+        Relaxations that came back onto the transition state instead of rolling
+        off it, because the displacement was too small to escape it.
+    n_unconverged : int
+        Relaxations that hit their step limit.
+    n_failed : int
+        Relaxations the calculator raised on.
+    """
+
+    ts_energy: float
+    ts_fmax: float
+    minima: list[Atoms]
+    connecting: tuple[int, int] | None
+    n_directions: int
+    n_relaxations: int
+    n_stalled: int
+    n_unconverged: int
+    n_failed: int
+
+    @property
+    def barriers(self) -> np.ndarray:
+        """numpy.ndarray: how far each minimum sits below the saddle, in eV.
+
+        Parallel to :attr:`minima`, and so also in ascending energy order,
+        which makes this descending. A negative entry is a minimum that came
+        back *above* the transition state, which :func:`seed_minima_from_ts`
+        warns about.
+        """
+        return np.array(
+            [minimum.info["seed_barrier"] for minimum in self.minima], dtype=float
+        )
+
+    @property
+    def connecting_minima(self) -> tuple[Atoms, Atoms] | None:
+        """tuple of ase.Atoms or None: the bracketing pair, ready for a band.
+
+        The two structures :attr:`connecting` names, or None when nothing
+        bracketed the saddle. Handing these to
+        :func:`~reactiontools.tools_reaction.prepare_neb` and checking the band
+        comes back over a barrier near the transition state they were found
+        from is what settles whether the rattle landed where it looked like it
+        did.
+        """
+        if self.connecting is None:
+            return None
+        first, second = self.connecting
+        return self.minima[first], self.minima[second]
+
+    @staticmethod
+    def _ev(value: float) -> str:
+        """Format an energy, without a sign on a value that rounds to zero.
+
+        A barrier that rounds to nothing comes out a hair either side of it,
+        and "-0.000 eV" reads as a finding rather than as the rounding it is.
+        The same problem, and the same fix, as ``NebSummary`` has.
+        """
+        text = f"{value:.3f}"
+        return "0.000" if text == "-0.000" else text
+
+    def __str__(self) -> str:
+        """Report the saddle, the minima found under it, and what was thrown away."""
+        lines = [
+            f"TS energy:     {self._ev(self.ts_energy)} eV",
+            f"TS max force:  {self.ts_fmax:.3f} eV/A",
+            f"Minima found:  {len(self.minima)}",
+        ]
+        for index, minimum in enumerate(self.minima):
+            lines.append(
+                f"  {index}  barrier {self._ev(minimum.info['seed_barrier'])} eV"
+                f"   {minimum.info['seed_rmsd_ts']:.3f} A from the TS"
+                f"   {minimum.info['seed_count']} of {self.n_relaxations}"
+            )
+        if self.connecting is None:
+            lines.append("Connecting:    nothing bracketed the saddle")
+        else:
+            lines.append(
+                f"Connecting:    minima {self.connecting[0]} and {self.connecting[1]}"
+            )
+        lines.append(
+            f"Discarded:     {self.n_stalled} stalled, "
+            f"{self.n_unconverged} unconverged, {self.n_failed} failed"
+        )
+        return "\n".join(lines)
+
+
+def _should_align(atoms: Atoms) -> bool:
+    """Whether an RMSD measured against *atoms* should remove rigid motion first.
+
+    Two structures relaxed out of the same basin differ by whatever rigid
+    translation and rotation they were displaced with, because the force along
+    a rigid mode is zero and no optimiser ever removes one. Left in, that drift
+    is larger than the scatter around the basin itself, and a single minimum
+    comes back looking like several. Fitting one structure onto the other takes
+    it out.
+
+    Unless the frame is already pinned, in which case there is no drift to
+    remove and the fit is actively wrong: a periodic cell does not follow a
+    rotation applied to its contents, and a fit that moves atoms the caller
+    held with :class:`~ase.constraints.FixAtoms` moves atoms that cannot move.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        Structure the comparison is anchored on.
+
+    Returns
+    -------
+    bool
+        True when the structure is free to drift and the fit should be applied.
+    """
+    return not (
+        bool(np.any(atoms.pbc))
+        or any(isinstance(item, FixAtoms) for item in atoms.constraints)
+    )
+
+
+def _same_minimum(
+    first: Atoms,
+    first_energy: float,
+    second: Atoms,
+    second_energy: float,
+    selection: np.ndarray,
+    rmsd_tol: float,
+    energy_tol: float,
+    align: bool,
+) -> bool:
+    """Whether two relaxed structures describe the same basin.
+
+    Both tests have to pass. Geometry is the one that decides: two structures
+    sitting on top of each other are the same minimum whatever their energies
+    say. Energy is there to split what geometry cannot -- and it can only ever
+    split, never merge, which is what makes the conjunction safe. Taking either
+    one alone breaks: an energy-only test collapses the two ends of any
+    symmetric reaction, whose minima are degenerate by construction, and a
+    geometry-only test at a tolerance loose enough to absorb the scatter a
+    crude ``fmax`` leaves behind starts merging basins that genuinely differ.
+
+    Parameters
+    ----------
+    first, second : ase.Atoms
+        Relaxed structures to compare.
+    first_energy, second_energy : float
+        Their potential energies in eV, passed in rather than read back so that
+        no calculator is re-run here.
+    selection : numpy.ndarray
+        Atoms the comparison is made over, as in :func:`seed_minima_from_ts`.
+    rmsd_tol : float
+        Largest RMSD in Å that still counts as the same basin.
+    energy_tol : float
+        Largest energy difference in eV that still counts as the same basin.
+    align : bool
+        Remove rigid rotation and translation before measuring.
+
+    Returns
+    -------
+    bool
+        True when the two are the same minimum.
+    """
+    if abs(first_energy - second_energy) > energy_tol:
+        return False
+    rmsd = atom_set_rmsd(
+        first,
+        second,
+        mobile_indices=selection,
+        reference_indices=selection,
+        align=align,
+    )
+    return rmsd <= rmsd_tol
+
+
+def seed_minima_from_ts(
+    ts: Atoms,
+    calc: Calculator,
+    n_directions: int = 5,
+    stdev: float = 0.1,
+    mirror: bool = True,
+    indices: int | Iterable[int] | None = None,
+    fmax: float = 0.05,
+    steps: int = 200,
+    rmsd_tol: float = 0.3,
+    energy_tol: float = 0.01,
+    align: bool | None = None,
+    seed: int | np.random.Generator | None = 0,
+    optimiser: Callable[..., Any] = BFGS,
+    logfile: str | TextIO | None = None,
+    seed_traj: str = "seed_minima.traj",
+    keep_traj: bool = False,
+    raise_on_unconverged: bool = False,
+) -> SeedSummary:
+    """Rattle a transition state downhill to find the minima it connects.
+
+    Displaces the saddle at random, relaxes what comes out, and repeats,
+    collecting the distinct basins the relaxations fall into. A saddle is
+    downhill in one direction and uphill in every other, so a structure nudged
+    off it rolls into one of the two states it connects; doing that from enough
+    directions finds both.
+
+    Each direction is stepped both ways. From a saddle a displacement and its
+    negative roll to *opposite* sides, so a mirrored pair brackets the reaction
+    rather than sampling one basin twice, and the pair the search most often
+    brackets is the answer this exists to give -- reported in
+    ``connecting``, and available as two structures ready for a band through
+    :attr:`SeedSummary.connecting_minima`.
+
+    This is the crude counterpart to
+    :func:`~reactiontools.tools_reaction.optimise_irc`, which answers the same
+    question properly by following the true reaction coordinate downhill, and
+    needs Sella, a tightly converged saddle and hundreds of gradients to do it.
+    Where :func:`seed_product_from_ts` builds one end state out of a saddle and
+    the *other end state*, with no calculator at all, this needs no end state
+    and finds both -- for the price of ``2 * n_directions`` full geometry
+    relaxations, ten by default.
+
+    Nothing here checks that ``ts`` is a first-order saddle; that is what
+    :func:`~reactiontools.tools_reaction.get_vibrations` is for, and it costs
+    more than this whole search. ``ts_fmax`` on the summary is the cheap
+    stand-in: a structure handed over at 0.3 eV/Å was never a stationary point,
+    and whatever comes back is wherever the slope ran out.
+
+    Parameters
+    ----------
+    ts : ase.Atoms
+        Transition state, or a guess at one. Not modified; every relaxation
+        runs on its own copy.
+    calc : ase.calculators.Calculator
+        Calculator attached to the transition state and to every relaxation.
+    n_directions : int, optional
+        Number of random directions to draw. Each costs two relaxations unless
+        ``mirror`` says otherwise, so this is half the calculator budget, not
+        all of it.
+    stdev : float, optional
+        Standard deviation of the displacement drawn for each atom and each
+        Cartesian component, in Å. **The one knob that matters.** Too small and
+        every relaxation converges straight back onto the saddle, because the
+        force there is already below any usable ``fmax``; too large and the
+        structure lands somewhere the saddle never connected to. The default of
+        0.1 Å clears a converged saddle reliably. Note that ASE's own
+        ``Atoms.rattle`` defaults to 0.001 Å, which would stall every time --
+        the two are not meant to match.
+    mirror : bool, optional
+        Relax each direction from both sides of the saddle. On by default,
+        because a mirrored pair is the only thing here that brackets anything:
+        with this off nothing can be shown to lie either side of the saddle,
+        ``connecting`` is always None, and what is left is a way of enumerating
+        the minima near a structure for half the cost.
+    indices : int or iterable of int, optional
+        Atoms to displace, and to compare structures over. Every atom by
+        default. Worth setting for a large system on both counts: an isotropic
+        rattle spends most of its amplitude on atoms with nothing to do with
+        the reaction, and an RMSD taken over everything dilutes as one over the
+        square root of the atom count, until a real hop between basins measures
+        smaller than the scatter a loose ``fmax`` leaves behind.
+    fmax : float, optional
+        Maximum force criterion for the relaxations, in eV/Å. Loose by the
+        standards of the rest of the package, because what is wanted from these
+        is which basin, not the bottom of it -- but see ``rmsd_tol``.
+    steps : int, optional
+        Maximum number of optimiser steps per relaxation. A structure starting
+        a hair off a saddle that has not settled within a couple of hundred
+        steps has gone somewhere unintended, and the warning saying so is more
+        use than grinding on.
+    rmsd_tol : float, optional
+        Largest RMSD in Å at which two relaxed structures still count as the
+        same minimum. Coupled to ``fmax``: a loose force criterion leaves
+        structures scattered around the bottom of a basin, and this has to be
+        wider than that scatter or one basin is reported as several. Tighten
+        ``fmax`` before tightening this.
+    energy_tol : float, optional
+        Largest energy difference in eV at which two relaxed structures still
+        count as the same minimum, and the width of the band around the
+        transition state's own energy that counts as not having left it.
+        Roughly kBT/2 at room temperature.
+    align : bool or None, optional
+        Remove the best rigid rotation and translation before measuring any
+        RMSD. None, the default, decides per structure: off when the cell is
+        periodic or an atom is held by :class:`~ase.constraints.FixAtoms`, on
+        otherwise. A free molecule needs it, because a rattle imparts net
+        translation and rotation that the relaxation will never remove -- the
+        force along a rigid mode is zero -- so without it two structures in the
+        same basin look different and the whole search fragments. A periodic
+        cell or a pinned substrate must not have it: the frame is already
+        fixed, and rotating a structure the cell does not follow is meaningless.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the displacements, passed to :func:`numpy.random.default_rng`,
+        so an integer, a generator or None all work. Defaults to 0: what this
+        function finds is entirely a function of the draw, and a result that
+        cannot be reproduced is hard to argue with.
+    optimiser : callable, optional
+        ASE optimiser class used for the relaxations, as in
+        :func:`~reactiontools.tools_reaction.optimise_geom`.
+    logfile : str, file object or None, optional
+        Where the optimisers write their per-step tables. None, the default,
+        silences them -- deliberately unlike the rest of the package, because
+        ten interleaved tables with nothing marking where one ends and the next
+        begins are worse than no tables at all. Pass ``'-'`` for stdout.
+    seed_traj : str, optional
+        Base trajectory filename. Each relaxation gets its own name derived
+        from it, ``seed_minima_0_plus.traj`` and so on, so that keeping them
+        keeps all of them rather than only the last.
+    keep_traj : bool, optional
+        Keep those trajectories instead of deleting them. Off by default. A
+        relaxation the calculator raised on leaves its trajectory behind either
+        way, since that is the evidence for what went wrong.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`~reactiontools.tools_reaction.ConvergenceError` instead of
+        warning when any relaxation hit ``steps`` without reaching ``fmax``.
+        Checked once, after every relaxation has run, so that turning it on
+        does not throw away the work already done -- the same order
+        :func:`~reactiontools.tools_reaction.optimise_irc` runs its two halves
+        in.
+
+    Returns
+    -------
+    SeedSummary
+        The distinct minima found, which pair of them the search bracketed the
+        saddle with, and what was discarded getting there.
+
+    Raises
+    ------
+    TypeError
+        If ``indices`` is neither an integer nor an iterable of integers.
+    ValueError
+        If any argument is out of range, or ``indices`` is empty or repeats.
+    IndexError
+        If ``indices`` names an atom outside ``ts``. Negative indices are not
+        accepted; use ``len(ts) - 1`` for the last atom.
+    RuntimeError
+        If the calculator raised on every single relaxation, chained to the
+        last exception it raised.
+    ConvergenceError
+        If any relaxation hit ``steps`` without reaching ``fmax`` and
+        ``raise_on_unconverged`` is True.
+
+    Warns
+    -----
+    SeedWarning
+        If any relaxation came back onto the transition state instead of
+        rolling off it; if no mirrored pair bracketed the saddle, so there is
+        no answer to the question this was run to ask; if the calculator raised
+        on some of the relaxations; or if a minimum came back above the
+        transition state, which means either that the input was not a maximum
+        along that direction or that the relaxation stopped short.
+
+    Notes
+    -----
+    Everything measured here goes through
+    :func:`atom_set_rmsd`, which matches atoms by index, applies no
+    minimum-image convention and does not consider permutations. So two minima
+    that differ only by a lattice translation are reported as distinct, as are
+    two related by swapping identical atoms; and a mechanism in which two atoms
+    exchange places reads as an enormous displacement. A reaction that crosses
+    a cell boundary is the wrong shape for this function.
+
+    The displacement is not mass-weighted, unlike the direction
+    :func:`seed_product_from_ts` extrapolates along, so a hydrogen and a
+    tungsten are moved by the same amount and a proton transfer gets less of
+    the amplitude than it wants. ``indices`` is the way to put it back.
+
+    Growing the system does not call for a larger ``stdev``. The component of
+    an isotropic displacement along any one direction is distributed as
+    ``N(0, stdev)`` however many atoms there are; what grows is the total,
+    ``stdev * sqrt(3 * n_atoms)``, which is strain dumped into every mode that
+    is not the reaction coordinate. That costs optimiser steps, so ``steps`` is
+    the argument a large system runs out of, not ``stdev``.
+
+    Examples
+    --------
+    >>> summary = seed_minima_from_ts(ts, calc)          # doctest: +SKIP
+    >>> print(summary)                                   # doctest: +SKIP
+    >>> reactant, product = summary.connecting_minima    # doctest: +SKIP
+    >>> summarise_neb(optimise_neb(prepare_neb(reactant, product, calc)))
+    ...                                                  # doctest: +SKIP
+    """
+    selection = _atom_indices(ts, indices, "indices")
+    if n_directions < 1:
+        raise ValueError(
+            f"n_directions must be at least 1 to displace the transition state "
+            f"at all, got {n_directions}"
+        )
+    if stdev <= 0:
+        raise ValueError(
+            f"stdev must be positive to move anything, got {stdev}. A "
+            f"displacement of zero relaxes the transition state onto itself."
+        )
+    if fmax <= 0:
+        raise ValueError(f"fmax must be positive, got {fmax}")
+    if steps < 1:
+        raise ValueError(f"steps must be at least 1, got {steps}")
+    if rmsd_tol < 0:
+        raise ValueError(f"rmsd_tol must not be negative, got {rmsd_tol}")
+    if energy_tol < 0:
+        raise ValueError(f"energy_tol must not be negative, got {energy_tol}")
+
+    if align is None:
+        align = _should_align(ts)
+
+    rng = np.random.default_rng(seed)
+    signs = (1.0, -1.0) if mirror else (1.0,)
+    n_relaxations = n_directions * len(signs)
+
+    # Priced before the loop and off its own copy: once a relaxation has run,
+    # the shared calculator holds that structure's result and asking again here
+    # would pay for the transition state a second time.
+    reference = ts.copy()
+    reference.calc = calc
+    ts_energy = float(reference.get_potential_energy())
+    ts_fmax = get_fmax(reference)
+
+    stem = Path(seed_traj)
+    minima: list[Atoms] = []
+    energies: list[float] = []
+    counts: list[int] = []
+    brackets: dict[tuple[int, int], int] = {}
+
+    n_stalled = 0
+    n_unconverged = 0
+    n_failed = 0
+    last_failure: Exception | None = None
+
+    for direction in range(n_directions):
+        step = np.zeros((len(ts), 3))
+        step[selection] = rng.normal(scale=stdev, size=(len(selection), 3))
+
+        landed: list[int | None] = []
+        for sign in signs:
+            side = "plus" if sign > 0 else "minus"
+            what = f"Rattle {direction} ({side}) relaxation"
+
+            image = ts.copy()
+            # Whether the transition state converged says nothing about a
+            # structure displaced away from it. Everything else the caller put
+            # in info rides along, which is what makes seed_count and the rest
+            # below safe to read back off the returned structures.
+            image.info.pop("converged", None)
+            # apply_constraint=True, and set_positions rather than assigning to
+            # .positions: this is a step, not a change of frame, so an atom the
+            # caller fixed has to stay where it was fixed.
+            image.set_positions(ts.positions + sign * step, apply_constraint=True)
+
+            try:
+                relaxed = optimise_geom(
+                    image,
+                    calc,
+                    fmax=fmax,
+                    steps=steps,
+                    opti_traj=str(
+                        stem.with_name(f"{stem.stem}_{direction}_{side}{stem.suffix}")
+                    ),
+                    # Checked once after the loop instead, so that asking for an
+                    # error does not throw away the relaxations that did work.
+                    raise_on_unconverged=False,
+                    optimiser=optimiser,
+                    logfile=logfile,
+                    keep_traj=keep_traj,
+                    _what=what,
+                )
+            # Broad: a calculator can raise anything, and one bad geometry
+            # out of ten should not lose the other nine.
+            except Exception as exc:
+                last_failure = exc
+                n_failed += 1
+                landed.append(None)
+                warnings.warn(
+                    f"{what} failed with {type(exc).__name__}: {exc}. Carrying "
+                    f"on with the remaining {n_relaxations - 1} relaxations.",
+                    SeedWarning,
+                    stacklevel=2,
+                )
+                continue
+
+            # Read now, not later: optimise_geom hands every structure the same
+            # calculator object, so by the time the next relaxation has run,
+            # this one's cached result has been overwritten.
+            energy = _cached_energy(relaxed)
+            if energy is None:
+                energy = relaxed.get_potential_energy()
+            energy = float(energy)
+
+            if not relaxed.info.get("converged", True):
+                n_unconverged += 1
+
+            rmsd_ts = atom_set_rmsd(
+                relaxed,
+                ts,
+                mobile_indices=selection,
+                reference_indices=selection,
+                align=align,
+            )
+
+            # The force at a converged saddle is already below any fmax worth
+            # asking for, so a displacement too small to leave it relaxes
+            # straight back onto it and reports the saddle as a minimum.
+            if rmsd_ts <= rmsd_tol and abs(energy - ts_energy) <= energy_tol:
+                n_stalled += 1
+                landed.append(None)
+                continue
+
+            index = next(
+                (
+                    other
+                    for other, minimum in enumerate(minima)
+                    if _same_minimum(
+                        relaxed,
+                        energy,
+                        minimum,
+                        energies[other],
+                        selection,
+                        rmsd_tol,
+                        energy_tol,
+                        align,
+                    )
+                ),
+                None,
+            )
+            if index is None:
+                relaxed.info["seed_rmsd_ts"] = rmsd_ts
+                minima.append(relaxed)
+                energies.append(energy)
+                counts.append(1)
+                index = len(minima) - 1
+            else:
+                counts[index] += 1
+            landed.append(index)
+
+        first, second = (landed + [None, None])[:2]
+        if first is not None and second is not None and first != second:
+            pair = (min(first, second), max(first, second))
+            brackets[pair] = brackets.get(pair, 0) + 1
+
+    # Sorted by energy rather than by how often each was found: on a symmetric
+    # reaction the two ends are visited equally often and are degenerate, so
+    # visit count leaves minima[0] decided by nothing. Energy makes it the
+    # deepest, which is also what a caller reaching for one of them wants.
+    order = sorted(range(len(minima)), key=lambda index: energies[index])
+    remap = {old: new for new, old in enumerate(order)}
+    minima = [minima[index] for index in order]
+    energies = [energies[index] for index in order]
+    counts = [counts[index] for index in order]
+
+    for minimum, energy, count in zip(minima, energies, counts, strict=True):
+        minimum.info["seed_count"] = count
+        minimum.info["seed_barrier"] = ts_energy - energy
+
+    connecting = None
+    if brackets:
+        best = max(brackets, key=lambda pair: brackets[pair])
+        low, high = sorted((remap[best[0]], remap[best[1]]))
+        connecting = (low, high)
+
+    if n_failed == n_relaxations:
+        raise RuntimeError(
+            f"The calculator raised on all {n_relaxations} relaxations, so "
+            f"nothing was found. The last failure was "
+            f"{type(last_failure).__name__}: {last_failure}."
+        ) from last_failure
+
+    if n_stalled:
+        warnings.warn(
+            f"{n_stalled} of {n_relaxations} relaxations came back onto the "
+            f"transition state rather than rolling off it, within rmsd_tol="
+            f"{rmsd_tol} A and energy_tol={energy_tol} eV of it. Raise stdev "
+            f"from {stdev}: the force at a saddle is already below any fmax "
+            f"worth asking for, so loosening fmax cannot help. A structure "
+            f"that is a minimum rather than a saddle does this from every "
+            f"direction however far it is displaced, which ts_fmax="
+            f"{ts_fmax:.3f} eV/A alone cannot tell apart from a saddle.",
+            SeedWarning,
+            stacklevel=2,
+        )
+
+    if not minima:
+        warnings.warn(
+            "No minima were found: every relaxation stalled on the transition "
+            "state or failed. Raise stdev, or check that ts is a structure a "
+            "calculator can evaluate.",
+            SeedWarning,
+            stacklevel=2,
+        )
+    elif connecting is None:
+        found = "only one minimum" if len(minima) == 1 else f"{len(minima)} minima"
+        reason = (
+            "mirror=False, so nothing was stepped both ways and nothing can be "
+            "shown to lie either side of the saddle"
+            if not mirror
+            else f"the rattles found {found}, all on the same side"
+        )
+        warnings.warn(
+            f"No pair of relaxations bracketed the transition state: {reason}. "
+            f"Raise n_directions or stdev, or check that ts really is a saddle "
+            f"between two states -- ts_fmax was {ts_fmax:.3f} eV/A.",
+            SeedWarning,
+            stacklevel=2,
+        )
+
+    above = [index for index, energy in enumerate(energies) if energy > ts_energy]
+    if above:
+        warnings.warn(
+            f"Minima {above} came back above the transition state, so either ts "
+            f"is not a maximum along the direction they were reached in or "
+            f"their relaxations stopped short. {n_unconverged} of "
+            f"{n_relaxations} relaxations hit the step limit; "
+            f"get_vibrations will say whether ts is a saddle at all.",
+            SeedWarning,
+            stacklevel=2,
+        )
+
+    _check_converged(
+        n_unconverged == 0,
+        f"Rattled relaxations ({n_unconverged} of {n_relaxations})",
+        fmax,
+        steps,
+        raise_on_unconverged,
+    )
+
+    return SeedSummary(
+        ts_energy=ts_energy,
+        ts_fmax=ts_fmax,
+        minima=minima,
+        connecting=connecting,
+        n_directions=n_directions,
+        n_relaxations=n_relaxations,
+        n_stalled=n_stalled,
+        n_unconverged=n_unconverged,
+        n_failed=n_failed,
+    )

@@ -30,3 +30,11 @@ plot_irc(stitch_path(reverse, forward))
 
 These two use Sella, which is installed with `reactiontools` and imported only
 when a saddle-point calculation is requested.
+
+`seed_minima_from_ts` answers the same question as `optimise_irc` without
+either: it rattles the saddle at random and relaxes what comes out, from enough
+directions to land in both of the basins either side of it. That costs a
+handful of geometry relaxations rather than hundreds of gradients, and does not
+need a tightly converged saddle -- but it follows no reaction coordinate, so
+what it finds is where the structure rolled, not what the saddle connects.
+See [Building end states](end-states.md).

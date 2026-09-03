@@ -22,9 +22,10 @@ The package is organised into ten modules, all of which are re-exported here:
     halves over, or move one or more hydrogens across their hydrogen bonds, to
     build a product end state for a band -- or build one out of a transition
     state instead, by stepping past the saddle along the geodesic that reaches
-    it. For two structures that already describe the same atoms, superpose one
-    on the other with the optimal rigid Kabsch transform and measure the RMSD
-    that remains.
+    it, or by rattling the saddle at random and relaxing what comes out until
+    the minima either side of it have both been found. For two structures that
+    already describe the same atoms, superpose one on the other with the
+    optimal rigid Kabsch transform and measure the RMSD that remains.
 ``tools_io``
     Read and write the structure files a reaction path passes through -- XYZ,
     PDB, and the multi-model reference a ``PATHMSD`` collective variable is
@@ -107,6 +108,7 @@ from .tools_fes import (
     summarise_fes,
 )
 from .tools_geometry import (
+    SeedSummary,
     SeedWarning,
     align_atom_sets,
     atom_set_rmsd,
@@ -116,6 +118,7 @@ from .tools_geometry import (
     get_dimer_bonded_cluster_indices,
     kabsch_transform,
     optimize_with_fixed_anchors,
+    seed_minima_from_ts,
     seed_product_from_ts,
     swap_bonding_configuration,
 )
@@ -262,7 +265,9 @@ __all__ = [
     "select_frames_by_cv",
     "select_frames_by_msd",
     # tools_geometry
+    "SeedSummary",
     "SeedWarning",
+    "seed_minima_from_ts",
     "seed_product_from_ts",
     "align_atom_sets",
     "atom_set_rmsd",
