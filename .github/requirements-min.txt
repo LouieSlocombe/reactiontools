@@ -1,0 +1,11 @@
+# Minimum direct scientific and test/lint dependencies, exercised on Python 3.12.
+# Keep these pins aligned with the lower bounds in pyproject.toml.
+# Git dependencies and dependencies without declared floors are resolved normally.
+ase==3.25.0
+matplotlib==3.8.4
+mdtraj==1.10.2
+numpy==2.0.0
+pandas==2.2.2
+pytest==8.0.0
+ruff==0.1.0
+scipy==1.16.0

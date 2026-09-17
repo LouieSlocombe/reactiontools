@@ -126,6 +126,11 @@ set of `integration` tests exercises real local socket transport when the
 runner permits it. ORCA and OpenMM checks skip when those optional dependencies
 are unavailable. Coverage is branch-aware and enforces the configured floor.
 
+CI tests Python 3.12–3.14 and also tests the minimum scientific, pytest and Ruff
+versions together on Python 3.12. To reproduce that environment, install with
+`pip install -c .github/requirements-min.txt -e .` in a fresh Python 3.12
+environment. Keep those constraints in step with the bounds in `pyproject.toml`.
+
 ## Citing
 
 If `reactiontools` is useful in your work, please cite it and whichever of the

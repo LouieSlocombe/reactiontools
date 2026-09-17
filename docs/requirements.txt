@@ -12,8 +12,8 @@ sphinx-design
 
 # Light runtime dependencies, present so autodoc renders real signatures and
 # intersphinx resolves the ASE and NumPy references the docstrings already use.
-ase>=3.23
-matplotlib
-numpy
-pandas
-scipy
+ase>=3.25
+matplotlib>=3.8.4
+numpy>=2.0
+pandas>=2.2.2
+scipy>=1.16

@@ -7,7 +7,7 @@ name = "reactiontools"
 dynamic = ["version"]
 description = "A centralised set of tools for looking at TS and NEB calculations"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 
@@ -31,16 +31,16 @@ keywords = [
 ]
 
 dependencies = [
-  "ase>=3.23",
+  "ase>=3.25",
   "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
-  "matplotlib",
-  "mdtraj",
-  "numpy",
-  "pandas",
-  "pytest",
+  "matplotlib>=3.8.4",
+  "mdtraj>=1.10.2",
+  "numpy>=2.0",
+  "pandas>=2.2.2",
+  "pytest>=8.0",
   "pytest-cov",
-  "ruff",
-  "scipy",
+  "ruff>=0.1.0",
+  "scipy>=1.16",
   "sella @ git+https://github.com/LouieSlocombe/sella.git",
 ]
 # ORCA is needed at runtime by reactiontools.tools_orca but is licensed
@@ -111,7 +111,7 @@ show_missing = true
 skip_covered = true
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 # These are upstream command-line scripts retained with their original style.
 extend-exclude = ["reactiontools/opes/*.py"]
 

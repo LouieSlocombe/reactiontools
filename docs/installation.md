@@ -34,15 +34,19 @@ PLUMED is built from source, and the Sol cluster route.
 
 ## Dependencies
 
-Installed requirements include `numpy`, `scipy`, `matplotlib`, `pandas`,
-`ase>=3.23` (the version where `NEB` moved to `ase.mep`), `mdtraj`, pytest and
-Ruff, plus two that come from git:
+Python 3.12 or newer is required. Installed requirements include `numpy>=2.0`,
+`scipy>=1.16`, `matplotlib>=3.8.4`, `pandas>=2.2.2`, `ase>=3.25`,
+`mdtraj>=1.10.2`, pytest and Ruff, plus two that come from git:
 [`sella`](https://github.com/LouieSlocombe/sella) (saddle-point refinement and
 IRC) and
 [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
 (used by `prepare_neb`, `quick_guess_path` and `quick_guess_ts`).
 `conda_install.sh` sets both up as editable checkouts beside this repository;
 a plain `pip install` takes them from GitHub instead.
+
+The Python, ASE and SciPy minimums follow the Geodesic fork's requirements.
+NumPy 2 provides the trapezoidal integration used for basin free energies;
+the Matplotlib, pandas and MDTraj minimums support NumPy 2.
 
 Three dependencies fall outside `pip install` and are only needed by the
 functions named:
