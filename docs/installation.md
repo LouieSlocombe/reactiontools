@@ -1,6 +1,17 @@
 # Installation
 
-One command, from the repository root:
+Into an existing environment, straight from GitHub:
+
+```bash
+pip install git+https://github.com/LouieSlocombe/reactiontools.git@v1.0.0
+```
+
+That brings in the Python side, `geodesic_interpolate` and `sella` included.
+Drop the `@v1.0.0` to track `main`. PLUMED and ORCA fall outside `pip` and are
+covered under [Dependencies](#dependencies).
+
+For everything at once — environment, PLUMED and the package — one command from
+the repository root:
 
 ```bash
 bash build_tools/conda_install.sh
@@ -34,15 +45,26 @@ PLUMED is built from source, and the Sol cluster route.
 
 ## Dependencies
 
-Python 3.12 or newer is required. Installed requirements include `numpy>=2.0`,
-`scipy>=1.16`, `matplotlib>=3.8.4`, `pandas>=2.2.2`, `ase>=3.25`,
-`mdtraj>=1.10.2`, pytest and Ruff, plus two that come from git:
+Python 3.12 or newer is required. Installed requirements are `numpy>=2.0`,
+`scipy>=1.16`, `matplotlib>=3.8.4`, `pandas>=2.2.2`, `ase>=3.25` and
+`mdtraj>=1.10.2`, plus two that come from git:
 [`sella`](https://github.com/LouieSlocombe/sella) (saddle-point refinement and
 IRC) and
 [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
 (used by `prepare_neb`, `quick_guess_path` and `quick_guess_ts`).
 `conda_install.sh` sets both up as editable checkouts beside this repository;
 a plain `pip install` takes them from GitHub instead.
+
+Those two git dependencies are also why `reactiontools` is installed from
+GitHub rather than PyPI, which rejects distributions whose metadata carries a
+direct URL requirement.
+
+The test runner and the linter are not runtime dependencies. To run the suite,
+install the `dev` extra:
+
+```bash
+pip install -e ".[dev]"
+```
 
 The Python, ASE and SciPy minimums follow the Geodesic fork's requirements.
 NumPy 2 provides the trapezoidal integration used for basin free energies;

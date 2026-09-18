@@ -61,6 +61,7 @@ quickstart
 guide/index
 api/index
 citing
+changelog
 ```
 
 ```{toctree}

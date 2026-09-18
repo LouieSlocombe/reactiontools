@@ -1,0 +1,33 @@
+# Renders the "Cite this repository" button on GitHub. The full reference list
+# -- this package plus every code and method it wraps -- is in CITATIONS.bib;
+# docs/citing.md says which entry to use for what.
+cff-version: 1.2.0
+message: >-
+  If reactiontools is useful in your work, please cite it and whichever of the
+  codes it wraps you actually exercised. See CITATIONS.bib and docs/citing.md.
+title: "reactiontools: tools for transition-state and NEB calculations"
+abstract: >-
+  A calculator-agnostic Python package for reaction-path work with ASE:
+  interpolating and relaxing nudged elastic bands, refining the transition
+  state to a true saddle point, following the intrinsic reaction coordinate,
+  driving PLUMED metadynamics and the collective variables it is biased along,
+  and producing publication-ready figures.
+type: software
+authors:
+  - family-names: Slocombe
+    given-names: Louie
+    email: louies@hotmail.co.uk
+version: 1.0.0
+date-released: "2026-09-18"
+license: MIT
+repository-code: "https://github.com/LouieSlocombe/reactiontools"
+url: "https://reactiontools.readthedocs.io"
+keywords:
+  - chemistry
+  - computational-chemistry
+  - transition-state
+  - nudged-elastic-band
+  - metadynamics
+  - plumed
+  - orca
+  - ase

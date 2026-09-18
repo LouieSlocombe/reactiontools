@@ -24,7 +24,16 @@ from EMT to a machine-learned potential to a DFT code.
 
 ## Installation
 
-One command, from the repository root:
+Into an existing environment, straight from GitHub:
+
+```bash
+pip install git+https://github.com/LouieSlocombe/reactiontools.git@v1.0.0
+```
+
+That brings the Python side in, `geodesic_interpolate` and `sella` included.
+PLUMED and ORCA are separate — see below.
+
+For everything at once, one command from the repository root:
 
 ```bash
 bash build_tools/conda_install.sh
@@ -116,6 +125,13 @@ Full documentation is at **[reactiontools.readthedocs.io](https://reactiontools.
 
 ## Testing
 
+The test runner and the linter are not runtime dependencies; install the `dev`
+extra to get them:
+
+```bash
+pip install -e ".[dev]"
+```
+
 ```bash
 pytest --cov
 ```
@@ -128,7 +144,7 @@ are unavailable. Coverage is branch-aware and enforces the configured floor.
 
 CI tests Python 3.12–3.14 and also tests the minimum scientific, pytest and Ruff
 versions together on Python 3.12. To reproduce that environment, install with
-`pip install -c .github/requirements-min.txt -e .` in a fresh Python 3.12
+`pip install -c .github/requirements-min.txt -e ".[dev]"` in a fresh Python 3.12
 environment. Keep those constraints in step with the bounds in `pyproject.toml`.
 
 ## Citing

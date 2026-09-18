@@ -37,25 +37,37 @@ dependencies = [
   "mdtraj>=1.10.2",
   "numpy>=2.0",
   "pandas>=2.2.2",
-  "pytest>=8.0",
-  "pytest-cov",
-  "ruff>=0.1.0",
   "scipy>=1.16",
   "sella @ git+https://github.com/LouieSlocombe/sella.git",
 ]
 # ORCA is needed at runtime by reactiontools.tools_orca but is licensed
 # separately and cannot be installed from PyPI; see build_tools/README.md.
+#
+# The two git+https dependencies keep this distribution off PyPI, which rejects
+# direct URL requirements. Install from GitHub instead; see docs/installation.md.
 
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Physics",
 ]
 
 [project.optional-dependencies]
+# The test runner and linter CI runs; not needed to use the package.
+# Keep the floors in step with .github/requirements-min.txt.
+dev = [
+  "pytest>=8.0",
+  "pytest-cov",
+  "ruff>=0.1.0",
+]
+
 # Mirrors the Sphinx half of docs/requirements.txt, which is what ReadTheDocs
 # installs; keep the two in step.
 docs = [

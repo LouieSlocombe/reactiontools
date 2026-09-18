@@ -60,13 +60,14 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             .github/requirements-min.txt
-      # Pulls sella and geodesic_interpolate from git, and mdtraj wheels.
+      # Pulls sella and geodesic_interpolate from git, and mdtraj wheels. The
+      # `dev` extra carries pytest and Ruff, which are not runtime dependencies.
       - name: Install current dependencies
         if: matrix.dependencies == 'latest'
-        run: pip install -e .
+        run: pip install -e ".[dev]"
       - name: Install minimum dependencies
         if: matrix.dependencies == 'minimum'
-        run: pip install -c .github/requirements-min.txt -e .
+        run: pip install -c .github/requirements-min.txt -e ".[dev]"
       - run: pip check
       - name: Lint with the minimum Ruff version
         if: matrix.dependencies == 'minimum'
