@@ -115,7 +115,6 @@ from ase.geometry import complete_cell, minkowski_reduce
 from ase.io.trajectory import Trajectory, TrajectoryWriter
 from ase.optimize.optimize import Optimizer
 from ase.utils import basestring
-from ase.visualize import view
 from scipy import sparse
 from scipy.integrate import LSODA
 from scipy.linalg import (
@@ -5818,7 +5817,6 @@ class InternalPES(PES):
             if self.bad_int is not None:
                 break
             if ode.nfev > 1000:
-                view(self.atoms + self.dummies)
                 raise RuntimeError("Geometry update ODE is taking too long "
                                    "to converge!")
 

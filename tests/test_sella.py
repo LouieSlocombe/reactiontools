@@ -805,7 +805,18 @@ def test_PES(pes_class, name, use_traj, fixed_bonds, tmp_path, request):
         request.node.add_marker(
             pytest.mark.xfail(
                 raises=RuntimeError,
-                strict=True,
+                # Not strict, because whether this trips is a floating-point
+                # knife-edge. The geodesic ODE in set_x() stalls on a ~1e-4
+                # step taken during the finite-difference Hessian probe --
+                # LSODA drops to a ~1e-11 step size and burns its whole
+                # evaluation budget covering 0.2% of the interval -- but only
+                # when the probe direction lands in the stiff region, and that
+                # turns on the last bits of the Ritz vectors. Patch releases
+                # of the dependencies flip it either way: it raises under
+                # Python 3.14 / SciPy 1.18.0 / JAX 0.11.0 and converges under
+                # Python 3.12 / SciPy 1.18.1 / JAX 0.11.2. A strict marker
+                # just fails whichever CI legs happen to get through.
+                strict=False,
                 reason="upstream: geometry update ODE does not converge "
                        "for C6H6 in internal coordinates",
             )
