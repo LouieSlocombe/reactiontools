@@ -4,9 +4,9 @@
 # alongside reactiontools is cloned once and installed in editable mode instead
 # of being pulled fresh from GitHub on every install.
 #
-# geodesic_interpolate used to be here too. It is now vendored into the package
-# as reactiontools/_geodesic, so cloning it would install a copy that nothing
-# imports; to change that code, edit it in place and keep the fork in step.
+# geodesic_interpolate used to be here too. The interpolation is now part of the
+# package, as reactiontools/tools_geodesic.py, so cloning it would install a copy
+# that nothing imports; to change that code, edit the module.
 
 # name=url pairs. The name is both the directory the repo is cloned into and the
 # module the install is checked against.

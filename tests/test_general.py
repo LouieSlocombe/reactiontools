@@ -20,7 +20,17 @@ _PACKAGE = Path(reactiontools.__file__).resolve().parent
 #: ``tools_path`` is deliberately not in this set: it reads COLVAR files
 #: through ``read_plumed_file``, so it depends on ``tools_fes`` by rights, and
 #: it needs mdtraj anyway -- a heavier import than matplotlib.
-_PLOT_FREE = {"tools_units", "tools_plumed", "tools_cv", "tools_io"}
+#:
+#: ``tools_geodesic`` is in it for a second reason as well as its own: it sits
+#: at the bottom of the layering, under ``tools_reaction``, so anything it
+#: reached for would be imported by every workflow in the package.
+_PLOT_FREE = {
+    "tools_units",
+    "tools_plumed",
+    "tools_cv",
+    "tools_io",
+    "tools_geodesic",
+}
 
 
 def _source_of(name: str) -> Path | None:
@@ -166,6 +176,13 @@ def test_public_api_is_complete() -> None:
         "get_vibrations",
         "quick_guess_path",
         "quick_guess_ts",
+        # tools_geodesic
+        "geodesic_interpolate",
+        "Geodesic",
+        "redistribute",
+        "morse_scaler",
+        "align_geom",
+        "align_path",
         # tools_geometry
         "SeedSummary",
         "SeedWarning",

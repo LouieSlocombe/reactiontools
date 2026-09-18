@@ -56,30 +56,33 @@ Python 3.12 or newer is required, and `pip install reactiontools` brings in
 `numpy>=2.0`, `scipy>=1.16`, `matplotlib>=3.8.4`, `pandas>=2.2.2`, `ase>=3.25`
 and `mdtraj>=1.10.2`.
 
-The Python, ASE and SciPy minimums follow the geodesic code's requirements.
+The Python, ASE and SciPy minimums follow what `tools_geodesic` needs.
 NumPy 2 provides the trapezoidal integration used for basin free energies;
 the Matplotlib, pandas and MDTraj minimums support NumPy 2.
 
 ### Geodesic interpolation
 
 Nothing to install. `prepare_neb(geo_int=True)`, `quick_guess_path`,
-`quick_guess_ts` and `seed_product_from_ts` use a copy of
-[`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
-vendored into the package as `reactiontools._geodesic`. It is MIT licensed and
-copyright Xiaolei Zhu, whose licence ships with every copy of this package, and
-it is still `zhu2019geodesic` you cite when you use it.
+`quick_guess_ts` and `seed_product_from_ts` are built on `tools_geodesic`,
+which is part of the package like any other module. `geodesic_interpolate` is
+its entry point, and `Geodesic`, `redistribute` and the scalers that set the
+metric are exported alongside it.
 
-It is vendored rather than depended on because the version on PyPI under the
-name `geodesic-interpolate` exposes only the lower-level `Geodesic` and
-`redistribute`, without the ASE-aware entry point these functions call, and a
-git dependency on the fork that does have it would keep this package off PyPI
+It is derived from
+[`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate)
+by Xiaolei Zhu, MIT licensed as the rest of the package is — the notice is at
+the foot of `LICENSE` — and it is still `zhu2019geodesic` you cite when you use
+it. It lives here rather than being depended on because the version on PyPI
+under the name `geodesic-interpolate` exposes only the lower-level `Geodesic`
+and `redistribute`, without the ASE-aware entry point these functions call, and
+a git dependency on a fork that does have it would keep this package off PyPI
 altogether.
 
 ### Sella
 
 [`sella`](https://github.com/LouieSlocombe/sella) is **not** installed with the
-package, for the same reason: the fork these workflows are built against is not
-on PyPI. Install it by hand:
+package, for the same PyPI reason: the fork these workflows are built against is
+not on PyPI. Install it by hand:
 
 ```bash
 pip install git+https://github.com/LouieSlocombe/sella.git

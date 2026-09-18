@@ -23,6 +23,12 @@ never tagged, so everything the package does arrives here at once.
   of a band into a true saddle point with Sella, `optimise_irc` to follow the
   intrinsic reaction coordinate away from it, and `summarise_neb` for the
   forward barrier, reverse barrier and reaction energy.
+- `tools_geodesic` — the interpolation `prepare_neb(geo_int=True)`,
+  `quick_guess_path` and `quick_guess_ts` are built on. `geodesic_interpolate`
+  takes two end states, or more, to a path that is short in a metric of scaled
+  inter-atomic distances rather than in Cartesian space, so atoms do not run
+  through each other on the way across; `redistribute` and `Geodesic` are the
+  two stages it runs, and the scalers that set the metric are exported too.
 - `tools_geometry` — build end states: `swap_bonding_configuration` to move
   protons across their hydrogen bonds, `flip_and_face_bases` for stacked
   dimers, and `seed_product_from_ts` / `seed_minima_from_ts` to find the minima
@@ -79,15 +85,17 @@ Neither of the two dependencies that used to come from git is declared as such
 any more. PyPI rejects any distribution whose metadata carries a direct URL, so
 this is what makes `pip install reactiontools` possible at all.
 
-- **geodesic_interpolate is vendored** into the package as
-  `reactiontools._geodesic`, so `prepare_neb(geo_int=True)`, `quick_guess_path`,
-  `quick_guess_ts` and `seed_product_from_ts` need nothing installed alongside.
-  It is a copy of [the fork](https://github.com/LouieSlocombe/geodesic_interpolate),
-  MIT licensed and copyright Xiaolei Zhu, and its licence ships with every copy
-  of this package. The distribution published on PyPI under the name
-  `geodesic-interpolate` was not usable in its place: it exposes only the
-  lower-level `Geodesic` and `redistribute`, without the ASE-aware entry point
-  these functions call. Keep citing `zhu2019geodesic` for it.
+- **geodesic_interpolate is no longer a dependency.** The interpolation is part
+  of the package, as `tools_geodesic`, so `prepare_neb(geo_int=True)`,
+  `quick_guess_path`, `quick_guess_ts` and `seed_product_from_ts` need nothing
+  installed alongside. It is derived from
+  [`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate),
+  MIT licensed and copyright Xiaolei Zhu; that notice is at the foot of
+  `LICENSE` and ships with every copy of this package. The distribution
+  published on PyPI under the name `geodesic-interpolate` was not usable in its
+  place: it exposes only the lower-level `Geodesic` and `redistribute`, without
+  the ASE-aware entry point these functions call. Keep citing `zhu2019geodesic`
+  for it.
 - **sella is no longer installed with the package.** Only `optimise_ts`,
   `optimise_irc` and `sella_ts_search` use it, they import it on demand, and
   each raises an `ImportError` carrying the install command when it is missing:

@@ -41,7 +41,7 @@ pip install git+https://github.com/LouieSlocombe/sella.git
 
 Without it, only `optimise_ts`, `optimise_irc` and `sella_ts_search` are
 unavailable, and each says so with the command to fix it. Geodesic
-interpolation needs nothing extra — it is vendored into the package.
+interpolation needs nothing extra — it is part of the package.
 
 For everything at once, including PLUMED built with the OPES module, one
 command from the repository root:
@@ -170,9 +170,8 @@ codes it wraps you actually exercised. Every entry is in
 
 MIT — see [LICENSE](LICENSE).
 
-`reactiontools/_geodesic/` is a vendored copy of
-[`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate),
-also MIT, copyright Xiaolei Zhu; its licence sits beside the code in
-[reactiontools/_geodesic/LICENSE](reactiontools/_geodesic/LICENSE).
-`reactiontools/opes/` holds PLUMED's OPES post-processing scripts, which carry
-their own upstream licence.
+`reactiontools/tools_geodesic.py` is derived from
+[`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate),
+also MIT, copyright Xiaolei Zhu; the notice is at the foot of
+[LICENSE](LICENSE). `reactiontools/opes/` holds PLUMED's OPES post-processing
+scripts, which carry their own upstream licence.

@@ -1,6 +1,7 @@
 """Tools for transition-state, NEB and metadynamics calculations.
 
-The package is organised into ten modules, all of which are re-exported here:
+The package is organised into eleven modules, all of which are re-exported
+here:
 
 ``tools_reaction``
     Build, optimise and post-process nudged elastic band (NEB) paths, either
@@ -9,6 +10,14 @@ The package is organised into ten modules, all of which are re-exported here:
     band into a true saddle point and follow the intrinsic reaction coordinate
     away from it, and take quick geodesic guesses at a path or a transition
     state.
+``tools_geodesic``
+    The interpolation those quick guesses and ``prepare_neb`` are built on.
+    Given two end states -- or more, when an intermediate is already known --
+    ``geodesic_interpolate`` returns a path that is short in a metric of
+    scaled inter-atomic distances rather than in Cartesian space, which is
+    what keeps atoms from passing through each other on the way across.
+    Beneath it sit the two stages it runs, ``redistribute`` and ``Geodesic``,
+    and the scalers that set the metric.
 ``tools_orca``
     Build ASE ORCA calculators from a few presets -- named levels of theory in
     the ``orca_preset_*`` dictionaries -- optimise a geometry with ORCA's own
@@ -80,8 +89,10 @@ use it. Two things the package uses are not installed with it:
     Everything in ``tools_orca`` shells out to it. Licensed separately and
     installed by hand; see ``build_tools/README.md``.
 
-Geodesic interpolation needs nothing extra: it is vendored as
-``reactiontools._geodesic``, MIT licensed and copyright Xiaolei Zhu.
+Geodesic interpolation needs nothing extra. ``tools_geodesic`` is part of
+the package like any other module; it is derived from ``geodesic-interpolate``
+by Xiaolei Zhu and MIT licensed as the rest of the package is, and it is still
+``zhu2019geodesic`` you cite when you use it.
 """
 
 from .tools_cv import (
@@ -118,6 +129,24 @@ from .tools_fes import (
     plot_plumed_fes,
     read_plumed_file,
     summarise_fes,
+)
+from .tools_geodesic import (
+    SWEEP_ABOVE_N_ATOMS,
+    Geodesic,
+    align_geom,
+    align_path,
+    align_path_to,
+    compute_rij,
+    compute_wij,
+    elu_scaler,
+    from_ase_atoms,
+    geodesic_interpolate,
+    get_bond_list,
+    morse_scaler,
+    read_xyz,
+    redistribute,
+    to_ase_atoms,
+    write_xyz,
 )
 from .tools_geometry import (
     SeedSummary,
@@ -253,6 +282,23 @@ __all__ = [
     "get_vibrations",
     "quick_guess_path",
     "quick_guess_ts",
+    # tools_geodesic
+    "SWEEP_ABOVE_N_ATOMS",
+    "Geodesic",
+    "geodesic_interpolate",
+    "redistribute",
+    "morse_scaler",
+    "elu_scaler",
+    "align_geom",
+    "align_path",
+    "align_path_to",
+    "get_bond_list",
+    "compute_rij",
+    "compute_wij",
+    "from_ase_atoms",
+    "to_ase_atoms",
+    "read_xyz",
+    "write_xyz",
     # tools_orca
     "orca_calc_preset",
     "orca_optimise_atoms",

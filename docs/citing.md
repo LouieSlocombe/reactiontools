@@ -8,7 +8,7 @@ the codes it wraps you actually exercised — all in
 | --- | --- | --- |
 | `Slocombe_reactiontools` | `reactiontools` itself | always |
 | `larsen2017atomic` | [ASE](https://wiki.fysik.dtu.dk/ase/) | NEB, optimisation and I/O throughout |
-| `zhu2019geodesic` | [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate), vendored as `reactiontools._geodesic` | `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts`, `seed_product_from_ts` |
+| `zhu2019geodesic` | [`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate), which `tools_geodesic` is derived from | `geodesic_interpolate`, `prepare_neb(geo_int=True)`, `quick_guess_path`, `quick_guess_ts`, `seed_product_from_ts` |
 | `hermes2022sella` | [Sella](https://github.com/zadorlab/sella) | `optimise_ts`, `optimise_irc`, `sella_ts_search` |
 | `plumed2` | [PLUMED](https://www.plumed.org/) | `run_sum_hills`, `plumed_calculator` |
 | `laio2002escaping` | The metadynamics method | `plumed_metad_input` |

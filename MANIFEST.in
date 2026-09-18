@@ -4,9 +4,6 @@ include LICENSE
 include CITATION.cff
 include CITATIONS.bib
 
-# The MIT licence of the vendored geodesic code, which has to travel with it.
-include reactiontools/_geodesic/LICENSE
-
 recursive-include build_tools *.yml *.md *.sh
 # build_tools/sources holds the PLUMED checkout conda_install.sh builds from.
 # It is gitignored, but MANIFEST.in reads the working tree, so without this an

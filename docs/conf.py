@@ -24,9 +24,9 @@ project = "reactiontools"
 author = "Louie Slocombe"
 copyright = "2026, Louie Slocombe"
 
-# Parsed rather than imported: autodoc_mock_imports is not in effect while this
-# file runs, so importing the package here would hit the real
-# geodesic_interpolate -- a git dependency the docs environment does not have.
+# Parsed rather than imported, so the version can be read without the package
+# and everything it pulls in having to import cleanly first: autodoc_mock_imports
+# is not in effect while this file runs.
 release = re.search(
     r'^__version__ = "([^"]+)"',
     (_ROOT / "reactiontools" / "__init__.py").read_text(),
@@ -60,11 +60,11 @@ autodoc_default_options = {"members": True, "show-inheritance": True}
 autodoc_member_order = "bysource"
 autodoc_typehints = "signature"
 
-# geodesic_interpolate is imported at module scope by tools_reaction and comes
-# from git; sella and mdtraj are imported lazily inside the functions that use
-# them; plumed is reached only through ase.calculators.plumed. None appears in
-# a signature or a default, so mocking all four costs nothing.
-autodoc_mock_imports = ["geodesic_interpolate", "sella", "mdtraj", "plumed"]
+# sella and mdtraj are imported lazily inside the functions that use them, and
+# plumed is reached only through ase.calculators.plumed. None appears in a
+# signature or a default, so mocking all three costs nothing and keeps the docs
+# buildable from the light half of the dependency set.
+autodoc_mock_imports = ["sella", "mdtraj", "plumed"]
 
 autosummary_generate = False
 add_module_names = False

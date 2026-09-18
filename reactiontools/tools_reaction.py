@@ -47,7 +47,7 @@ from ase.parallel import world
 from ase.vibrations import Vibrations
 from scipy.interpolate import CubicSpline
 
-from . import _geodesic as gi
+from .tools_geodesic import geodesic_interpolate
 
 #: Sella is not a declared dependency -- the fork these workflows are built
 #: against is not on PyPI, and a direct URL requirement would keep this package
@@ -518,7 +518,7 @@ def _build_band(
     neb_images = [reactant] + [reactant.copy() for _ in range(n_images - 2)] + [product]
 
     if geo_int:
-        neb_images = gi.geodesic_interpolate(neb_images, n_images=n_images)
+        neb_images = geodesic_interpolate(neb_images, n_images=n_images)
 
     neb = NEB(
         neb_images,
@@ -1874,7 +1874,7 @@ def quick_guess_path(
     list of ase.Atoms
         Interpolated path.
     """
-    return gi.geodesic_interpolate([reactant, product], n_images=n_images)
+    return geodesic_interpolate([reactant, product], n_images=n_images)
 
 
 def quick_guess_ts(reactant: Atoms, product: Atoms, n_images: int = 25) -> Atoms:
@@ -1894,5 +1894,5 @@ def quick_guess_ts(reactant: Atoms, product: Atoms, n_images: int = 25) -> Atoms
     ase.Atoms
         Midpoint image of the interpolated path.
     """
-    path = gi.geodesic_interpolate([reactant, product], n_images=n_images)
+    path = geodesic_interpolate([reactant, product], n_images=n_images)
     return path[n_images // 2]

@@ -62,7 +62,7 @@ jobs:
             .github/requirements-min.txt
       # The `dev` extra carries pytest and Ruff, which are not runtime
       # dependencies. Nothing here comes from git: geodesic interpolation is
-      # vendored, and sella is installed separately below.
+      # part of the package, and sella is installed separately below.
       - name: Install current dependencies
         if: matrix.dependencies == 'latest'
         run: pip install -e ".[dev]"

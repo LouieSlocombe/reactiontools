@@ -94,26 +94,22 @@ direct URLs. So a plain `pip install reactiontools` leaves it out, and only
 `optimise_ts`, `optimise_irc` and `sella_ts_search` notice — each raises an
 `ImportError` carrying the install command.
 
-### The vendored geodesic code
+### The geodesic code
 
-`geodesic_interpolate` used to be a second editable checkout here. It is now
-vendored into the package as `reactiontools/_geodesic`, for the same PyPI reason
-plus one more: the distribution published on PyPI as `geodesic-interpolate`
-exposes only the lower-level `Geodesic` and `redistribute`, not the ASE-aware
-entry point this package calls.
+`geodesic_interpolate` used to be a second editable checkout here, and then a
+vendored subpackage. It is now `reactiontools/tools_geodesic.py`, an ordinary
+module of this package: linted, covered by `tests/test_geodesic.py` and
+documented alongside its siblings. Change it the way you would change any other
+module — there is nothing to copy across and no fork to keep in step.
 
-It is a copy of [the fork](https://github.com/LouieSlocombe/geodesic_interpolate),
-MIT licensed and copyright Xiaolei Zhu, with the licence kept beside it. To move
-a change across, edit it in the fork, run the fork's own tests, then copy the
-modules over:
+It got here for the same PyPI reason as sella, plus one more: the distribution
+published on PyPI as `geodesic-interpolate` exposes only the lower-level
+`Geodesic` and `redistribute`, not the ASE-aware entry point this package calls.
 
-```bash
-cp ../geodesic_interpolate/geodesic_interpolate/*.py reactiontools/_geodesic/
-```
-
-and restore `reactiontools/_geodesic/__init__.py`, which differs from the fork's:
-it drops the `importlib.metadata` version lookup, which has no distribution to
-find once vendored. Then run this package's suite.
+It is derived from
+[`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate),
+MIT licensed and copyright Xiaolei Zhu. That notice is at the foot of the
+repository `LICENSE` and has to stay there.
 
 ## Sol cluster
 

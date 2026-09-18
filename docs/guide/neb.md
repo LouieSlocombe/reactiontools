@@ -14,10 +14,16 @@ about:
   for a molecule tumbling in vacuum, but wrong for a periodic slab whose atoms
   are already pinned by a constraint — leaving it on stops the band converging.
   Set `rm_ro_trans=False` for constrained or periodic systems.
-- **`geo_int`** uses geodesic interpolation. With `geo_int=False` the band is
-  built by linear interpolation refined with IDPP, which is usually fine for
-  a small displacement like the adatom hop in the
-  [quickstart](../quickstart.md).
+- **`geo_int`** uses geodesic interpolation, which finds the shortest path in
+  a metric of scaled inter-atomic distances rather than in Cartesian space, so
+  atoms do not run through each other on the way across. With `geo_int=False`
+  the band is built by linear interpolation refined with IDPP, which is usually
+  fine for a small displacement like the adatom hop in the
+  [quickstart](../quickstart.md). `prepare_neb` takes the interpolation as it
+  comes; call
+  [`geodesic_interpolate`](../api/tools_geodesic.md) yourself and hand the
+  images to `optimise_neb` if you need to tune the metric, the tolerance or
+  the seed.
 - **`parallel`** evaluates the interior images concurrently instead of one at
   a time, for both the initial energies and every force call `optimise_neb`
   makes afterwards. Without an MPI launcher this runs each image's calculator

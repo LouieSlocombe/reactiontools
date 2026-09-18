@@ -15,6 +15,7 @@ Every name below is also re-exported at the top level, so
 .. autosummary::
 
    tools_reaction
+   tools_geodesic
    tools_orca
    tools_geometry
    tools_io
@@ -33,6 +34,7 @@ Every name below is also re-exported at the top level, so
 :maxdepth: 1
 
 tools_reaction
+tools_geodesic
 tools_orca
 tools_geometry
 tools_io
