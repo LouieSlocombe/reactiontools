@@ -1,13 +1,16 @@
 #!/bin/bash
 # Shared handling of the dependencies that come from git rather than conda-forge,
-# sourced by conda_install.sh and custom_install_sol.sh. Both are forks that get
-# edited alongside reactiontools, so they are cloned once and installed in
-# editable mode instead of being pulled fresh from GitHub on every install.
+# sourced by conda_install.sh and custom_install_sol.sh. A fork that gets edited
+# alongside reactiontools is cloned once and installed in editable mode instead
+# of being pulled fresh from GitHub on every install.
+#
+# geodesic_interpolate used to be here too. It is now vendored into the package
+# as reactiontools/_geodesic, so cloning it would install a copy that nothing
+# imports; to change that code, edit it in place and keep the fork in step.
 
 # name=url pairs. The name is both the directory the repo is cloned into and the
 # module the install is checked against.
 EDITABLE_REPOS=(
-    "geodesic_interpolate=https://github.com/LouieSlocombe/geodesic_interpolate.git"
     "sella=https://github.com/LouieSlocombe/sella.git"
 )
 

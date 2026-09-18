@@ -1,0 +1,97 @@
+# Publishes to PyPI when a v* tag is pushed.
+#
+# Authentication is PyPI's Trusted Publishing, so there is no API token in the
+# repository secrets. Before the first run this has to be set up once, at
+# https://pypi.org/manage/account/publishing/, as a pending publisher:
+#
+#   PyPI project name  reactiontools
+#   Owner              LouieSlocombe
+#   Repository name    reactiontools
+#   Workflow name      release.yml
+#   Environment name   pypi
+#
+# The `pypi` environment is also where a required reviewer can be set, so that
+# a tag builds and then waits for a human before anything is published.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build and check the distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # A tag that disagrees with the package is the one mistake that cannot be
+      # undone after the fact: PyPI never lets a version be reuploaded. Catch it
+      # before anything is built.
+      - name: Check the tag matches __version__
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(python -c 'import re,pathlib; print(re.search(r"^__version__ = \"([^\"]+)\"", pathlib.Path("reactiontools/__init__.py").read_text(), re.M).group(1))')"
+          if [ "${tag}" != "${pkg}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match __version__ ${pkg}" >&2
+            exit 1
+          fi
+          echo "Releasing ${pkg}"
+
+      - name: Build the sdist and wheel
+        run: pipx run build
+
+      # --strict fails on a README that PyPI would refuse to render. It also
+      # rejects any direct URL requirement, which is what keeps a git dependency
+      # from reaching the upload and failing there instead.
+      - name: Check the metadata
+        run: pipx run twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/reactiontools
+    permissions:
+      # Mints the OIDC token Trusted Publishing authenticates with.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Attach the distributions to the GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # Creates the release if the tag has none yet, and leaves the notes to be
+      # written by hand or generated from CHANGELOG.md.
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 \
+            || gh release create "${GITHUB_REF_NAME}" --title "reactiontools ${GITHUB_REF_NAME#v}" --notes "See CHANGELOG.md."
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber

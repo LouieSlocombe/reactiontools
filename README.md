@@ -1,6 +1,9 @@
 # reactiontools
 
+[![PyPI](https://img.shields.io/pypi/v/reactiontools)](https://pypi.org/project/reactiontools/)
+[![Python versions](https://img.shields.io/pypi/pyversions/reactiontools)](https://pypi.org/project/reactiontools/)
 [![Documentation Status](https://readthedocs.org/projects/reactiontools/badge/?version=latest)](https://reactiontools.readthedocs.io/en/latest/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A centralised set of tools for looking at transition state (TS) and nudged
 elastic band (NEB) calculations.
@@ -24,29 +27,36 @@ from EMT to a machine-learned potential to a DFT code.
 
 ## Installation
 
-Into an existing environment, straight from GitHub:
-
 ```bash
-pip install git+https://github.com/LouieSlocombe/reactiontools.git@v1.0.0
+pip install reactiontools
 ```
 
-That brings the Python side in, `geodesic_interpolate` and `sella` included.
-PLUMED and ORCA are separate — see below.
+That covers everything except the saddle-point searches. Those use
+[Sella](https://github.com/LouieSlocombe/sella), which is not on PyPI in the
+form they need and so is one more command:
 
-For everything at once, one command from the repository root:
+```bash
+pip install git+https://github.com/LouieSlocombe/sella.git
+```
+
+Without it, only `optimise_ts`, `optimise_irc` and `sella_ts_search` are
+unavailable, and each says so with the command to fix it. Geodesic
+interpolation needs nothing extra — it is vendored into the package.
+
+For everything at once, including PLUMED built with the OPES module, one
+command from the repository root:
 
 ```bash
 bash build_tools/conda_install.sh
 ```
 
-That creates the `reactiontools` conda environment, compiles PLUMED with the
-OPES module and the matching Python bindings into it, and installs this package
-— along with `geodesic_interpolate` and `sella`, cloned next to this repository
-— in editable mode.
+That creates the `reactiontools` conda environment, compiles PLUMED and the
+matching Python bindings into it, and installs this package — along with
+`sella`, cloned next to this repository — in editable mode.
 
-For the environment-only route, the three dependencies that fall outside
-`pip install` (the `plumed` executable, `py-plumed` and ORCA), and the Sol
-cluster, see [Installation](https://reactiontools.readthedocs.io/en/latest/installation.html) or
+For the environment-only route, the dependencies that fall outside `pip`
+(the `plumed` executable, `py-plumed` and ORCA), and the Sol cluster, see
+[Installation](https://reactiontools.readthedocs.io/en/latest/installation.html) or
 [build_tools/README.md](build_tools/README.md).
 
 ## Quickstart
@@ -139,8 +149,10 @@ pytest --cov
 The suite builds its own structures with `ase.build` and evaluates them with
 EMT. Offline unit tests cover orchestration without opening sockets; a small
 set of `integration` tests exercises real local socket transport when the
-runner permits it. ORCA and OpenMM checks skip when those optional dependencies
-are unavailable. Coverage is branch-aware and enforces the configured floor.
+runner permits it. Checks needing sella, ORCA, PLUMED or OpenMM skip when those
+are unavailable, so a plain `pip install -e ".[dev]"` runs the suite green —
+install sella as well to pick up the saddle-point and IRC tests. Coverage is
+branch-aware and enforces the configured floor.
 
 CI tests Python 3.12–3.14 and also tests the minimum scientific, pytest and Ruff
 versions together on Python 3.12. To reproduce that environment, install with
@@ -157,3 +169,10 @@ codes it wraps you actually exercised. Every entry is in
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+`reactiontools/_geodesic/` is a vendored copy of
+[`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate),
+also MIT, copyright Xiaolei Zhu; its licence sits beside the code in
+[reactiontools/_geodesic/LICENSE](reactiontools/_geodesic/LICENSE).
+`reactiontools/opes/` holds PLUMED's OPES post-processing scripts, which carry
+their own upstream licence.

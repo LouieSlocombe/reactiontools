@@ -56,15 +56,43 @@ never tagged, so everything the package does arrives here at once.
   PLUMED with the OPES module and its Python bindings, and installs this
   package and its two git dependencies in editable mode.
 
+### Fixed
+
+- `seed_product_from_ts` decided whether the seed had moved anywhere by
+  comparing two RMSDs exactly. When the push covers no ground the seed *is* the
+  transition state, so those are one number computed two ways, and which came
+  out larger was decided by rounding in the Kabsch alignment — about 1e-16 Å,
+  either sign depending on the LAPACK underneath. On an unlucky build the
+  function stayed silent and reported `info["seeded"] = True` for a seed that
+  had not moved at all. Both the warning and the flag now allow a 1e-9 Å
+  tolerance, and stay exact complements of each other.
+
 ### Notes
 
 - `pytest`, `pytest-cov` and `ruff` moved out of the runtime dependencies into
   a `dev` extra; installing the package no longer pulls in a test runner and a
   linter. Install them with `pip install -e ".[dev]"`.
-- Two dependencies come from git — [`sella`](https://github.com/LouieSlocombe/sella)
-  and [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate) —
-  so the distribution is installed from GitHub rather than PyPI, which rejects
-  direct URL requirements.
+
+### Dependencies
+
+Neither of the two dependencies that used to come from git is declared as such
+any more. PyPI rejects any distribution whose metadata carries a direct URL, so
+this is what makes `pip install reactiontools` possible at all.
+
+- **geodesic_interpolate is vendored** into the package as
+  `reactiontools._geodesic`, so `prepare_neb(geo_int=True)`, `quick_guess_path`,
+  `quick_guess_ts` and `seed_product_from_ts` need nothing installed alongside.
+  It is a copy of [the fork](https://github.com/LouieSlocombe/geodesic_interpolate),
+  MIT licensed and copyright Xiaolei Zhu, and its licence ships with every copy
+  of this package. The distribution published on PyPI under the name
+  `geodesic-interpolate` was not usable in its place: it exposes only the
+  lower-level `Geodesic` and `redistribute`, without the ASE-aware entry point
+  these functions call. Keep citing `zhu2019geodesic` for it.
+- **sella is no longer installed with the package.** Only `optimise_ts`,
+  `optimise_irc` and `sella_ts_search` use it, they import it on demand, and
+  each raises an `ImportError` carrying the install command when it is missing:
+  `pip install git+https://github.com/LouieSlocombe/sella.git`. Everything else
+  works without it.
 
 [Unreleased]: https://github.com/LouieSlocombe/reactiontools/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/LouieSlocombe/reactiontools/releases/tag/v1.0.0

@@ -39,6 +39,7 @@ from reactiontools import (
     reaction_energy,
     sella_ts_search,
     tools_orca,
+    tools_reaction,
 )
 from reactiontools.tools_orca import (
     EH_TO_KCAL,
@@ -755,7 +756,11 @@ def test_sella_search_wires_the_calculator_and_optimizer(
             seen["run"] = kwargs
 
     monkeypatch.setattr(tools_orca, "orca_calculator", fake_calculator)
-    monkeypatch.setattr("sella.Sella", FakeSella)
+    # Patch the import helper rather than "sella.Sella": sella is not installed
+    # with the package, and patching it by name would need the real module here.
+    monkeypatch.setattr(
+        tools_reaction, "_import_sella", lambda name: (FakeSella, object)
+    )
 
     result = sella_ts_search(
         water,

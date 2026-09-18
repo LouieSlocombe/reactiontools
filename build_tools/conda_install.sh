@@ -12,9 +12,8 @@
 #
 #   ENV_NAME=reactiontools2 bash conda_install.sh
 #
-# geodesic_interpolate and sella are cloned next to this repository and installed
-# editable. Existing checkouts are used as they are, never wiped. Set SRC_DIR to
-# keep them somewhere else:
+# sella is cloned next to this repository and installed editable. An existing
+# checkout is used as it is, never wiped. Set SRC_DIR to keep it somewhere else:
 #
 #   SRC_DIR="${HOME}/src" bash conda_install.sh
 

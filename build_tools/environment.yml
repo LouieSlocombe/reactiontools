@@ -25,7 +25,9 @@ dependencies:
   # build_py_plumed regenerates the py-plumed C extension from its .pyx source.
   - cython
 
-# geodesic_interpolate and sella are deliberately absent: conda_install.sh clones
-# them next to this repository and installs them editable (see editable_repos.sh).
-# Creating this environment on its own leaves them out, and `pip install -e ..`
-# then pulls them from git, as pyproject.toml declares them.
+# sella is deliberately absent: conda_install.sh clones it next to this
+# repository and installs it editable (see editable_repos.sh). Creating this
+# environment on its own leaves it out, and `pip install -e ..` does not pull it
+# either -- pyproject.toml cannot declare a git dependency without keeping
+# reactiontools off PyPI, so sella is installed by hand. Only the saddle-point
+# searches need it; see docs/installation.md.

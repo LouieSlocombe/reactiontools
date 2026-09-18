@@ -55,6 +55,14 @@ from .tools_reaction import (
 #: copies of the same structure score about zero.
 _SEED_MIN_ALIGNMENT = 0.5
 
+#: Slack, in angstrom, on the comparison that decides whether the seed ended up
+#: any further from the reactant than the transition state already was. When
+#: every step clashed the seed *is* the transition state, so the two distances
+#: are one number computed two ways, and which of them comes out larger is
+#: decided by rounding in the Kabsch alignment -- around 1e-16 Å, and either
+#: sign depending on the LAPACK underneath. Anything below this is no movement.
+_SEED_RMSD_TOL = 1e-9
+
 
 def _alignment_positions(
     points: Sequence[Sequence[float]] | np.ndarray,
@@ -1458,7 +1466,7 @@ def seed_product_from_ts(
     rmsd_ts = atom_set_rmsd(seed, ts, align=True)
     ts_from_reactant = atom_set_rmsd(ts, reactant, align=True)
 
-    if rmsd_reactant <= ts_from_reactant:
+    if rmsd_reactant <= ts_from_reactant + _SEED_RMSD_TOL:
         warnings.warn(
             f"The seed is {rmsd_reactant:.3f} Å from the reactant, no further "
             f"than the transition state already was ({ts_from_reactant:.3f} "
@@ -1478,8 +1486,12 @@ def seed_product_from_ts(
             stacklevel=2,
         )
 
+    # The first half is the exact complement of the warning above, tolerance
+    # included: a seed that warned it went nowhere useful must not also be
+    # reported as successfully seeded.
     seed.info["seeded"] = bool(
-        rmsd_reactant > ts_from_reactant and alignment >= _SEED_MIN_ALIGNMENT
+        rmsd_reactant > ts_from_reactant + _SEED_RMSD_TOL
+        and alignment >= _SEED_MIN_ALIGNMENT
     )
     seed.info["seed_push"] = float(len(extrapolated) * step)
     seed.info["seed_alignment"] = alignment

@@ -22,8 +22,9 @@ Every ``optimise_*`` function records whether it reached its force criterion in
 :class:`ConvergenceWarning` when it did not; pass ``raise_on_unconverged=True``
 for a :class:`ConvergenceError` instead.
 
-Sella is installed with the package and imported on demand by the
-saddle-point searches, :func:`optimise_ts` and :func:`optimise_irc`.
+Sella is imported on demand by the saddle-point searches, :func:`optimise_ts`
+and :func:`optimise_irc`. It is not installed with the package; those two
+functions say how to install it if it is missing.
 """
 
 import copy
@@ -35,7 +36,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-import geodesic_interpolate as gi
 import numpy as np
 from ase import Atoms
 from ase.calculators.calculator import Calculator
@@ -47,9 +47,15 @@ from ase.parallel import world
 from ase.vibrations import Vibrations
 from scipy.interpolate import CubicSpline
 
+from . import _geodesic as gi
+
+#: Sella is not a declared dependency -- the fork these workflows are built
+#: against is not on PyPI, and a direct URL requirement would keep this package
+#: off it too -- so it is installed by hand and this says how.
 _SELLA_HINT = (
-    "{name} needs sella, which is not installed. "
-    "Reinstall reactiontools with its dependencies."
+    "{name} needs sella, which is not installed. It is not pulled in "
+    "automatically; install it with\n"
+    "    pip install git+https://github.com/LouieSlocombe/sella.git"
 )
 
 
@@ -1180,8 +1186,6 @@ def prepare_parallel_neb(
         If ``n_images`` is less than three.
     RuntimeError
         If more than one MPI rank is running.
-    ImportError
-        If ``geo_int`` is ``True`` and geodesic_interpolate is not installed.
 
     Examples
     --------
@@ -1291,8 +1295,6 @@ def prepare_threaded_neb(
         If ``n_images`` is less than three.
     RuntimeError
         If more than one MPI rank is running.
-    ImportError
-        If ``geo_int`` is ``True`` and geodesic_interpolate is not installed.
 
     Examples
     --------

@@ -3,4 +3,13 @@ include CHANGELOG.md
 include LICENSE
 include CITATION.cff
 include CITATIONS.bib
+
+# The MIT licence of the vendored geodesic code, which has to travel with it.
+include reactiontools/_geodesic/LICENSE
+
 recursive-include build_tools *.yml *.md *.sh
+# build_tools/sources holds the PLUMED checkout conda_install.sh builds from.
+# It is gitignored, but MANIFEST.in reads the working tree, so without this an
+# sdist built on a machine that has run the installer carries 2000-odd files of
+# someone else's source tree.
+prune build_tools/sources

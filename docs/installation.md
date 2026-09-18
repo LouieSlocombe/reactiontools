@@ -1,14 +1,22 @@
 # Installation
 
-Into an existing environment, straight from GitHub:
+From PyPI, into an existing environment:
 
 ```bash
-pip install git+https://github.com/LouieSlocombe/reactiontools.git@v1.0.0
+pip install reactiontools
 ```
 
-That brings in the Python side, `geodesic_interpolate` and `sella` included.
-Drop the `@v1.0.0` to track `main`. PLUMED and ORCA fall outside `pip` and are
-covered under [Dependencies](#dependencies).
+That is enough for everything except the saddle-point searches, which need
+Sella, and anything in `tools_orca`, which needs ORCA. Both are installed by
+hand — see [Dependencies](#dependencies). Geodesic interpolation needs nothing
+extra.
+
+Sella is one more command, and worth running now if you expect to use
+`optimise_ts`, `optimise_irc` or `sella_ts_search`:
+
+```bash
+pip install git+https://github.com/LouieSlocombe/sella.git
+```
 
 For everything at once — environment, PLUMED and the package — one command from
 the repository root:
@@ -19,10 +27,9 @@ bash build_tools/conda_install.sh
 
 That creates the `reactiontools` conda environment, compiles PLUMED with the
 OPES module and the matching Python bindings into it, and installs this package
-— along with `geodesic_interpolate` and `sella`, cloned next to this repository —
-in editable mode. It **removes and recreates** any environment of that name;
-pass `ENV_NAME=...` to install somewhere else, or `SRC_DIR=...` to keep the
-checkouts elsewhere. Checkouts that already exist are used as they are and never
+— along with `sella`, cloned next to this repository — in editable mode. It
+**removes and recreates** any environment of that name; pass `ENV_NAME=...` to
+install somewhere else, or `SRC_DIR=...` to keep the checkouts elsewhere. Checkouts that already exist are used as they are and never
 wiped.
 
 If you already have a PLUMED with OPES on your `PATH`, the environment and the
@@ -45,33 +52,57 @@ PLUMED is built from source, and the Sol cluster route.
 
 ## Dependencies
 
-Python 3.12 or newer is required. Installed requirements are `numpy>=2.0`,
-`scipy>=1.16`, `matplotlib>=3.8.4`, `pandas>=2.2.2`, `ase>=3.25` and
-`mdtraj>=1.10.2`, plus two that come from git:
-[`sella`](https://github.com/LouieSlocombe/sella) (saddle-point refinement and
-IRC) and
+Python 3.12 or newer is required, and `pip install reactiontools` brings in
+`numpy>=2.0`, `scipy>=1.16`, `matplotlib>=3.8.4`, `pandas>=2.2.2`, `ase>=3.25`
+and `mdtraj>=1.10.2`.
+
+The Python, ASE and SciPy minimums follow the geodesic code's requirements.
+NumPy 2 provides the trapezoidal integration used for basin free energies;
+the Matplotlib, pandas and MDTraj minimums support NumPy 2.
+
+### Geodesic interpolation
+
+Nothing to install. `prepare_neb(geo_int=True)`, `quick_guess_path`,
+`quick_guess_ts` and `seed_product_from_ts` use a copy of
 [`geodesic_interpolate`](https://github.com/LouieSlocombe/geodesic_interpolate)
-(used by `prepare_neb`, `quick_guess_path` and `quick_guess_ts`).
-`conda_install.sh` sets both up as editable checkouts beside this repository;
-a plain `pip install` takes them from GitHub instead.
+vendored into the package as `reactiontools._geodesic`. It is MIT licensed and
+copyright Xiaolei Zhu, whose licence ships with every copy of this package, and
+it is still `zhu2019geodesic` you cite when you use it.
 
-Those two git dependencies are also why `reactiontools` is installed from
-GitHub rather than PyPI, which rejects distributions whose metadata carries a
-direct URL requirement.
+It is vendored rather than depended on because the version on PyPI under the
+name `geodesic-interpolate` exposes only the lower-level `Geodesic` and
+`redistribute`, without the ASE-aware entry point these functions call, and a
+git dependency on the fork that does have it would keep this package off PyPI
+altogether.
 
-The test runner and the linter are not runtime dependencies. To run the suite,
-install the `dev` extra:
+### Sella
+
+[`sella`](https://github.com/LouieSlocombe/sella) is **not** installed with the
+package, for the same reason: the fork these workflows are built against is not
+on PyPI. Install it by hand:
+
+```bash
+pip install git+https://github.com/LouieSlocombe/sella.git
+```
+
+Only `optimise_ts`, `optimise_irc` and `sella_ts_search` need it, and they are
+the only things that break without it — each raises an `ImportError` repeating
+the command above. Everything else, the NEB and PLUMED halves of the package
+included, works without it.
+
+### Development
+
+The test runner and the linter are not runtime dependencies either. To run the
+suite from a checkout, install the `dev` extra:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-The Python, ASE and SciPy minimums follow the Geodesic fork's requirements.
-NumPy 2 provides the trapezoidal integration used for basin free energies;
-the Matplotlib, pandas and MDTraj minimums support NumPy 2.
+### Outside pip entirely
 
-Three dependencies fall outside `pip install` and are only needed by the
-functions named:
+Three more fall outside `pip` altogether, and are only needed by the functions
+named:
 
 | Dependency | Needed by | Notes |
 | --- | --- | --- |

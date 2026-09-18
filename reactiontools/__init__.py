@@ -67,9 +67,21 @@ criterion in ``info["converged"]`` on the structures it returns, and warns
 a ``ConvergenceError`` instead, or promote every one of them at once with
 ``warnings.simplefilter("error", ConvergenceWarning)``.
 
-Sella and MDTraj are installed dependencies but are imported only by the
-workflows that use them. The ``tools_orca`` functions shell out to ORCA, which
-is licensed separately and installed by hand; see ``build_tools/README.md``.
+MDTraj is an installed dependency but is imported only by the workflows that
+use it. Two things the package uses are not installed with it:
+
+``sella``
+    Needed by ``optimise_ts``, ``optimise_irc`` and ``sella_ts_search`` only,
+    and imported on demand. The fork these are built against is not on PyPI, so
+    install it by hand with
+    ``pip install git+https://github.com/LouieSlocombe/sella.git``; the three
+    functions say as much if it is missing.
+``ORCA``
+    Everything in ``tools_orca`` shells out to it. Licensed separately and
+    installed by hand; see ``build_tools/README.md``.
+
+Geodesic interpolation needs nothing extra: it is vendored as
+``reactiontools._geodesic``, MIT licensed and copyright Xiaolei Zhu.
 """
 
 from .tools_cv import (

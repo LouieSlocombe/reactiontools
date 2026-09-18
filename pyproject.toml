@@ -32,19 +32,26 @@ keywords = [
 
 dependencies = [
   "ase>=3.25",
-  "geodesic-interpolate @ git+https://github.com/LouieSlocombe/geodesic_interpolate.git",
   "matplotlib>=3.8.4",
   "mdtraj>=1.10.2",
   "numpy>=2.0",
   "pandas>=2.2.2",
   "scipy>=1.16",
-  "sella @ git+https://github.com/LouieSlocombe/sella.git",
 ]
-# ORCA is needed at runtime by reactiontools.tools_orca but is licensed
-# separately and cannot be installed from PyPI; see build_tools/README.md.
+# Everything the package needs to import and to run every workflow except the
+# saddle-point searches. PyPI rejects any distribution whose metadata carries a
+# direct URL requirement, so nothing here may be a git+https dependency -- which
+# is why the two that used to be are handled the way they are:
 #
-# The two git+https dependencies keep this distribution off PyPI, which rejects
-# direct URL requirements. Install from GitHub instead; see docs/installation.md.
+# geodesic_interpolate  vendored as reactiontools._geodesic, because the fork
+#                       the package needs is not on PyPI and the distribution
+#                       that is there lacks its ASE entry point.
+# sella                 not declared at all. optimise_ts, optimise_irc and
+#                       sella_ts_search import it on demand and explain how to
+#                       install it if it is missing; see docs/installation.md.
+#
+# ORCA is needed at runtime by reactiontools.tools_orca but is licensed
+# separately and installed by hand; see build_tools/README.md.
 
 classifiers = [
   "Development Status :: 5 - Production/Stable",
@@ -82,9 +89,16 @@ docs = [
 Homepage = "https://github.com/LouieSlocombe/reactiontools"
 Documentation = "https://reactiontools.readthedocs.io"
 Repository = "https://github.com/LouieSlocombe/reactiontools"
+Changelog = "https://github.com/LouieSlocombe/reactiontools/blob/main/CHANGELOG.md"
+Issues = "https://github.com/LouieSlocombe/reactiontools/issues"
 
 [tool.setuptools]
 include-package-data = true
+
+# The vendored geodesic code is MIT; its licence has to travel with every
+# distribution, so it ships inside the package rather than only in the sdist.
+[tool.setuptools.package-data]
+"reactiontools._geodesic" = ["LICENSE"]
 
 [tool.setuptools.dynamic]
 version = { attr = "reactiontools.__version__" }
@@ -115,6 +129,8 @@ omit = [
   "reactiontools/opes/FES_from_Reweighting.py",
   "reactiontools/opes/FES_from_State.py",
   "reactiontools/opes/State_from_Kernels.py",
+  # Vendored upstream code with its own test suite in the project it came from.
+  "reactiontools/_geodesic/*.py",
 ]
 
 [tool.coverage.report]
@@ -124,8 +140,9 @@ skip_covered = true
 
 [tool.ruff]
 target-version = "py312"
-# These are upstream command-line scripts retained with their original style.
-extend-exclude = ["reactiontools/opes/*.py"]
+# Vendored upstream code, retained with its original style so that it stays
+# easy to diff against the project it came from.
+extend-exclude = ["reactiontools/opes/*.py", "reactiontools/_geodesic/*.py"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]

@@ -72,26 +72,48 @@ do not, so skip the build only if you already have a PLUMED with `opes` on your
 
 ### Editable dependencies
 
-`geodesic_interpolate` and `sella` are forks that get edited alongside this
-package, so the installer clones them **next to the repository** and installs
-them editable rather than pulling them from GitHub on every install:
+`sella` is a fork that gets edited alongside this package, so the installer
+clones it **next to the repository** and installs it editable rather than
+pulling it from GitHub on every install:
 
 ```
 skunkworks/
 ├── reactiontools/
-├── geodesic_interpolate/
 └── sella/
 ```
 
-Set `SRC_DIR` to keep them elsewhere. A checkout that is already there is used
+Set `SRC_DIR` to keep it elsewhere. A checkout that is already there is used
 exactly as it is — the installer never pulls, resets or removes one, so
 uncommitted work is safe across a rebuild. Only a missing one is cloned.
+`conda_install.sh` finishes by checking it imports from its checkout rather than
+from `site-packages`.
 
-The editable installs run **after** `pip install -e ..`, not before: `pyproject.toml`
-declares both as `name @ git+...` dependencies, and pip re-clones those even when
-the package is already installed, so an editable install done first would be
-replaced by the copy pip pulls. `conda_install.sh` finishes by checking each one
-imports from its checkout rather than from `site-packages`.
+`pyproject.toml` does not declare sella at all. It cannot: a `name @ git+...`
+requirement in the metadata would keep reactiontools off PyPI, which rejects
+direct URLs. So a plain `pip install reactiontools` leaves it out, and only
+`optimise_ts`, `optimise_irc` and `sella_ts_search` notice — each raises an
+`ImportError` carrying the install command.
+
+### The vendored geodesic code
+
+`geodesic_interpolate` used to be a second editable checkout here. It is now
+vendored into the package as `reactiontools/_geodesic`, for the same PyPI reason
+plus one more: the distribution published on PyPI as `geodesic-interpolate`
+exposes only the lower-level `Geodesic` and `redistribute`, not the ASE-aware
+entry point this package calls.
+
+It is a copy of [the fork](https://github.com/LouieSlocombe/geodesic_interpolate),
+MIT licensed and copyright Xiaolei Zhu, with the licence kept beside it. To move
+a change across, edit it in the fork, run the fork's own tests, then copy the
+modules over:
+
+```bash
+cp ../geodesic_interpolate/geodesic_interpolate/*.py reactiontools/_geodesic/
+```
+
+and restore `reactiontools/_geodesic/__init__.py`, which differs from the fork's:
+it drops the `importlib.metadata` version lookup, which has no distribution to
+find once vendored. Then run this package's suite.
 
 ## Sol cluster
 
@@ -158,6 +180,5 @@ and nuclear-quantum-effect simulations — is
 [openmmnqe](https://github.com/LouieSlocombe/openmmnqe), which depends on this
 package. Its `build_tools/` compiles the same PLUMED, from the same pinned
 version, plus the `openmm-plumed` plugin, and its `editable_repos.sh` installs
-this repository editable alongside `geodesic_interpolate` and `sella` — the same
-checkouts this one uses. Install that environment instead of this one if you need
+this repository editable alongside `sella` — the same checkouts this one uses. Install that environment instead of this one if you need
 both.

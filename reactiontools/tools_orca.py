@@ -1344,8 +1344,18 @@ def sella_ts_search(
     -------
     ase.Atoms
         The same object, at the located saddle point.
+
+    Raises
+    ------
+    ImportError
+        If sella is not installed. It is not a declared dependency; the message
+        says how to install it.
     """
-    from sella import Sella
+    # Imported here rather than at module scope so that tools_orca stays
+    # importable on its own, as the rest of it needs nothing from tools_reaction.
+    from .tools_reaction import _import_sella
+
+    Sella, _ = _import_sella("sella_ts_search")
 
     calc_kwargs.setdefault("task", "engrad")
     calc_kwargs.setdefault("atoms", atoms)
