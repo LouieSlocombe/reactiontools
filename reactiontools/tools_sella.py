@@ -73,6 +73,14 @@ Changes made from upstream when the code was brought into this package:
   every name it exports to carry one.
 * Two lists in ``CellInternalPES.set_x`` gained the blank line before them that
   reStructuredText needs, so that the documentation builds warning-free.
+* ``InternalPES._get_Binv`` no longer discards the rank-truncated Jacobian
+  inverse that ``_get_jacobian_qr`` has just cached. It used to recompute with
+  ``np.linalg.pinv``'s default cutoff, which is relative to machine precision
+  and so retained the rigid-body null space, and the caller that missed the
+  cold cache was handed an inverse with entries of order 1e12. Since
+  ``_set_x_ode`` freezes one inverse for a whole integration, that was enough
+  to make the geodesic stiff and stall the geometry update on steps as small
+  as 1e-4. The rank threshold both paths cut at is now ``_INT_RANK_TOL``.
 
 Cite ``hermes2022sella`` when you use it -- see ``CITATIONS.bib``.
 """
@@ -4977,6 +4985,13 @@ class Internals(BaseInternals):
 logger = logging.getLogger(__name__)
 
 
+# Singular values below this are treated as the null space of the internal
+# Jacobian. A molecule's internals are invariant under rigid-body motion, so B
+# always carries six (five, if linear) vanishing singular values; they sit far
+# below the smallest physical one, and anything in between would be noise.
+_INT_RANK_TOL = 1e-6
+
+
 class _LRU2:
     """2-entry LRU cache keyed by state hash (bytes).
 
@@ -5648,10 +5663,10 @@ class InternalPES(PES):
 
         # Check for rank deficiency via R diagonal
         rdiag = np.abs(np.diag(R))
-        if len(rdiag) > 0 and rdiag.min() < 1e-6 * rdiag.max():
+        if len(rdiag) > 0 and rdiag.min() < _INT_RANK_TOL * rdiag.max():
             # Rank-deficient: fall back to SVD for safe truncation
             Ui, Si, VTi = np.linalg.svd(B, full_matrices=False)
-            nnred = np.sum(Si > 1e-6)
+            nnred = np.sum(Si > _INT_RANK_TOL)
             Q = Ui[:, :nnred]
             R = np.diag(Si[:nnred]) @ VTi[:nnred]
 
@@ -5676,17 +5691,32 @@ class InternalPES(PES):
             return cached
 
         Q, R = self._get_jacobian_qr()
+
+        # When the Jacobian is rank-deficient — the usual case, since the
+        # rigid-body modes are always in its null space — _get_jacobian_qr
+        # has just built the truncated inverse from its own SVD factors and
+        # cached it. Take that rather than recomputing: the R it returns is
+        # then non-square, and the recomputation below cannot see the rank
+        # it already established.
+        cached = self._pinv_cache.get(state_hash)
+        if cached is not None:
+            return cached
+
         if R.size == 0:
             ncart = 3 * len(self.atoms) + (3 * len(self.dummies) if self.dummies else 0)
             Binv = np.empty((ncart, 0))
         elif R.shape[0] == R.shape[1]:
             Binv = solve_triangular(R, Q.T, check_finite=False)
         else:
-            # Non-square R from rank-deficient SVD fallback — Binv should
-            # already have been cached by _get_jacobian_qr, but recompute
-            # as a safety net (e.g., if the 2-entry cache evicted it).
+            # Non-square R from the rank-deficient SVD fallback, whose Binv
+            # the 2-entry cache has since evicted. Truncate at the same
+            # threshold _get_jacobian_qr used: np.linalg.pinv's default cuts
+            # relative to machine precision, which keeps the null space and
+            # returns an inverse with entries of order 1e12.
             B = self.int.jacobian()
-            Binv = np.linalg.pinv(B)
+            Ui, Si, VTi = np.linalg.svd(B, full_matrices=False)
+            nnred = np.sum(Si > _INT_RANK_TOL)
+            Binv = VTi[:nnred].T @ np.diag(1.0 / Si[:nnred]) @ Ui[:, :nnred].T
 
         self._pinv_cache.put(state_hash, Binv)
         return Binv

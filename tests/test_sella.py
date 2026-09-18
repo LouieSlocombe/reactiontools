@@ -800,28 +800,10 @@ def _build_pes(pes_class, atoms, cons, trajectory):
                           ("CH4", False, ((0, 1),)),
                           ("C6H6", False, None),
                           ])
-def test_PES(pes_class, name, use_traj, fixed_bonds, tmp_path, request):
-    if pes_class is InternalPES and name == "C6H6":
-        request.node.add_marker(
-            pytest.mark.xfail(
-                raises=RuntimeError,
-                # Not strict, because whether this trips is a floating-point
-                # knife-edge. The geodesic ODE in set_x() stalls on a ~1e-4
-                # step taken during the finite-difference Hessian probe --
-                # LSODA drops to a ~1e-11 step size and burns its whole
-                # evaluation budget covering 0.2% of the interval -- but only
-                # when the probe direction lands in the stiff region, and that
-                # turns on the last bits of the Ritz vectors. Patch releases
-                # of the dependencies flip it either way: it raises under
-                # Python 3.14 / SciPy 1.18.0 / JAX 0.11.0 and converges under
-                # Python 3.12 / SciPy 1.18.1 / JAX 0.11.2. A strict marker
-                # just fails whichever CI legs happen to get through.
-                strict=False,
-                reason="upstream: geometry update ODE does not converge "
-                       "for C6H6 in internal coordinates",
-            )
-        )
-
+def test_PES(pes_class, name, use_traj, fixed_bonds, tmp_path):
+    # C6H6 on InternalPES used to raise from the geometry-update ODE, because
+    # a badly truncated Jacobian pseudo-inverse made the geodesic violently
+    # stiff. See test_binv_is_truncated_at_the_rank_of_the_jacobian.
     tol = dict(atol=1e-6, rtol=1e-6)
 
     atoms = molecule(name)
@@ -880,6 +862,48 @@ def test_constraint_is_enforced_through_sella():
 
     assert opt.converged()
     assert atoms.get_distance(0, 1) == pytest.approx(r0, abs=1e-6)
+
+
+def test_binv_is_truncated_at_the_rank_of_the_jacobian():
+    """_get_Binv drops the null space whichever cache path it takes.
+
+    Internal coordinates do not change under rigid-body motion, so the
+    Jacobian always carries six vanishing singular values and its inverse
+    exists only on the row space. _get_jacobian_qr detects that and builds a
+    truncated inverse from its own SVD factors; _get_Binv used to discard it
+    and recompute with np.linalg.pinv's default cutoff, which is relative to
+    machine precision and so kept the null space. That inverse had entries of
+    order 1e12, and since _set_x_ode freezes one Binv for the whole
+    integration, the geodesic went stiff enough to stall on a 1e-4 step.
+    """
+    atoms = molecule('C6H6')
+    atoms.calc = EMT()
+    pes = InternalPES(atoms, Internals(atoms, cons=None), trajectory=None)
+
+    # Both caches are keyed on the geometry, so moving an atom leaves them
+    # cold, as every fresh step does. Order matters from there: _set_x_ode
+    # asks for Binv first, which is what the bug needed. _get_Binv missed the
+    # cold cache, _get_jacobian_qr filled it with the truncated inverse on the
+    # way past, and _get_Binv returned its own recomputation regardless --
+    # reaching for the good value only on a later call, once the geometry had
+    # stopped moving.
+    pes.atoms.positions[0, 0] += 1e-3
+
+    B = pes.int.jacobian()
+    svals = np.linalg.svd(B, compute_uv=False)
+    kept = svals > 1e-6
+    # Twelve atoms, so 36 Cartesian degrees of freedom, six of them rigid.
+    assert B.shape[1] == 36
+    assert kept.sum() == 30
+
+    Binv = pes._get_Binv()
+
+    assert_allclose(Binv, np.linalg.pinv(B, rcond=1e-6), atol=1e-8)
+    # ||Binv||_2 is 1/s_min over the retained singular values, and no entry
+    # of a matrix exceeds its spectral norm. Keeping the null space put this
+    # at ~1e12 against a bound of ~1.6.
+    assert np.abs(Binv).max() <= 1.0 / svals[kept].min()
+
 
 # ===========================================================================
 # Cell optimisation
