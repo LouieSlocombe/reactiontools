@@ -19,7 +19,9 @@ authors:
     email: louies@hotmail.co.uk
 version: 1.0.0
 date-released: "2026-09-18"
-license: MIT
+# reactiontools/tools_sella.py is derived from Sella and stays LGPL; everything
+# else is MIT. See LICENSE.
+license: MIT AND LGPL-3.0-or-later
 repository-code: "https://github.com/LouieSlocombe/reactiontools"
 url: "https://reactiontools.readthedocs.io"
 keywords:

@@ -1,6 +1,10 @@
 include README.md
 include CHANGELOG.md
 include LICENSE
+# tools_sella.py is LGPL; LICENSE.LGPL is that licence and LICENSE.GPL the one
+# it incorporates by reference. Both have to travel with any distribution.
+include LICENSE.LGPL
+include LICENSE.GPL
 include CITATION.cff
 include CITATIONS.bib
 

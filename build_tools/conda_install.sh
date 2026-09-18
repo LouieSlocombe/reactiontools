@@ -12,11 +12,6 @@
 #
 #   ENV_NAME=reactiontools2 bash conda_install.sh
 #
-# sella is cloned next to this repository and installed editable. An existing
-# checkout is used as it is, never wiped. Set SRC_DIR to keep it somewhere else:
-#
-#   SRC_DIR="${HOME}/src" bash conda_install.sh
-
 # Exit immediately on error and fail pipelines cleanly, so a broken build does not
 # fall through to the later steps and report success.
 set -eo pipefail
@@ -26,15 +21,9 @@ ENV_NAME="${ENV_NAME:-reactiontools}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORK_DIR="${SCRIPT_DIR}/sources"
-# Alongside the repository, so the checkouts survive the wipe WORK_DIR gets.
-SRC_DIR="${SRC_DIR:-$(dirname "${REPO_DIR}")}"
 
 # Pulls in build_plumed() and build_py_plumed(), with the PLUMED version they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
-# Pulls in install_editable_repos() and check_editable_repos(), with the git
-# dependencies they clone.
-source "${SCRIPT_DIR}/editable_repos.sh"
-
 echo "=== Initializing Conda Environment ==="
 source "$(conda info --base)/etc/profile.d/conda.sh"
 # conda refuses to remove the active environment, so drop back to base first
@@ -55,17 +44,12 @@ build_py_plumed "${WORK_DIR}"
 echo "=== Installing reactiontools (editable) ==="
 pip install -e "${REPO_DIR}"
 
-# After reactiontools, which drags its own copies of these in from git.
-install_editable_repos "${SRC_DIR}"
-
 echo "=== Verifying Installation ==="
 cd "${REPO_DIR}"
 plumed --no-mpi config -q module opes
 echo "PLUMED opes module: OK"
 python -c "import plumed; plumed.Plumed()"
 echo "py-plumed kernel load: OK"
-check_editable_repos "${SRC_DIR}"
-echo "editable dependencies: OK"
 python -c "import reactiontools"
 echo "reactiontools: OK"
 

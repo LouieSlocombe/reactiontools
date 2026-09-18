@@ -8,8 +8,11 @@ dynamic = ["version"]
 description = "A centralised set of tools for looking at TS and NEB calculations"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
-license = "MIT"
-license-files = ["LICENSE"]
+# Everything here is MIT except reactiontools/tools_sella.py, which is derived
+# from Sella and stays under the LGPL that covers it; LICENSE says which is
+# which, and the full LGPL text travels in LICENSE.LGPL.
+license = "MIT AND LGPL-3.0-or-later"
+license-files = ["LICENSE", "LICENSE.LGPL", "LICENSE.GPL"]
 
 authors = [
   { name = "Louie Slocombe", email = "louies@hotmail.co.uk" },
@@ -32,24 +35,30 @@ keywords = [
 
 dependencies = [
   "ase>=3.25",
+  "jax>=0.4.20",
+  "jaxlib>=0.4.20",
   "matplotlib>=3.8.4",
   "mdtraj>=1.10.2",
   "numpy>=2.0",
   "pandas>=2.2.2",
   "scipy>=1.16",
 ]
-# Everything the package needs to import and to run every workflow except the
-# saddle-point searches. PyPI rejects any distribution whose metadata carries a
-# direct URL requirement, so nothing here may be a git+https dependency -- which
-# is why the two that used to be are handled the way they are:
+# Everything the package needs to import and to run every workflow. PyPI rejects
+# any distribution whose metadata carries a direct URL requirement, so nothing
+# here may be a git+https dependency -- which is why the two that used to be are
+# handled the way they are:
 #
 # geodesic_interpolate  no longer a dependency at all. The interpolation lives
 #                       in reactiontools.tools_geodesic, because the fork the
 #                       package needs is not on PyPI and the distribution that
 #                       is there lacks its ASE entry point.
-# sella                 not declared at all. optimise_ts, optimise_irc and
-#                       sella_ts_search import it on demand and explain how to
-#                       install it if it is missing; see docs/installation.md.
+# sella                 no longer a dependency at all either. The saddle-point
+#                       searches live in reactiontools.tools_sella, because the
+#                       fork the package needs is not on PyPI. jax and jaxlib
+#                       are listed above because that module needs them: the
+#                       internal coordinates are differentiated rather than
+#                       hand-coded. They are CPU-only here -- nothing asks JAX
+#                       for linear algebra -- so the plain wheels are enough.
 #
 # ORCA is needed at runtime by reactiontools.tools_orca but is licensed
 # separately and installed by hand; see build_tools/README.md.
@@ -108,6 +117,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-config --strict-markers"
 markers = [
   "integration: exercises an optional executable, dependency, or local socket transport",
+  "slow: long-running optimisation (deselect with '-m \"not slow\"')",
 ]
 filterwarnings = [
   "ignore::DeprecationWarning:ase.*",
@@ -121,10 +131,14 @@ branch = true
 source = ["reactiontools"]
 # Bundled upstream OPES command-line programs are smoke-tested as subprocesses;
 # they are not maintained as importable reactiontools library modules.
+# tools_sella.py is vendored upstream Sella. tests/test_sella.py exercises it,
+# but holding 9000 lines of someone else's code to this package's coverage bar
+# would only measure how much of Sella these workflows happen to touch.
 omit = [
   "reactiontools/opes/FES_from_Reweighting.py",
   "reactiontools/opes/FES_from_State.py",
   "reactiontools/opes/State_from_Kernels.py",
+  "reactiontools/tools_sella.py",
 ]
 
 [tool.coverage.report]
@@ -140,3 +154,15 @@ extend-exclude = ["reactiontools/opes/*.py"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# tools_sella.py is vendored upstream Sella, left as it was found so that it
+# stays diffable against the project it came from. Every one of these is an
+# upstream finding, not this package's, and all of them are still present in
+# sella at the commit this was taken from:
+#   F821  _rotation_3axis_masked is referenced by _rotation_3axis_hvp and
+#         defined nowhere -- a latent NameError on an untested code path,
+#         reported upstream rather than invented a fix for here.
+#   F841  four dead local assignments.
+#   E702  one compound statement written with a semicolon.
+"reactiontools/tools_sella.py" = ["E702", "F821", "F841"]

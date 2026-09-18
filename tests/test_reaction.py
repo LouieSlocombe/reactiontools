@@ -1,6 +1,5 @@
 """Tests for reactiontools.tools_reaction."""
 
-import importlib.util
 import os
 import socket
 import warnings
@@ -44,15 +43,6 @@ from reactiontools import (
     stitch_path,
     summarise_neb,
     tools_reaction,
-)
-
-# Skip rather than fail: sella is not installed with the package -- the fork
-# these workflows need is not on PyPI -- so a machine without it is the normal
-# case. Only the runs that drive a real saddle search need it; the wiring tests
-# patch _import_sella and work either way.
-sella_required = pytest.mark.skipif(
-    importlib.util.find_spec("sella") is None,
-    reason="needs sella (pip install git+https://github.com/LouieSlocombe/sella.git)",
 )
 
 
@@ -2030,11 +2020,7 @@ class TestOptimiseTs:
             def run(self, **kwargs: Any) -> bool:
                 return True
 
-        monkeypatch.setattr(
-            tools_reaction,
-            "_import_sella",
-            lambda name: (FakeSella, object),
-        )
+        monkeypatch.setattr(tools_reaction, "Sella", FakeSella)
         monkeypatch.setattr(
             tools_reaction,
             "read",
@@ -2045,7 +2031,6 @@ class TestOptimiseTs:
 
         assert seen["optimizer"][1]["internal"] is expected_internal
 
-    @sella_required
     def test_returns_a_structure_and_keeps_the_trajectory(
         self, calc: EMT, water: Atoms
     ) -> None:
@@ -2054,7 +2039,6 @@ class TestOptimiseTs:
         assert len(ts) == len(water)
         assert Path("sella.traj").exists()
 
-    @sella_required
     def test_does_not_modify_the_input(self, calc: EMT, water: Atoms) -> None:
         before = water.positions.copy()
 
@@ -2062,13 +2046,11 @@ class TestOptimiseTs:
 
         assert water.positions == pytest.approx(before)
 
-    @sella_required
     def test_records_convergence_on_the_result(self, calc: EMT, water: Atoms) -> None:
         ts = optimise_ts(water, calc, fmax=0.5, steps=2)
 
         assert ts.info["converged"] is True
 
-    @sella_required
     def test_a_logfile_takes_sellas_log_off_stdout(
         self, calc: EMT, water: Atoms, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -2079,7 +2061,6 @@ class TestOptimiseTs:
         assert "Step" not in out
         assert Path("ts.log").exists()
 
-    @sella_required
     def test_warns_and_records_when_it_runs_out_of_steps(self, calc: EMT) -> None:
         strained = molecule("H2O")
         strained.positions[1] += [0.5, 0.0, 0.0]
@@ -2096,7 +2077,6 @@ class TestOptimiseTs:
 
         assert ts.info["converged"] is False
 
-    @sella_required
     def test_raises_instead_when_asked(self, calc: EMT) -> None:
         strained = molecule("H2O")
         strained.positions[1] += [0.5, 0.0, 0.0]
@@ -2105,7 +2085,6 @@ class TestOptimiseTs:
             optimise_ts(strained, calc, fmax=1e-4, steps=2, raise_on_unconverged=True)
 
 
-@sella_required
 class TestOptimiseIrc:
     def test_returns_both_directions(self, calc: EMT, water: Atoms) -> None:
         with pytest.warns(ConvergenceWarning):

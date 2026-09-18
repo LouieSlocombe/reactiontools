@@ -47,9 +47,9 @@ ENV_NAME=reactiontools2 bash conda_install.sh
 
 The script creates the environment from `environment.yml`, compiles PLUMED and
 py-plumed into it (sources are cloned into the gitignored `build_tools/sources/`,
-wiped on each run), installs `reactiontools` and its two git dependencies in
-editable mode so changes to the source are picked up without reinstalling, and
-finishes with import checks. It is equivalent to running, from this directory:
+wiped on each run), installs `reactiontools` in editable mode so changes to the
+source are picked up without reinstalling, and finishes with import checks. It
+is equivalent to running, from this directory:
 
 ```bash
 conda env create -f environment.yml
@@ -57,10 +57,9 @@ conda activate reactiontools
 src_dir="$(mktemp -d)"
 source build_plumed.sh && build_plumed "${src_dir}" && build_py_plumed "${src_dir}"
 pip install -e ..
-source editable_repos.sh && install_editable_repos ../..
 ```
 
-(`build_plumed.sh` and `editable_repos.sh` are function libraries rather than
+(`build_plumed.sh` and `clone_repo.sh` are function libraries rather than
 scripts. `build_py_plumed` reuses the plumed2 checkout that `build_plumed` leaves
 behind, so both take the same working directory, and the PLUMED version is pinned
 there in one place.)
@@ -70,46 +69,46 @@ there in one place.)
 do not, so skip the build only if you already have a PLUMED with `opes` on your
 `PATH`.
 
-### Editable dependencies
+### Vendored code
 
-`sella` is a fork that gets edited alongside this package, so the installer
-clones it **next to the repository** and installs it editable rather than
-pulling it from GitHub on every install:
+There are no editable git dependencies left. Both of the forks that used to be
+cloned next to this repository are now ordinary modules of this package —
+linted, covered by their own test files and documented alongside their siblings.
+Change either the way you would change any other module: there is nothing to
+copy across and no fork to keep in step.
 
-```
-skunkworks/
-├── reactiontools/
-└── sella/
-```
+| Module | From | Tests | Licence |
+| --- | --- | --- | --- |
+| `reactiontools/tools_geodesic.py` | [`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate), Xiaolei Zhu | `tests/test_geodesic.py` | MIT, as the package |
+| `reactiontools/tools_sella.py` | [Sella](https://github.com/zadorlab/sella), Eric Hermes and contributors | `tests/test_sella.py` | **LGPL-3.0-or-later** |
 
-Set `SRC_DIR` to keep it elsewhere. A checkout that is already there is used
-exactly as it is — the installer never pulls, resets or removes one, so
-uncommitted work is safe across a rebuild. Only a missing one is cloned.
-`conda_install.sh` finishes by checking it imports from its checkout rather than
-from `site-packages`.
+Both got here for the same reason: `pyproject.toml` cannot declare either as a
+dependency. A `name @ git+...` requirement in the metadata would keep
+reactiontools off PyPI, which rejects direct URLs, and the forks these workflows
+need are not published there. The geodesic code had a second reason: the
+distribution published on PyPI as `geodesic-interpolate` exposes only the
+lower-level `Geodesic` and `redistribute`, not the ASE-aware entry point this
+package calls.
 
-`pyproject.toml` does not declare sella at all. It cannot: a `name @ git+...`
-requirement in the metadata would keep reactiontools off PyPI, which rejects
-direct URLs. So a plain `pip install reactiontools` leaves it out, and only
-`optimise_ts`, `optimise_irc` and `sella_ts_search` notice — each raises an
-`ImportError` carrying the install command.
+Two things about `tools_sella.py` in particular:
 
-### The geodesic code
+**It is LGPL, not MIT.** Sella is copyright Sandia National Laboratories
+(NTESS) under US Government contract DE-NA0003525, and that licence travels
+with the code. The repository `LICENSE` records which parts of the distribution
+it covers, `LICENSE.LGPL` and `LICENSE.GPL` carry the text, and all three have
+to stay there. If you edit that module, the LGPL asks that the change be noted:
+the list at the top of the file is where the existing ones are recorded.
 
-`geodesic_interpolate` used to be a second editable checkout here, and then a
-vendored subpackage. It is now `reactiontools/tools_geodesic.py`, an ordinary
-module of this package: linted, covered by `tests/test_geodesic.py` and
-documented alongside its siblings. Change it the way you would change any other
-module — there is nothing to copy across and no fork to keep in step.
+**It brings `jax`.** Sella differentiates its internal coordinates rather than
+hand-coding the derivatives, so `jax` and `jaxlib` are now dependencies. They
+are used for automatic differentiation only, never linear algebra, so the CPU
+wheels are enough. Upstream also ships three Cython extension modules; none are
+built here — two were unused, and of the third only `modified_gram_schmidt` was
+ever called, which is reimplemented in NumPy. That is what keeps this a
+pure-Python wheel with no build step.
 
-It got here for the same PyPI reason as sella, plus one more: the distribution
-published on PyPI as `geodesic-interpolate` exposes only the lower-level
-`Geodesic` and `redistribute`, not the ASE-aware entry point this package calls.
-
-It is derived from
-[`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate),
-MIT licensed and copyright Xiaolei Zhu. That notice is at the foot of the
-repository `LICENSE` and has to stay there.
+The geodesic notice is at the foot of the repository `LICENSE` and has to stay
+there too.
 
 ## Sol cluster
 
@@ -119,10 +118,10 @@ dependencies come from conda-forge, but PLUMED is compiled from source for the
 `$SCRATCH/reactiontools_sources`, and both the environment and those sources are
 recreated from scratch on each run.
 
-`reactiontools` itself and the two editable dependencies are cloned into
-`$HOME/reactiontools_src` instead — outside the build area, since that is wiped —
-and installed editable, so `git pull` in a checkout is enough to update it. Set
-`SRC_DIR` to put them somewhere else.
+`reactiontools` itself is cloned into `$HOME/reactiontools_src` instead —
+outside the build area, since that is wiped — and installed editable, so `git
+pull` in the checkout is enough to update it. Set `SRC_DIR` to put it somewhere
+else.
 
 Submit it as a batch job from this directory:
 
@@ -175,6 +174,6 @@ Running the same collective variables under OpenMM instead of ASE — path-integ
 and nuclear-quantum-effect simulations — is
 [openmmnqe](https://github.com/LouieSlocombe/openmmnqe), which depends on this
 package. Its `build_tools/` compiles the same PLUMED, from the same pinned
-version, plus the `openmm-plumed` plugin, and its `editable_repos.sh` installs
-this repository editable alongside `sella` — the same checkouts this one uses. Install that environment instead of this one if you need
-both.
+version, plus the `openmm-plumed` plugin, and installs this repository editable
+— the same checkout this one uses. Install that environment instead of this one
+if you need both.

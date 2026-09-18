@@ -61,8 +61,8 @@ jobs:
             pyproject.toml
             .github/requirements-min.txt
       # The `dev` extra carries pytest and Ruff, which are not runtime
-      # dependencies. Nothing here comes from git: geodesic interpolation is
-      # part of the package, and sella is installed separately below.
+      # dependencies. Nothing here comes from git: both the geodesic
+      # interpolation and the saddle-point searches are part of the package.
       - name: Install current dependencies
         if: matrix.dependencies == 'latest'
         run: pip install -e ".[dev]"
@@ -71,15 +71,6 @@ jobs:
         run: pip install -c .github/requirements-min.txt -e ".[dev]"
       - run: pip check
 
-      # sella is deliberately not a declared dependency -- a direct URL in the
-      # metadata would keep this package off PyPI -- so install it here to keep
-      # the saddle-point and IRC tests running. They skip without it, which is
-      # what a contributor without sella sees, so this is the run that covers
-      # them. `continue-on-error` keeps a broken sella fork from failing a build
-      # whose own tests are fine; the skips then show up in the pytest summary.
-      - name: Install sella for the saddle-point tests
-        continue-on-error: true
-        run: pip install "sella @ git+https://github.com/LouieSlocombe/sella.git"
       - name: Lint with the minimum Ruff version
         if: matrix.dependencies == 'minimum'
         run: ruff check .

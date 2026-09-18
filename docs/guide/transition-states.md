@@ -28,8 +28,8 @@ forward, reverse = optimise_irc(ts, calc, dx=0.1)
 plot_irc(stitch_path(reverse, forward))
 ```
 
-These two use Sella, which is installed with `reactiontools` and imported only
-when a saddle-point calculation is requested.
+These two use Sella, which is part of the package as `tools_sella`. Nothing
+extra has to be installed to run them.
 
 `seed_minima_from_ts` answers the same question as `optimise_irc` without
 either: it rattles the saddle at random and relaxes what comes out, from enough

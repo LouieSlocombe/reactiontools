@@ -22,9 +22,9 @@ Every ``optimise_*`` function records whether it reached its force criterion in
 :class:`ConvergenceWarning` when it did not; pass ``raise_on_unconverged=True``
 for a :class:`ConvergenceError` instead.
 
-Sella is imported on demand by the saddle-point searches, :func:`optimise_ts`
-and :func:`optimise_irc`. It is not installed with the package; those two
-functions say how to install it if it is missing.
+The saddle-point searches, :func:`optimise_ts` and :func:`optimise_irc`, are
+driven by :mod:`reactiontools.tools_sella`, which is part of the package like
+any other module. Nothing extra has to be installed to use them.
 """
 
 import copy
@@ -48,15 +48,7 @@ from ase.vibrations import Vibrations
 from scipy.interpolate import CubicSpline
 
 from .tools_geodesic import geodesic_interpolate
-
-#: Sella is not a declared dependency -- the fork these workflows are built
-#: against is not on PyPI, and a direct URL requirement would keep this package
-#: off it too -- so it is installed by hand and this says how.
-_SELLA_HINT = (
-    "{name} needs sella, which is not installed. It is not pulled in "
-    "automatically; install it with\n"
-    "    pip install git+https://github.com/LouieSlocombe/sella.git"
-)
+from .tools_sella import IRC, Sella
 
 
 class ConvergenceWarning(UserWarning):
@@ -136,34 +128,6 @@ def _check_converged(
     # called it, onto the caller's own line.
     warnings.warn(message, ConvergenceWarning, stacklevel=3)
     return False
-
-
-def _import_sella(name: str) -> tuple[type, type]:
-    """Import sella on demand, with an install hint when it is missing.
-
-    Importing Sella only for saddle-point searches keeps package startup
-    lightweight.
-
-    Parameters
-    ----------
-    name : str
-        Name of the calling function, quoted in the error message.
-
-    Returns
-    -------
-    tuple
-        The ``(Sella, IRC)`` classes.
-
-    Raises
-    ------
-    ImportError
-        If sella is not installed.
-    """
-    try:
-        from sella import IRC, Sella
-    except ImportError as exc:
-        raise ImportError(_SELLA_HINT.format(name=name)) from exc
-    return Sella, IRC
 
 
 def get_neb_path(images: Sequence[Atoms]) -> np.ndarray:
@@ -1672,12 +1636,9 @@ def optimise_ts(
 
     Raises
     ------
-    ImportError
-        If sella is not installed.
     ConvergenceError
         If the search did not converge and ``raise_on_unconverged`` is True.
     """
-    Sella, _IRC = _import_sella("optimise_ts")
 
     print("Running Sella TS search", flush=True)
     ts_image = ts_image.copy()
@@ -1768,14 +1729,11 @@ def optimise_irc(
 
     Raises
     ------
-    ImportError
-        If sella is not installed.
     ConvergenceError
         If either direction did not converge and ``raise_on_unconverged`` is
         True. The forward direction is checked first, and only once both have
         run, so a failure there does not cost the reverse run.
     """
-    _Sella, IRC = _import_sella("optimise_irc")
 
     irc_f = ts_image.copy()
     irc_f.calc = calc

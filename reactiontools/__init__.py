@@ -1,6 +1,6 @@
 """Tools for transition-state, NEB and metadynamics calculations.
 
-The package is organised into eleven modules, all of which are re-exported
+The package is organised into twelve modules, all of which are re-exported
 here:
 
 ``tools_reaction``
@@ -18,6 +18,15 @@ here:
     what keeps atoms from passing through each other on the way across.
     Beneath it sit the two stages it runs, ``redistribute`` and ``Geodesic``,
     and the scalers that set the metric.
+``tools_sella``
+    The saddle-point refinement ``optimise_ts`` drives and the reaction-path
+    following ``optimise_irc`` does. :class:`Sella` walks a transition-state
+    guess uphill to a true first-order saddle by accumulating curvature from
+    the gradients it already needs, rather than building a Hessian by finite
+    differences, and works in redundant internal coordinates by default;
+    :class:`IRC` follows the path downhill from that saddle to the minima
+    either side of it. ``Internals`` and ``Constraints`` are there for driving
+    either of them under constraints.
 ``tools_orca``
     Build ASE ORCA calculators from a few presets -- named levels of theory in
     the ``orca_preset_*`` dictionaries -- optimise a geometry with ORCA's own
@@ -77,22 +86,24 @@ a ``ConvergenceError`` instead, or promote every one of them at once with
 ``warnings.simplefilter("error", ConvergenceWarning)``.
 
 MDTraj is an installed dependency but is imported only by the workflows that
-use it. Two things the package uses are not installed with it:
+use it. One thing the package uses is not installed with it:
 
-``sella``
-    Needed by ``optimise_ts``, ``optimise_irc`` and ``sella_ts_search`` only,
-    and imported on demand. The fork these are built against is not on PyPI, so
-    install it by hand with
-    ``pip install git+https://github.com/LouieSlocombe/sella.git``; the three
-    functions say as much if it is missing.
 ``ORCA``
     Everything in ``tools_orca`` shells out to it. Licensed separately and
     installed by hand; see ``build_tools/README.md``.
 
-Geodesic interpolation needs nothing extra. ``tools_geodesic`` is part of
-the package like any other module; it is derived from ``geodesic-interpolate``
-by Xiaolei Zhu and MIT licensed as the rest of the package is, and it is still
-``zhu2019geodesic`` you cite when you use it.
+Nothing else has to be installed by hand. Both of the pieces that used to be
+fetched from GitHub are now part of the package like any other module:
+
+``tools_geodesic``
+    Derived from ``geodesic-interpolate`` by Xiaolei Zhu and MIT licensed as
+    the rest of the package is. Cite ``zhu2019geodesic``.
+``tools_sella``
+    Derived from Sella by Eric Hermes and contributors. Unlike everything else
+    here it is **LGPL**, not MIT -- see ``LICENSE`` -- and it is what makes
+    ``jax`` a dependency of this package, as it differentiates its internal
+    coordinates rather than hand-coding their derivatives. Cite
+    ``hermes2022sella``.
 """
 
 from .tools_cv import (
@@ -245,6 +256,7 @@ from .tools_reaction import (
     stitch_path,
     summarise_neb,
 )
+from .tools_sella import IRC, Constraints, Internals, Sella
 from .tools_style import ax_plot, n_plot
 from .tools_units import (
     DEFAULT_ENERGY_UNIT,
@@ -299,6 +311,11 @@ __all__ = [
     "to_ase_atoms",
     "read_xyz",
     "write_xyz",
+    # tools_sella
+    "Sella",
+    "IRC",
+    "Internals",
+    "Constraints",
     # tools_orca
     "orca_calc_preset",
     "orca_optimise_atoms",

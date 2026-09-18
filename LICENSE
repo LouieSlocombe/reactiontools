@@ -25,8 +25,26 @@ SOFTWARE.
 Third-party code
 ----------------
 
+The MIT licence above covers this distribution with one exception, set out
+second below.
+
 reactiontools/tools_geodesic.py is derived from geodesic-interpolate
 (https://github.com/virtualzx-nad/geodesic-interpolate), which is distributed
 under the MIT licence set out above:
 
 Copyright (c) 2024 Xiaolei Zhu
+
+reactiontools/tools_sella.py is derived from Sella
+(https://github.com/zadorlab/sella). It is NOT covered by the MIT licence
+above. It is licensed under the GNU Lesser General Public License, version 3
+or later, as the code it derives from is:
+
+Copyright 2019 National Technology & Engineering Solutions of Sandia, LLC
+(NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S.
+Government retains certain rights in this software.
+
+The full text of that licence is in LICENSE.LGPL, together with the GNU
+General Public License version 3 it incorporates by reference, in LICENSE.GPL.
+You may modify reactiontools/tools_sella.py and relink it against the rest of
+this package under the terms of the LGPL; the header of that file records the
+changes already made to it relative to upstream Sella.

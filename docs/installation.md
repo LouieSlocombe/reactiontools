@@ -6,17 +6,9 @@ From PyPI, into an existing environment:
 pip install reactiontools
 ```
 
-That is enough for everything except the saddle-point searches, which need
-Sella, and anything in `tools_orca`, which needs ORCA. Both are installed by
-hand — see [Dependencies](#dependencies). Geodesic interpolation needs nothing
-extra.
-
-Sella is one more command, and worth running now if you expect to use
-`optimise_ts`, `optimise_irc` or `sella_ts_search`:
-
-```bash
-pip install git+https://github.com/LouieSlocombe/sella.git
-```
+That is enough for everything except `tools_orca`, which needs ORCA — licensed
+separately and installed by hand; see [Dependencies](#dependencies). The
+saddle-point searches and geodesic interpolation need nothing extra.
 
 For everything at once — environment, PLUMED and the package — one command from
 the repository root:
@@ -27,10 +19,8 @@ bash build_tools/conda_install.sh
 
 That creates the `reactiontools` conda environment, compiles PLUMED with the
 OPES module and the matching Python bindings into it, and installs this package
-— along with `sella`, cloned next to this repository — in editable mode. It
-**removes and recreates** any environment of that name; pass `ENV_NAME=...` to
-install somewhere else, or `SRC_DIR=...` to keep the checkouts elsewhere. Checkouts that already exist are used as they are and never
-wiped.
+in editable mode. It **removes and recreates** any environment of that name; pass `ENV_NAME=...` to
+install somewhere else.
 
 If you already have a PLUMED with OPES on your `PATH`, the environment and the
 package on their own are:
@@ -78,20 +68,41 @@ and `redistribute`, without the ASE-aware entry point these functions call, and
 a git dependency on a fork that does have it would keep this package off PyPI
 altogether.
 
-### Sella
+### Saddle-point searches
 
-[`sella`](https://github.com/LouieSlocombe/sella) is **not** installed with the
-package, for the same PyPI reason: the fork these workflows are built against is
-not on PyPI. Install it by hand:
+Nothing to install either. `optimise_ts`, `optimise_irc` and `sella_ts_search`
+are built on `tools_sella`, which is part of the package like any other module.
+`Sella` and `IRC` are its entry points, and `Internals` and `Constraints` are
+exported alongside them for driving either under constraints.
 
-```bash
-pip install git+https://github.com/LouieSlocombe/sella.git
-```
+It is derived from [Sella](https://github.com/zadorlab/sella) by Eric Hermes
+and contributors, and it is `hermes2022sella` you cite when you use it. It
+lives here for the same PyPI reason as the interpolation: the fork these
+workflows are built against is not on PyPI, and a git dependency on it would
+keep this package off PyPI altogether.
 
-Only `optimise_ts`, `optimise_irc` and `sella_ts_search` need it, and they are
-the only things that break without it — each raises an `ImportError` repeating
-the command above. Everything else, the NEB and PLUMED halves of the package
-included, works without it.
+Two things follow from bringing it in.
+
+**It is LGPL, not MIT.** Sella is licensed under the GNU Lesser General Public
+License v3, copyright Sandia National Laboratories (NTESS) under US Government
+contract DE-NA0003525, and that licence travels with the code: `tools_sella.py`
+stays LGPL-3.0-or-later while everything else here stays MIT, so the
+distribution as a whole is `MIT AND LGPL-3.0-or-later`. `LICENSE` records which
+is which, `LICENSE.LGPL` and `LICENSE.GPL` carry the text, and you may modify
+that module and relink it against the rest of the package under those terms.
+
+**It is why `jax` is a dependency.** Sella differentiates its internal
+coordinates rather than hand-coding the derivatives, so `jax` and `jaxlib` are
+installed with the package. They are used for automatic differentiation only,
+never for linear algebra, so the CPU wheels are enough and no GPU build is
+needed. Compiled programs are cached under
+`~/.cache/reactiontools/jax_cache`; set `JAX_COMPILATION_CACHE_DIR` to move it
+if the home directory is not writable.
+
+Upstream Sella also ships three Cython extension modules. None are built here:
+two were unused, and of the third only one routine was ever called from Python,
+which is reimplemented in NumPy. That is what keeps `reactiontools` a
+pure-Python wheel with no build step.
 
 ### Development
 

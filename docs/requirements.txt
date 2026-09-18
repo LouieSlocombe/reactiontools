@@ -1,8 +1,8 @@
 # The environment ReadTheDocs builds in. reactiontools itself is NOT installed:
 # docs/conf.py puts the repository root on sys.path, and the flat layout makes
-# `import reactiontools` work straight from the checkout. That keeps the two
-# git+https dependencies and a compiled mdtraj out of the build entirely -- see
-# autodoc_mock_imports in conf.py.
+# `import reactiontools` work straight from the checkout. That keeps jax and a
+# compiled mdtraj out of the build entirely -- see autodoc_mock_imports in
+# conf.py.
 
 sphinx>=8.1
 furo

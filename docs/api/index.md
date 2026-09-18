@@ -16,6 +16,7 @@ Every name below is also re-exported at the top level, so
 
    tools_reaction
    tools_geodesic
+   tools_sella
    tools_orca
    tools_geometry
    tools_io
@@ -35,6 +36,7 @@ Every name below is also re-exported at the top level, so
 
 tools_reaction
 tools_geodesic
+tools_sella
 tools_orca
 tools_geometry
 tools_io
