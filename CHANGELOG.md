@@ -36,6 +36,17 @@ keeps its name and its meaning.
 - **Sella's internal coordinates and derivatives use NumPy.** The bundled
   implementation supports saddle-point searches and IRCs without JAX or a
   compilation cache, using the package's existing scientific dependencies.
+- **Custom coordinates from `make_internal` fall back to finite differences.**
+  Automatic differentiation used to differentiate whatever scalar function was
+  handed to it exactly. Without JAX, a coordinate built without `jac` takes its
+  gradient from a fourth-order stencil, and one built without `hess`
+  differentiates that gradient again. The result is close but no longer exact —
+  for a smooth coordinate, of order `1e-12` relative on the gradient and `1e-9`
+  on the Hessian, which is well inside what a quasi-Newton search tolerates.
+  Pass `jac` and `hess` to keep analytic derivatives. The built-in coordinates
+  are unaffected: bonds, angles, dihedrals, translations and displacements all
+  carry their own closed forms. `use_jit` is still accepted and now does
+  nothing, since there is no longer anything to compile.
 - `tools_sella` and `tools_geodesic` record the fork and commit they were
   vendored from, so the claim that they stay diffable against upstream can
   actually be checked and the modules re-synced.

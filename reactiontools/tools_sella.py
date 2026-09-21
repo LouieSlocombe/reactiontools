@@ -1145,8 +1145,9 @@ def expand(V, Y, P, B, lams, vecs, shift, method='jd0', seeking=0):
 # ===========================================================================
 # Internal coordinates
 # ===========================================================================
-# Bonds, angles, dihedrals and cell coordinates, their derivatives by
-# automatic differentiation, and the constraint machinery over them.
+# Bonds, angles, dihedrals and cell coordinates, their derivatives by the
+# NumPy forward-mode differentiation below, and the constraint machinery
+# over them.
 
 # =============================================================================
 # Lightweight atoms-like wrapper for efficient coordinate calculations
@@ -1846,11 +1847,14 @@ class Translation(Coordinate):
         return np.zeros(pos.shape + pos.shape, dtype=np.float64)
 
 
-# Nominally, jax.numpy.linalg.eigh supports auto-differentiation,
-# but if any of the eigenvalues are degenerate, the derivatives
-# of *all* eigenvectors will be NaN. Worryingly, this seems to be
-# the case when the molecule in question is sufficiently high-symmetry
-# (e.g. methane) and has not been rotated.
+# The rotation coordinate differentiates an eigenvector of the quaternion
+# F-matrix, which is why the derivatives below are closed-form rather than
+# built from the differentiation machinery above. Differentiating an
+# eigendecomposition gives NaN for the derivatives of *all* eigenvectors as
+# soon as any two eigenvalues are degenerate, which is the case when the
+# molecule in question is sufficiently high-symmetry (e.g. methane) and has
+# not been rotated. The closed forms reach those geometries through a
+# pseudoinverse instead.
 #
 # We are assuming here that the eigenvector of interest corresponds
 # to a simple (non-degenerate) eigenvalue (though we permit the
@@ -1862,7 +1866,7 @@ def _rotation_hessian_np(pos, axis, refpos, q_stable=None):
 
     Uses an analytic eigenvector second derivative that handles degenerate
     eigenvalues (linear molecules) via the Moore-Penrose pseudoinverse,
-    avoiding the NaN that JAX autodiff produces in that case.
+    which differentiating the eigendecomposition itself cannot do.
 
     Parameters
     ----------
