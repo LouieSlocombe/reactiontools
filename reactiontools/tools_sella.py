@@ -44,9 +44,13 @@ Module layout, in dependency order -- each section uses only the ones above it:
     :class:`Sella` and :class:`IRC`.
 
 Derived from `Sella <https://github.com/zadorlab/sella>`_ by Eric Hermes and
-contributors. **Unlike the rest of this package, which is MIT licensed, this
-module is licensed under the GNU Lesser General Public License, version 3 or
-later**, as the code it derives from is:
+contributors, by way of the fork at https://github.com/LouieSlocombe/sella,
+whose nine Python modules this file is the flattening of. Taken from commit
+``94eb1c98fc4ed72a6f5104c10b43101a089d90eb`` of 13 August 2026; that is the
+tree to diff this file against, and the one to re-sync from. **Unlike the rest
+of this package, which is MIT licensed, this module is licensed under the GNU
+Lesser General Public License, version 3 or later**, as the code it derives
+from is:
 
     Copyright 2019 National Technology & Engineering Solutions of Sandia, LLC
     (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S.
@@ -64,10 +68,23 @@ Changes made from upstream when the code was brought into this package:
   called from Python. It is reimplemented in NumPy below, which is what keeps
   this a pure-Python package with no build step.
 * ``samd``, an unreferenced simulated-annealing module, was dropped.
-* The nine remaining modules were flattened into this one, in dependency order,
-  with their contents otherwise unchanged.
+* The nine remaining modules were flattened into this one, in dependency order.
+  Their contents are unchanged but for what the rest of this list records.
+* ``_rotation_3axis_hvp`` and the jitted ``vmap`` wrapper over it were dropped.
+  Nothing called either, and the function referenced
+  ``_rotation_3axis_masked``, which is defined nowhere, so calling it could
+  only ever have raised ``NameError``. The rotation Hessian-vector products the
+  code actually takes come from the closed-form
+  ``_rotation_3axis_hvp_batched_closed``.
+* ``ase.utils.basestring``, which ASE still defines as ``basestring = str`` for
+  the sake of Python 2, is no longer imported; the two ``isinstance`` checks it
+  was used in test against :class:`str` directly.
+* ``__all__`` was added, naming the four classes this module exports.
 * The JAX compilation cache defaults to ``~/.cache/reactiontools/jax_cache``
-  rather than ``~/.cache/sella/jax_cache``.
+  rather than ``~/.cache/sella/jax_cache``, and a cache directory that cannot
+  be created no longer raises. The cache only saves tracing time, but this
+  module is imported by the package ``__init__``, so an unwritable home
+  directory used to make ``import reactiontools`` fail outright.
 * :class:`Sella`, :class:`IRC`, :class:`Internals` and :class:`Constraints`
   were given the class docstrings they lack upstream, as this package requires
   every name it exports to carry one.
@@ -122,7 +139,6 @@ from ase.data import covalent_radii
 from ase.geometry import complete_cell, minkowski_reduce
 from ase.io.trajectory import Trajectory, TrajectoryWriter
 from ase.optimize.optimize import Optimizer
-from ase.utils import basestring
 from scipy import sparse
 from scipy.integrate import LSODA
 from scipy.linalg import (
@@ -139,16 +155,34 @@ from scipy.linalg import (
 )
 from scipy.sparse.linalg import LinearOperator
 
+# The four names this module exports. Everything else in it is machinery for
+# them -- coordinate systems, steppers, linear operators -- and is not part of
+# the package's public surface. Keep in step with the tools_sella block of
+# reactiontools.__all__; docs/api/tools_sella.md documents whatever is listed
+# here.
+__all__ = ["Sella", "IRC", "Internals", "Constraints"]
+
 # JAX reads both of these when it is imported, so they have to be set first.
 # The cache holds compiled XLA programs, which saves a few seconds of tracing
 # on every run after the first; point JAX_COMPILATION_CACHE_DIR somewhere else
 # if the home directory is not writable. Only automatic differentiation is
 # asked of JAX here, never linear algebra, so there is nothing for a GPU to do.
+_JAX_CACHE_DIR_DEFAULT = os.path.expanduser("~/.cache/reactiontools/jax_cache")
 _JAX_CACHE_DIR = os.environ.setdefault(
-    "JAX_COMPILATION_CACHE_DIR",
-    os.path.expanduser("~/.cache/reactiontools/jax_cache"),
+    "JAX_COMPILATION_CACHE_DIR", _JAX_CACHE_DIR_DEFAULT
 )
-os.makedirs(_JAX_CACHE_DIR, exist_ok=True)
+try:
+    os.makedirs(_JAX_CACHE_DIR, exist_ok=True)
+except OSError:
+    # The cache only saves tracing time, so a directory that cannot be created
+    # -- a read-only home on a compute node, a container with no writable HOME
+    # -- must not take the whole package down with it, and this module is
+    # imported by reactiontools/__init__.py. Drop the variable again if it was
+    # this module that set it; one the caller set is theirs to keep, and JAX
+    # warns rather than raises when it cannot write there.
+    if _JAX_CACHE_DIR == _JAX_CACHE_DIR_DEFAULT:
+        del os.environ["JAX_COMPILATION_CACHE_DIR"]
+    _JAX_CACHE_DIR = None
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 import jax  # noqa: E402
@@ -159,11 +193,12 @@ from jax import device_get, grad, jacfwd, jacrev, jit, jvp, vmap  # noqa: E402
 # loses saddle points outright, so ask JAX for doubles. Nothing has been traced
 # at this point -- jit only traces on first call -- so this still takes effect.
 jax.config.update("jax_enable_x64", True)
-try:
-    jax.config.update("jax_compilation_cache_dir", _JAX_CACHE_DIR)
-    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
-except Exception:  # pragma: no cover - older JAX without the cache options
-    pass
+if _JAX_CACHE_DIR is not None:
+    try:
+        jax.config.update("jax_compilation_cache_dir", _JAX_CACHE_DIR)
+        jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
+    except Exception:  # pragma: no cover - older JAX without the cache options
+        pass
 
 
 def _modified_gram_schmidt(
@@ -2129,26 +2164,6 @@ def _rotation_3axis_hvp_batched_closed(pos_pad, ref_pad, mask, v_pad,
             hvp[idx, axis, :nr, :] = hvp_axis
 
     return hvp
-
-
-def _rotation_3axis_hvp(pos, refpos, mask, v):
-    """HVP for one fragment, all 3 axes at once.
-
-    Returns shape (3, N, 3) — the directional derivative of the
-    Jacobian (3, N, 3) along v (N, 3).
-    """
-    primals = (pos,)
-    tangents = (v,)
-    _, hvp = jvp(
-        lambda p: jacfwd(_rotation_3axis_masked, argnums=0)(p, refpos, mask),
-        primals, tangents
-    )
-    return hvp
-
-
-_rotation_3axis_hvp_batched_jit = jit(
-    vmap(_rotation_3axis_hvp, in_axes=(0, 0, 0, 0))
-)
 
 
 class Rotation(Coordinate):
@@ -5226,7 +5241,7 @@ class PES:
         self.eigensolver = eigensolver
 
         if trajectory is not None:
-            if isinstance(trajectory, basestring):
+            if isinstance(trajectory, str):
                 self.traj = Trajectory(trajectory, 'w', self.atoms)
             else:
                 self.traj = trajectory
@@ -8534,7 +8549,7 @@ class Sella(Optimizer):
                 )
 
         if trajectory is not None:
-            if isinstance(trajectory, basestring):
+            if isinstance(trajectory, str):
                 mode = "a" if append_trajectory else "w"
                 trajectory = Trajectory(trajectory, mode=mode,
                                         atoms=atoms, master=master)

@@ -34,10 +34,13 @@ under the MIT licence set out above:
 
 Copyright (c) 2024 Xiaolei Zhu
 
+The header of that file names the fork and commit it was taken from.
+
 reactiontools/tools_sella.py is derived from Sella
-(https://github.com/zadorlab/sella). It is NOT covered by the MIT licence
-above. It is licensed under the GNU Lesser General Public License, version 3
-or later, as the code it derives from is:
+(https://github.com/zadorlab/sella); the header of that file names the fork and
+commit it was taken from. It is NOT covered by the MIT licence above. It is
+licensed under the GNU Lesser General Public License, version 3 or later, as
+the code it derives from is:
 
 Copyright 2019 National Technology & Engineering Solutions of Sandia, LLC
 (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S.

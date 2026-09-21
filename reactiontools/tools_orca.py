@@ -55,6 +55,7 @@ from ase.calculators.orca import ORCA, OrcaProfile, OrcaTemplate
 from ase.io import read
 from ase.units import Hartree, kcal, mol
 
+from .tools_reaction import _check_converged
 from .tools_sella import Sella
 
 # --- shared helpers ----------------------------------------------------------
@@ -1314,6 +1315,7 @@ def sella_ts_search(
     steps: int = 200,
     trajectory: Optional[str] = "ts_search.traj",
     internal: bool = False,
+    raise_on_unconverged: bool = False,
     **calc_kwargs: Any,
 ) -> Atoms:
     """Locate a saddle point with Sella, using ORCA only for energy+gradient.
@@ -1338,6 +1340,9 @@ def sella_ts_search(
         Path to write the search trajectory to; None writes nothing.
     internal : bool, optional
         Use Sella's internal coordinates instead of Cartesian coordinates.
+    raise_on_unconverged : bool, optional
+        Raise :exc:`~reactiontools.tools_reaction.ConvergenceError` instead of
+        warning when the search hits ``steps`` without reaching ``fmax``.
     **calc_kwargs
         Passed to :func:`orca_calculator`. ``task`` and ``atoms`` default to
         ``"engrad"`` and *atoms*.
@@ -1345,8 +1350,16 @@ def sella_ts_search(
     Returns
     -------
     ase.Atoms
-        The same object, at the located saddle point.
+        The same object, at the located saddle point, with
+        ``info["converged"]`` recording whether the search reached ``fmax``.
+        As with :func:`~reactiontools.tools_reaction.optimise_ts`, converging
+        says the search found *a* stationary point, not that it is a
+        first-order saddle -- run a frequency job to confirm that.
 
+    Raises
+    ------
+    reactiontools.tools_reaction.ConvergenceError
+        If the search did not converge and ``raise_on_unconverged`` is True.
     """
     calc_kwargs.setdefault("task", "engrad")
     calc_kwargs.setdefault("atoms", atoms)
@@ -1355,7 +1368,13 @@ def sella_ts_search(
     )
 
     opt = Sella(atoms, order=1, internal=internal, trajectory=trajectory)
-    opt.run(fmax=fmax, steps=steps)
+    converged = opt.run(fmax=fmax, steps=steps)
+    # Same contract as every optimise_* function: a search that ran out of
+    # steps hands back a structure that looks like any other, and at ORCA
+    # gradient prices that is an expensive thing to discover later.
+    atoms.info["converged"] = _check_converged(
+        converged, "Sella TS search", fmax, steps, raise_on_unconverged
+    )
     return atoms
 
 

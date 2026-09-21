@@ -38,13 +38,52 @@ keeps its name and its meaning.
   derivatives. They are used for automatic differentiation only, never linear
   algebra, so the CPU wheels are enough and no GPU build is needed. Compiled
   programs are cached under `~/.cache/reactiontools/jax_cache`; set
-  `JAX_COMPILATION_CACHE_DIR` to move it.
+  `JAX_COMPILATION_CACHE_DIR` to move it. A cache directory that cannot be
+  created is no longer fatal: it only saves tracing time, but `tools_sella` is
+  imported by the package `__init__`, so an unwritable home — a compute node, a
+  container without a writable `HOME` — used to make `import reactiontools`
+  fail outright with a `PermissionError`.
+- `tools_sella` and `tools_geodesic` record the fork and commit they were
+  vendored from, so the claim that they stay diffable against upstream can
+  actually be checked and the modules re-synced.
+- `tools_sella` defines `__all__` — `Sella`, `IRC`, `Internals`, `Constraints`
+  — so its API page no longer hand-maintains that list.
+- Two pieces of dead code are gone from `tools_sella`: `_rotation_3axis_hvp`
+  and its jitted wrapper, which nothing called and which referenced an
+  undefined name, so calling them could only have raised `NameError`; and the
+  `ase.utils.basestring` import, which ASE still defines as `basestring = str`
+  for the sake of Python 2.
 - Upstream Sella's three Cython extension modules are not built here.
   `force_match` was unreferenced, `utilities.blas` existed only to serve
   `utilities.math` at the C level, and of `utilities.math` only
   `modified_gram_schmidt` was ever called from Python — it is reimplemented in
   NumPy. `reactiontools` therefore remains a pure-Python `py3-none-any` wheel
   with no build step, and `pseudo_inverse`, which nothing used, is gone.
+
+### Fixed
+
+- **`geodesic_interpolate` no longer accepts end states that describe
+  different atoms.** The coordinates carry no record of which atom is which, so
+  two structures built separately — the usual way to get a product — were
+  interpolated between position by position whatever their symbols said. A
+  reordered product gave a path to something that was not the product, with no
+  error; a product with a different number of atoms gave an inhomogeneous-array
+  message from NumPy. Both now raise `ValueError` naming the first frame and
+  atom that disagree. This guards `prepare_neb`, `quick_guess_path`,
+  `quick_guess_ts` and `seed_product_from_ts`.
+- **`sella_ts_search` reports a search that ran out of steps.** It records
+  `info["converged"]` and warns `ConvergenceWarning`, as `optimise_ts` and
+  `optimise_irc` already did and as the package promises of every optimiser; it
+  takes `raise_on_unconverged` for a `ConvergenceError` instead. The flag Sella
+  returned was being discarded, so an unconverged saddle came back looking like
+  any other — at ORCA gradient prices, usually not noticed until the frequency
+  job.
+- `prepare_neb(geo_int=True)` hands `geodesic_interpolate` the two end states
+  rather than a band already padded to `n_images` with copies of the reactant.
+  The padding is what ASE's own `interpolate()` needs, but it left
+  `redistribute` with a path that was already the right length, so its
+  bisection never ran and the smoothing started from interior images all
+  sitting on the reactant. `quick_guess_path` always called it the other way.
 
 ### Removed
 

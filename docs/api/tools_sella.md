@@ -2,5 +2,5 @@
 
 ```{eval-rst}
 .. automodule:: reactiontools.tools_sella
-   :members: Sella, IRC, Internals, Constraints
+   :members:
 ```

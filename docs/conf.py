@@ -54,8 +54,12 @@ exclude_patterns = ["_build", "build", "build_tools", "Thumbs.db", ".DS_Store"]
 
 # -- autodoc / autosummary ---------------------------------------------------
 
-# Every module defines __all__, which :members: honours, so the API pages need
-# no hand-maintained name lists.
+# Where a module defines __all__, :members: honours it, so the API pages need no
+# hand-maintained name lists. That matters most for tools_sella, whose four
+# exported classes sit among nine thousand lines of machinery. The modules that
+# define no __all__ are documented member by member instead, which also picks
+# up a handful of module-level constants -- the orca_* keyword tables,
+# C_CYCLE -- that reactiontools.__all__ does not re-export.
 autodoc_default_options = {"members": True, "show-inheritance": True}
 autodoc_member_order = "bysource"
 autodoc_typehints = "signature"

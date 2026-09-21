@@ -16,9 +16,13 @@ what the eigensolver and linear-operator tests are built on.
 
 import importlib.util
 import math
+import os
+import subprocess
+import sys
 import warnings
 from collections.abc import Callable, Sequence
 from itertools import permutations, product
+from pathlib import Path
 from typing import Union
 
 import numpy as np
@@ -34,6 +38,7 @@ from numpy.testing import assert_allclose
 from scipy.linalg import polar
 from scipy.stats import ortho_group
 
+import reactiontools
 from reactiontools import tools_sella
 from reactiontools.tools_sella import (
     IRC,
@@ -2649,3 +2654,56 @@ def test_modified_gram_schmidt_matches_the_cython_it_replaced(n, mx, my, degener
 
     assert actual.shape == expected.shape
     np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=1e-12)
+
+
+# ===========================================================================
+# Import-time environment
+# ===========================================================================
+# This module is imported by reactiontools/__init__.py, so anything it does at
+# import time it does to every user of the package.
+
+
+def test_an_unwritable_cache_directory_does_not_break_the_import(
+    tmp_path: Path,
+) -> None:
+    """Regression: an unwritable home made ``import reactiontools`` fail.
+
+    The JAX compilation cache only saves tracing time, but the ``os.makedirs``
+    that created it was unguarded, so a read-only home -- a compute node, a
+    container without a writable HOME -- raised PermissionError out of the
+    package __init__ and took every workflow down with it.
+
+    Run in a subprocess because the module under test is already imported.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    home.chmod(0o555)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "MPLCONFIGDIR": str(tmp_path / "mpl"),
+    }
+    env.pop("JAX_COMPILATION_CACHE_DIR", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import reactiontools;"
+            "from reactiontools import tools_sella;"
+            "import os;"
+            "print(tools_sella._JAX_CACHE_DIR);"
+            "print('JAX_COMPILATION_CACHE_DIR' in os.environ)",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=Path(reactiontools.__file__).resolve().parents[1],
+    )
+
+    assert result.returncode == 0, result.stderr
+    cache_dir, var_set = result.stdout.split()[-2:]
+    # The cache is off rather than pointed at a directory that is not there,
+    # and the variable this module would have set is not left behind.
+    assert cache_dir == "None"
+    assert var_set == "False"

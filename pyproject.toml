@@ -156,13 +156,15 @@ extend-exclude = ["reactiontools/opes/*.py"]
 select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.ruff.lint.per-file-ignores]
-# tools_sella.py is vendored upstream Sella, left as it was found so that it
-# stays diffable against the project it came from. Every one of these is an
-# upstream finding, not this package's, and all of them are still present in
-# sella at the commit this was taken from:
-#   F821  _rotation_3axis_masked is referenced by _rotation_3axis_hvp and
-#         defined nowhere -- a latent NameError on an untested code path,
-#         reported upstream rather than invented a fix for here.
-#   F841  four dead local assignments.
+# tools_sella.py is vendored Sella, kept close to the tree it came from so that
+# it stays diffable against it -- the fork and commit are named in the header
+# of that file. Both of these are upstream findings, not this package's, and
+# both are still present at that commit:
+#   F841  five dead local assignments.
 #   E702  one compound statement written with a semicolon.
-"reactiontools/tools_sella.py" = ["E702", "F821", "F841"]
+# The F821 that used to be ignored here is gone: _rotation_3axis_hvp
+# referenced the undefined _rotation_3axis_masked, and it was dead code --
+# nothing called it or the jitted wrapper below it, the live path being
+# _rotation_3axis_hvp_batched_closed -- so both were deleted rather than
+# ignored. The deletion is recorded in the tools_sella.py header.
+"reactiontools/tools_sella.py" = ["E702", "F841"]

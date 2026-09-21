@@ -79,10 +79,11 @@ Consistent matplotlib styling lives in ``tools_style`` and is applied by every
 plotting function; ``n_plot`` and ``ax_plot`` are exported for use on your own
 axes.
 
-Every ``optimise_*`` function records whether it actually reached its force
-criterion in ``info["converged"]`` on the structures it returns, and warns
-``ConvergenceWarning`` when it did not. Pass ``raise_on_unconverged=True`` for
-a ``ConvergenceError`` instead, or promote every one of them at once with
+Every ``optimise_*`` function, and ``sella_ts_search`` with them, records
+whether it actually reached its force criterion in ``info["converged"]`` on the
+structures it returns, and warns ``ConvergenceWarning`` when it did not. Pass
+``raise_on_unconverged=True`` for a ``ConvergenceError`` instead, or promote
+every one of them at once with
 ``warnings.simplefilter("error", ConvergenceWarning)``.
 
 MDTraj is an installed dependency but is imported only by the workflows that

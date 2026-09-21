@@ -538,6 +538,42 @@ class TestAseConversion:
         with pytest.raises(ValueError, match="not the same system"):
             to_ase_atoms(["C", "O"], np.zeros((2, 3)), template=water)
 
+    def test_frames_holding_the_same_atoms_in_a_different_order_are_refused(
+        self,
+    ) -> None:
+        """The coordinates carry no record of which atom is which.
+
+        Two end states built separately are the usual way to get this wrong,
+        and without the check the interpolation runs to completion and hands
+        back a path to a structure that is not the product.
+        """
+        water = molecule("H2O")
+        reordered = water[[1, 0, 2]]
+
+        with pytest.raises(ValueError, match="different order"):
+            from_ase_atoms([water, reordered])
+
+    def test_frames_of_different_composition_are_refused(self) -> None:
+        water = molecule("H2O")
+        swapped = water.copy()
+        swapped.symbols[2] = "F"
+
+        with pytest.raises(ValueError, match="different composition"):
+            from_ase_atoms([water, swapped])
+
+    def test_frames_of_different_length_are_refused(self) -> None:
+        """Otherwise this surfaces as an inhomogeneous-array error from NumPy."""
+        water = molecule("H2O")
+
+        with pytest.raises(ValueError, match="4 atoms, against 3"):
+            from_ase_atoms([water, molecule("NH3")])
+
+    def test_geodesic_interpolate_refuses_mismatched_end_states(self) -> None:
+        water = molecule("H2O")
+
+        with pytest.raises(ValueError, match="different order"):
+            geodesic_interpolate([water, water[[1, 0, 2]]], n_images=5)
+
 
 class TestXyzFiles:
     def test_coordinates_survive_a_round_trip(self, tmp_path: Path) -> None:

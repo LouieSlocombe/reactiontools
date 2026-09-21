@@ -20,7 +20,9 @@ than one after another.
 Every ``optimise_*`` function records whether it reached its force criterion in
 ``info["converged"]`` on the structures it returns, and warns
 :class:`ConvergenceWarning` when it did not; pass ``raise_on_unconverged=True``
-for a :class:`ConvergenceError` instead.
+for a :class:`ConvergenceError` instead. So does
+:func:`reactiontools.tools_orca.sella_ts_search`, which reaches for the helper
+here rather than keeping a second copy of the rule.
 
 The saddle-point searches, :func:`optimise_ts` and :func:`optimise_irc`, are
 driven by :mod:`reactiontools.tools_sella`, which is part of the package like
@@ -57,7 +59,8 @@ class ConvergenceWarning(UserWarning):
     Warned rather than raised because a partly relaxed structure is often
     still worth looking at, and because a band that ran out of steps is a
     perfectly good starting point for the next run. Pass
-    ``raise_on_unconverged=True`` to any of the ``optimise_*`` functions for a
+    ``raise_on_unconverged=True`` to any of the ``optimise_*`` functions, or to
+    :func:`reactiontools.tools_orca.sella_ts_search`, for a
     :exc:`ConvergenceError` instead, or turn every one of them into an error
     at once with ``warnings.simplefilter("error", ConvergenceWarning)``.
     """
@@ -66,7 +69,8 @@ class ConvergenceWarning(UserWarning):
 class ConvergenceError(RuntimeError):
     """An optimisation stopped before reaching its force criterion.
 
-    Raised by the ``optimise_*`` functions in place of
+    Raised by the ``optimise_*`` functions, and by
+    :func:`reactiontools.tools_orca.sella_ts_search`, in place of
     :class:`ConvergenceWarning` when they are called with
     ``raise_on_unconverged=True``.
     """
@@ -479,10 +483,21 @@ def _build_band(
     ase.mep.NEB
         Interpolated band with ``image.calc`` still ``None`` throughout.
     """
-    neb_images = [reactant] + [reactant.copy() for _ in range(n_images - 2)] + [product]
-
     if geo_int:
-        neb_images = geodesic_interpolate(neb_images, n_images=n_images)
+        # Just the two end states: geodesic_interpolate bisects its way up to
+        # n_images itself. Handing it a list already n_images long -- padded
+        # out with copies of the reactant, as ASE's own interpolate() needs --
+        # would leave redistribute() with nothing to do and start the
+        # smoothing from a path whose interior images all sit on the reactant.
+        neb_images = geodesic_interpolate([reactant, product], n_images=n_images)
+    else:
+        # ASE interpolates in place, so the band has to be the right length
+        # before NEB.interpolate() is called on it below.
+        neb_images = (
+            [reactant]
+            + [reactant.copy() for _ in range(n_images - 2)]
+            + [product]
+        )
 
     neb = NEB(
         neb_images,

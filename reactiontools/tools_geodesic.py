@@ -41,7 +41,11 @@ are in the frame it was given with.
 
 Derived from `geodesic-interpolate
 <https://github.com/virtualzx-nad/geodesic-interpolate>`_ by Xiaolei Zhu, MIT
-licensed; the copyright notice travels with this package in ``LICENSE``. Cite
+licensed; the copyright notice travels with this package in ``LICENSE``. It
+came by way of the fork at
+https://github.com/LouieSlocombe/geodesic_interpolate,
+commit ``1e37b32aab77bcab0273e806b5a0a35df81160dd`` of 20 August 2026, which is
+the tree to diff this file against and the one to re-sync from. Cite
 ``zhu2019geodesic`` when you use it -- see ``CITATIONS.bib``.
 """
 
@@ -1310,11 +1314,17 @@ def redistribute(
 def from_ase_atoms(atoms: list[Atoms]) -> tuple[list[str], list[np.ndarray]]:
     """Split a list of ASE Atoms objects into symbols and coordinates.
 
+    Every frame must hold the same atoms in the same order, since the symbols
+    are taken from the first one and the interpolation matches the frames up
+    atom by atom. Two end states built separately are the usual way to get
+    that wrong, so it is checked here rather than assumed: the coordinates
+    alone carry no record of which atom is which, and a path interpolated
+    between mismatched frames is silently a path to the wrong structure.
+
     Parameters
     ----------
     atoms : list of ase.Atoms
-        Frames of the path. All are assumed to hold the same atoms in the same
-        order, so the symbols are taken from the first one.
+        Frames of the path.
 
     Returns
     -------
@@ -1322,10 +1332,37 @@ def from_ase_atoms(atoms: list[Atoms]) -> tuple[list[str], list[np.ndarray]]:
         Element symbols of all the atoms.
     coords : list of numpy.ndarray
         Cartesian coordinates for every frame.
+
+    Raises
+    ------
+    ValueError
+        If the frames do not all describe the same atoms in the same order.
     """
     atom_names = atoms[0].get_chemical_symbols()
     coords: list[np.ndarray] = []
-    for atom in atoms:
+    for i, atom in enumerate(atoms):
+        symbols = atom.get_chemical_symbols()
+        if symbols != atom_names:
+            first = next(
+                (j for j, (a, b) in enumerate(zip(atom_names, symbols)) if a != b),
+                min(len(symbols), len(atom_names)),
+            )
+            if len(symbols) != len(atom_names):
+                detail = f"{len(symbols)} atoms, against {len(atom_names)}"
+            elif sorted(symbols) == sorted(atom_names):
+                detail = (
+                    f"the same atoms in a different order: atom {first} is "
+                    f"{symbols[first]}, not {atom_names[first]}"
+                )
+            else:
+                detail = (
+                    f"a different composition: atom {first} is "
+                    f"{symbols[first]}, not {atom_names[first]}"
+                )
+            raise ValueError(
+                f"Frame {i} has {detail}. Every frame of a path must hold the "
+                f"same atoms in the same order as the first."
+            )
         coords.append(np.array(atom.get_positions()))
     return atom_names, coords
 

@@ -24,6 +24,8 @@ from ase.io import read, write
 from reactiontools import (
     CHEAP_METHODS,
     NATIVE_XTB_METHODS,
+    ConvergenceError,
+    ConvergenceWarning,
     GoldStandard,
     orca_calc_preset,
     orca_calculate_goat,
@@ -751,8 +753,9 @@ def test_sella_search_wires_the_calculator_and_optimizer(
         def __init__(self, atoms: Atoms, **kwargs: Any) -> None:
             seen["optimizer"] = (atoms, kwargs)
 
-        def run(self, **kwargs: Any) -> None:
+        def run(self, **kwargs: Any) -> bool:
             seen["run"] = kwargs
+            return True
 
     monkeypatch.setattr(tools_orca, "orca_calculator", fake_calculator)
     # sella_ts_search binds Sella into tools_orca, so that is what to patch.
@@ -784,6 +787,35 @@ def test_sella_search_wires_the_calculator_and_optimizer(
         "trajectory": "sella.traj",
     }
     assert seen["run"] == {"fmax": 0.03, "steps": 17}
+    assert water.info["converged"] is True
+
+
+def test_sella_search_reports_a_search_that_ran_out_of_steps(
+    monkeypatch: pytest.MonkeyPatch, water: Atoms
+) -> None:
+    """The same contract as optimise_ts, at ORCA gradient prices.
+
+    A search that hit its step limit hands back a structure that looks like
+    any other, and the next thing to notice is usually the frequency job.
+    """
+
+    class UnconvergedSella:
+        def __init__(self, atoms: Atoms, **kwargs: Any) -> None:
+            pass
+
+        def run(self, **kwargs: Any) -> bool:
+            return False
+
+    monkeypatch.setattr(tools_orca, "orca_calculator", lambda **kwargs: object())
+    monkeypatch.setattr(tools_orca, "Sella", UnconvergedSella)
+
+    with pytest.warns(ConvergenceWarning, match="Sella TS search"):
+        result = sella_ts_search(water, steps=3)
+
+    assert result.info["converged"] is False
+
+    with pytest.raises(ConvergenceError, match="Sella TS search"):
+        sella_ts_search(water, steps=3, raise_on_unconverged=True)
 
 
 DLPNO_OUT = """

@@ -654,6 +654,36 @@ class TestPrepareNeb:
             np.isfinite([image.get_potential_energy() for image in neb.images])
         )
 
+    def test_geodesic_interpolation_gets_only_the_end_states(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        calc: EMT,
+        endpoints: tuple[Atoms, Atoms],
+    ) -> None:
+        """redistribute() has to be the one that sets the image count.
+
+        A band padded to n_images before the call -- which is what ASE's own
+        interpolate() needs -- leaves redistribute() with a path that is
+        already the right length, so its bisection never runs and the
+        smoothing starts from interior images all sitting on the reactant.
+        """
+        reactant, product = endpoints
+        seen = {}
+        original = tools_reaction.geodesic_interpolate
+
+        def spy(images, **kwargs):
+            seen["n_given"] = len(images)
+            seen["kwargs"] = kwargs
+            return original(images, **kwargs)
+
+        monkeypatch.setattr(tools_reaction, "geodesic_interpolate", spy)
+
+        neb = prepare_neb(reactant, product, calc, n_images=7, geo_int=True)
+
+        assert seen["n_given"] == 2
+        assert seen["kwargs"] == {"n_images": 7}
+        assert len(neb.images) == 7
+
     def test_images_do_not_share_calculator_state(
         self, endpoints: tuple[Atoms, Atoms]
     ) -> None:
