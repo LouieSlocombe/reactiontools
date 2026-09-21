@@ -27,5 +27,5 @@ dependencies:
 
 # sella is deliberately absent, and needs nothing doing about it: the
 # saddle-point searches are part of the package now, as
-# reactiontools/tools_sella.py, so `pip install -e ..` is all it takes. jax,
-# which that module needs, comes in the same way. See docs/installation.md.
+# reactiontools/tools_sella.py, so `pip install -e ..` is all it takes.
+# Its internal coordinates and derivatives use NumPy. See docs/installation.md.

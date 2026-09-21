@@ -4,8 +4,6 @@
 # "dev" optional-dependency group.
 # Dependencies without declared floors are resolved normally.
 ase==3.25.0
-jax==0.4.20
-jaxlib==0.4.20
 matplotlib==3.8.4
 mdtraj==1.10.2
 numpy==2.0.0

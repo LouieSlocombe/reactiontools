@@ -19,6 +19,7 @@ import math
 import os
 import subprocess
 import sys
+import textwrap
 import warnings
 from collections.abc import Callable, Sequence
 from itertools import permutations, product
@@ -603,6 +604,298 @@ def test_get_internal(name: str) -> None:
     np.testing.assert_allclose(hess, hess_numer, rtol=1e-7, atol=1e-7)
 
 
+def _ase_coordinate_value(kind, positions, tvecs):
+    """Evaluate a coordinate independently, after unwrapping its image shifts."""
+    unwrapped = positions.copy()
+    unwrapped[1:] += np.cumsum(tvecs, axis=0)
+    atoms = Atoms("H" * len(positions), positions=unwrapped)
+    if kind == "bond":
+        return atoms.get_distance(0, 1)
+    if kind == "angle":
+        return np.deg2rad(atoms.get_angle(0, 1, 2))
+    angle = np.deg2rad(atoms.get_dihedral(0, 1, 2, 3))
+    return np.arctan2(np.sin(angle), np.cos(angle))
+
+
+def _coordinate_difference(kind, plus, minus):
+    difference = plus - minus
+    if kind == "dihedral":
+        return np.arctan2(np.sin(difference), np.cos(difference))
+    return difference
+
+
+@pytest.mark.parametrize("kind,natoms", [("bond", 2), ("angle", 3), ("dihedral", 4)])
+@pytest.mark.parametrize("batch_size", [1, 5])
+def test_coordinate_kernels_with_periodic_images(kind, natoms, batch_size):
+    """Scalar, batched, cell and directional derivatives retain ASE geometry."""
+    rng = np.random.default_rng(804)
+    positions = rng.normal(size=(batch_size, natoms, 3))
+    ncvecs = rng.integers(-1, 2, size=(batch_size, natoms - 1, 3))
+    cell = np.array([[2.8, 0.3, -0.2], [0.6, 3.3, 0.4], [-0.1, 0.5, 3.8]])
+    tvecs = ncvecs @ cell
+    value = getattr(tools_sella, f"_{kind}_value_batched")
+    gradient = getattr(tools_sella, f"_{kind}_grad_batched")
+    hessian = getattr(tools_sella, f"_{kind}_hess_batched")
+    hvp = getattr(tools_sella, f"_{kind}_hvp_batched")
+    cell_gradient = getattr(tools_sella, f"_{kind}_cell_grad_batched")
+    coordinate_class = getattr(tools_sella, kind.capitalize())
+    expected_values = np.array([
+        _ase_coordinate_value(kind, pos, shift)
+        for pos, shift in zip(positions, tvecs)
+    ])
+    assert_allclose(
+        _coordinate_difference(kind, np.asarray(value(positions, tvecs)), expected_values),
+        0, atol=1e-12,
+    )
+
+    grad = np.asarray(gradient(positions, tvecs))
+    hess = np.asarray(hessian(positions, tvecs))
+    cell_grad = np.asarray(cell_gradient(positions, ncvecs, cell))
+    assert grad.shape == (batch_size, natoms, 3)
+    assert hess.shape == (batch_size, natoms, 3, natoms, 3)
+    assert cell_grad.shape == (batch_size, 3, 3)
+
+    step = 1e-5
+    numeric_grad = np.zeros_like(grad)
+    numeric_hess = np.zeros_like(hess)
+    for atom, axis in product(range(natoms), range(3)):
+        plus, minus = positions.copy(), positions.copy()
+        plus[:, atom, axis] += step
+        minus[:, atom, axis] -= step
+        for batch in range(batch_size):
+            numeric_grad[batch, atom, axis] = _coordinate_difference(
+                kind,
+                _ase_coordinate_value(kind, plus[batch], tvecs[batch]),
+                _ase_coordinate_value(kind, minus[batch], tvecs[batch]),
+            ) / (2 * step)
+        numeric_hess[:, :, :, atom, axis] = (
+            np.asarray(gradient(plus, tvecs)) - np.asarray(gradient(minus, tvecs))
+        ) / (2 * step)
+    assert_allclose(grad, numeric_grad, atol=1e-8, rtol=1e-7)
+    assert_allclose(hess, numeric_hess, atol=1e-8, rtol=1e-6)
+    assert_allclose(hess, hess.transpose(0, 3, 4, 1, 2), atol=1e-12)
+
+    numeric_cell_grad = np.zeros_like(cell_grad)
+    for row, column in product(range(3), repeat=2):
+        plus, minus = cell.copy(), cell.copy()
+        plus[row, column] += step
+        minus[row, column] -= step
+        for batch in range(batch_size):
+            numeric_cell_grad[batch, row, column] = _coordinate_difference(
+                kind,
+                _ase_coordinate_value(kind, positions[batch], ncvecs[batch] @ plus),
+                _ase_coordinate_value(kind, positions[batch], ncvecs[batch] @ minus),
+            ) / (2 * step)
+    assert_allclose(cell_grad, numeric_cell_grad, atol=1e-8, rtol=1e-7)
+
+    tangent = rng.normal(size=positions.shape)
+    actual_hvp = np.asarray(hvp(positions, tvecs, tangent))
+    numeric_hvp = (
+        np.asarray(gradient(positions + step * tangent, tvecs))
+        - np.asarray(gradient(positions - step * tangent, tvecs))
+    ) / (2 * step)
+    assert_allclose(actual_hvp, numeric_hvp, atol=1e-8, rtol=1e-6)
+    assert_allclose(actual_hvp, np.einsum("naibj,nbj->nai", hess, tangent), atol=1e-12)
+    assert_allclose(hvp(positions, tvecs, np.ones_like(positions)), 0, atol=1e-12)
+
+    for batch in range(batch_size):
+        atoms = Atoms("H" * natoms, positions=positions[batch], cell=cell, pbc=True)
+        coord = coordinate_class(np.arange(natoms), ncvecs=ncvecs[batch])
+        assert_allclose(
+            _coordinate_difference(kind, coord.calc(atoms), expected_values[batch]),
+            0, atol=1e-12,
+        )
+        assert_allclose(coord.calc_gradient(atoms), grad[batch], atol=1e-12)
+        assert_allclose(coord.calc_hessian(atoms), hess[batch], atol=1e-12)
+        assert_allclose(coord.calc_cell_gradient(atoms), cell_grad[batch], atol=1e-12)
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_nearly_linear_angle_derivatives(sign):
+    """Small and almost-straight angles retain finite, correctly scaled curvature."""
+    epsilon = 1e-4
+    positions = np.array([
+        [1., 0., 0.], [0., 0., 0.],
+        [sign * np.cos(epsilon), np.sin(epsilon), 0.],
+    ])[None]
+    tvecs = np.zeros((1, 2, 3))
+
+    def geometric_gradient(pos):
+        left, right = pos[:, 0] - pos[:, 1], pos[:, 2] - pos[:, 1]
+        lnorm = np.linalg.norm(left, axis=1)[:, None]
+        rnorm = np.linalg.norm(right, axis=1)[:, None]
+        left, right = left / lnorm, right / rnorm
+        cosine = np.sum(left * right, axis=1)[:, None]
+        sine = np.linalg.norm(np.cross(left, right), axis=1)[:, None]
+        lgrad = (cosine * left - right) / (lnorm * sine)
+        rgrad = (cosine * right - left) / (rnorm * sine)
+        return np.stack([lgrad, -lgrad - rgrad, rgrad], axis=1)
+
+    expected_value = epsilon if sign == 1 else np.pi - epsilon
+    assert_allclose(tools_sella._angle_value_batched(positions, tvecs),
+                    expected_value, atol=1e-12, rtol=0)
+    assert_allclose(tools_sella._angle_grad_batched(positions, tvecs),
+                    geometric_gradient(positions), atol=1e-8, rtol=1e-7)
+    hess = tools_sella._angle_hess_batched(positions, tvecs)
+    numeric_hess = np.zeros_like(hess)
+    step = epsilon * 1e-4
+    for atom, axis in product(range(3), repeat=2):
+        plus, minus = positions.copy(), positions.copy()
+        plus[:, atom, axis] += step
+        minus[:, atom, axis] -= step
+        numeric_hess[:, :, :, atom, axis] = (
+            geometric_gradient(plus) - geometric_gradient(minus)
+        ) / (2 * step)
+    # Curvature grows as 1 / epsilon near the collinear singularity.
+    assert_allclose(epsilon * hess, epsilon * numeric_hess, atol=2e-7, rtol=1e-7)
+
+
+@pytest.mark.parametrize("epsilon", [1., 1e-4])
+@pytest.mark.parametrize("angle", [-np.pi + 1e-7, np.pi - 1e-7, 0.7])
+def test_dihedral_derivatives_near_branch_cut_and_linear_bonds(epsilon, angle):
+    """Wrapped finite differences remain valid across the +/- pi discontinuity."""
+    positions = np.array([
+        [-1., epsilon, 0.], [0., 0., 0.], [1., 0., 0.],
+        [2., epsilon * np.cos(angle), epsilon * np.sin(angle)],
+    ])[None]
+    tvecs = np.zeros((1, 3, 3))
+    assert_allclose(tools_sella._dihedral_value_batched(positions, tvecs), angle,
+                    atol=1e-12, rtol=0)
+    grad = tools_sella._dihedral_grad_batched(positions, tvecs)
+    hess = tools_sella._dihedral_hess_batched(positions, tvecs)
+    numeric_grad, numeric_hess = np.zeros_like(grad), np.zeros_like(hess)
+    step = epsilon * 1e-4
+    for atom, axis in product(range(4), range(3)):
+        plus, minus = positions.copy(), positions.copy()
+        plus[:, atom, axis] += step
+        minus[:, atom, axis] -= step
+        numeric_grad[0, atom, axis] = _coordinate_difference(
+            "dihedral",
+            _ase_coordinate_value("dihedral", plus[0], tvecs[0]),
+            _ase_coordinate_value("dihedral", minus[0], tvecs[0]),
+        ) / (2 * step)
+        numeric_hess[:, :, :, atom, axis] = (
+            tools_sella._dihedral_grad_batched(plus, tvecs)
+            - tools_sella._dihedral_grad_batched(minus, tvecs)
+        ) / (2 * step)
+    # First and second derivatives scale with inverse bond-plane height.
+    assert_allclose(epsilon * grad, epsilon * numeric_grad, atol=1e-7, rtol=1e-7)
+    assert_allclose(epsilon**2 * hess, epsilon**2 * numeric_hess,
+                    atol=2e-7, rtol=1e-7)
+    tangent = np.random.default_rng(806).normal(size=positions.shape)
+    actual_hvp = tools_sella._dihedral_hvp_batched(positions, tvecs, tangent)
+    assert_allclose(epsilon**2 * actual_hvp,
+                    epsilon**2 * np.einsum("naibj,nbj->nai", numeric_hess, tangent),
+                    atol=2e-6, rtol=1e-7)
+
+
+def test_internal_hessian_vector_product_matches_jacobian_derivative():
+    """The assembled HVP includes every coordinate kind in the correct order."""
+    atoms = molecule("C2H6")
+    internal = Internals(atoms)
+    internal.find_all_bonds()
+    internal.find_all_angles()
+    internal.find_all_dihedrals()
+    internal.add_translation()
+    internal.add_rotation()
+    rng = np.random.default_rng(805)
+    internal.add_other(tools_sella.Displacement(
+        np.arange(len(atoms)), atoms.positions.copy(),
+        rng.normal(size=(3 * len(atoms), 3 * len(atoms))),
+    ))
+    assert all(internal.internals[kind] for kind in internal._names)
+    atoms.positions += rng.normal(scale=0.02, size=atoms.positions.shape)
+    positions = atoms.positions.copy()
+    tangent = rng.normal(size=positions.size)
+    expected = internal.hessian().rdot(tangent)
+    actual = internal.hessian_rdot(tangent).toarray()
+    step = 1e-5
+    atoms.positions = positions + step * tangent.reshape((-1, 3))
+    plus = internal.jacobian().copy()
+    atoms.positions = positions - step * tangent.reshape((-1, 3))
+    minus = internal.jacobian().copy()
+    atoms.positions = positions
+    assert_allclose(actual, expected, atol=1e-10, rtol=1e-10)
+    assert_allclose(actual, (plus - minus) / (2 * step), atol=1e-7, rtol=1e-6)
+
+
+@pytest.mark.parametrize("axis", range(3))
+def test_translation_derivatives(axis):
+    atoms = molecule("CH4")
+    indices = np.array([0, 2, 4])
+    coord = tools_sella.Translation(indices, axis)
+    expected_grad = np.zeros((len(indices), 3))
+    expected_grad[:, axis] = 1 / len(indices)
+    assert_allclose(coord.calc(atoms), atoms.positions[indices, axis].mean())
+    assert_allclose(coord.calc_gradient(atoms), expected_grad, atol=0, rtol=0)
+    assert_allclose(coord.calc_hessian(atoms), np.zeros((3, 3, 3, 3)), atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("provide_jac,provide_hess", list(product([False, True], repeat=2)))
+@pytest.mark.parametrize("use_jit", [False, True])
+def test_custom_coordinate_derivatives(provide_jac, provide_hess, use_jit):
+    """NumPy-only custom coordinates work with supplied or numerical derivatives."""
+    def value(pos):
+        x = pos.ravel()
+        return np.sin(x[0]) * np.exp(x[1]) + x[2]**4 + x[0] * x[4] + x[3]**2
+
+    def gradient(pos):
+        x = pos.ravel()
+        return np.array([
+            np.cos(x[0]) * np.exp(x[1]) + x[4],
+            np.sin(x[0]) * np.exp(x[1]), 4 * x[2]**3,
+            2 * x[3], x[0], 0,
+        ]).reshape(pos.shape)
+
+    def hessian(pos):
+        x = pos.ravel()
+        result = np.zeros((6, 6))
+        result[0, 0] = -np.sin(x[0]) * np.exp(x[1])
+        result[1, 1] = np.sin(x[0]) * np.exp(x[1])
+        result[0, 1] = result[1, 0] = np.cos(x[0]) * np.exp(x[1])
+        result[0, 4] = result[4, 0] = 1
+        result[2, 2] = 12 * x[2]**2
+        result[3, 3] = 2
+        return result.reshape(pos.shape + pos.shape)
+
+    coordinate_class = tools_sella.make_internal(
+        "CustomCoordinate", value, nindices=2, use_jit=use_jit,
+        jac=gradient if provide_jac else None,
+        hess=hessian if provide_hess else None,
+    )
+    atoms = Atoms("H2", positions=[[0.2, -0.4, 0.6], [-0.8, 1.2, 0.1]])
+    coord = coordinate_class((0, 1))
+    assert_allclose(coord.calc(atoms), value(atoms.positions), atol=1e-12)
+    assert_allclose(coord.calc_gradient(atoms), gradient(atoms.positions), atol=1e-7)
+    assert_allclose(coord.calc_hessian(atoms), hessian(atoms.positions), atol=1e-6)
+
+
+@pytest.mark.parametrize("offset", [0., 100., 1000.])
+@pytest.mark.parametrize("provide_jac", [False, True])
+def test_custom_coordinate_derivatives_are_independent_of_origin(offset, provide_jac):
+    """Moving a molecule must not enlarge the numerical differentiation stencil."""
+    def distance(pos):
+        return np.linalg.norm(pos[1] - pos[0])
+
+    def gradient(pos):
+        direction = (pos[1] - pos[0]) / distance(pos)
+        return np.stack([-direction, direction])
+
+    coordinate_class = tools_sella.make_internal(
+        "CustomDistance", distance, nindices=2,
+        jac=gradient if provide_jac else None,
+    )
+    atoms = Atoms("H2", positions=np.array([
+        [0.2, -0.4, 0.6], [-0.8, 1.2, 0.1],
+    ]) + offset)
+    custom, analytic = coordinate_class((0, 1)), Bond((0, 1))
+    assert_allclose(custom.calc(atoms), analytic.calc(atoms), atol=1e-12, rtol=0)
+    assert_allclose(custom.calc_gradient(atoms), analytic.calc_gradient(atoms),
+                    atol=1e-8, rtol=0)
+    assert_allclose(custom.calc_hessian(atoms), analytic.calc_hessian(atoms),
+                    atol=1e-6, rtol=0)
+
+
 class TestTRICs:
     """Tests for Translation-Rotation Internal Coordinates (TRICs)."""
 
@@ -728,7 +1021,7 @@ class TestTRICs:
         # With TRICs, expect 3N = 18 DOF (translations+rotations span full space)
         # validate_basis should not warn about a deficient basis for TRICs.
         # Filter to warnings raised by sella itself -- asserting on the total
-        # count makes this fail on unrelated warnings from JAX, ASE or numpy.
+        # count makes this fail on unrelated warnings from ASE or numpy.
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             ints.validate_basis()
@@ -2663,18 +2956,10 @@ def test_modified_gram_schmidt_matches_the_cython_it_replaced(n, mx, my, degener
 # import time it does to every user of the package.
 
 
-def test_an_unwritable_cache_directory_does_not_break_the_import(
+def test_import_and_optimization_work_without_jax_or_writable_home(
     tmp_path: Path,
 ) -> None:
-    """Regression: an unwritable home made ``import reactiontools`` fail.
-
-    The JAX compilation cache only saves tracing time, but the ``os.makedirs``
-    that created it was unguarded, so a read-only home -- a compute node, a
-    container without a writable HOME -- raised PermissionError out of the
-    package __init__ and took every workflow down with it.
-
-    Run in a subprocess because the module under test is already imported.
-    """
+    """Neither importing the package nor running Sella may require JAX."""
     home = tmp_path / "home"
     home.mkdir()
     home.chmod(0o555)
@@ -2683,27 +2968,60 @@ def test_an_unwritable_cache_directory_does_not_break_the_import(
         "HOME": str(home),
         "MPLCONFIGDIR": str(tmp_path / "mpl"),
     }
-    env.pop("JAX_COMPILATION_CACHE_DIR", None)
+    for name in ("JAX_COMPILATION_CACHE_DIR", "JAX_ENABLE_X64", "JAX_PLATFORMS"):
+        env.pop(name, None)
+
+    script = textwrap.dedent("""\
+        import importlib.abc
+        import os
+        import sys
+
+        attempts = []
+
+        class BlockJax(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.split('.')[0] in {'jax', 'jaxlib'}:
+                    attempts.append(fullname)
+                    raise ImportError(f'{fullname} is deliberately unavailable')
+
+        sys.meta_path.insert(0, BlockJax())
+        before = {name: value for name, value in os.environ.items()
+                  if name.startswith(('JAX_', 'XLA_'))}
+
+        import numpy as np
+        import reactiontools
+        from ase.build import molecule
+        from ase.calculators.emt import EMT
+        from reactiontools.tools_sella import Sella
+
+        for internal in (False, True):
+            atoms = molecule('H2O')
+            atoms.positions *= 1.1
+            atoms.calc = EMT()
+            initial_energy = atoms.get_potential_energy()
+            opt = Sella(atoms, order=0, internal=internal, logfile=None)
+            assert opt.run(fmax=0.03, steps=100), internal
+            assert opt.nsteps > 0, internal
+            assert atoms.get_potential_energy() < initial_energy, internal
+            assert np.max(np.linalg.norm(atoms.get_forces(), axis=1)) < 0.03
+            assert np.isfinite(atoms.positions).all()
+
+        assert attempts == [], attempts
+        assert not any(name.split('.')[0] in {'jax', 'jaxlib'} for name in sys.modules)
+        after = {name: value for name, value in os.environ.items()
+                 if name.startswith(('JAX_', 'XLA_'))}
+        assert after == before, (before, after)
+        print('JAX-free import and both Sella optimizations succeeded')
+    """)
 
     result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import reactiontools;"
-            "from reactiontools import tools_sella;"
-            "import os;"
-            "print(tools_sella._JAX_CACHE_DIR);"
-            "print('JAX_COMPILATION_CACHE_DIR' in os.environ)",
-        ],
+        [sys.executable, "-c", script],
         capture_output=True,
         text=True,
         env=env,
         cwd=Path(reactiontools.__file__).resolve().parents[1],
+        timeout=120,
     )
 
-    assert result.returncode == 0, result.stderr
-    cache_dir, var_set = result.stdout.split()[-2:]
-    # The cache is off rather than pointed at a directory that is not there,
-    # and the variable this module would have set is not left behind.
-    assert cache_dir == "None"
-    assert var_set == "False"
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "JAX-free import and both Sella optimizations succeeded" in result.stdout

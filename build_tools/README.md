@@ -99,13 +99,11 @@ it covers, `LICENSE.LGPL` and `LICENSE.GPL` carry the text, and all three have
 to stay there. If you edit that module, the LGPL asks that the change be noted:
 the list at the top of the file is where the existing ones are recorded.
 
-**It brings `jax`.** Sella differentiates its internal coordinates rather than
-hand-coding the derivatives, so `jax` and `jaxlib` are now dependencies. They
-are used for automatic differentiation only, never linear algebra, so the CPU
-wheels are enough. Upstream also ships three Cython extension modules; none are
-built here — two were unused, and of the third only `modified_gram_schmidt` was
-ever called, which is reimplemented in NumPy. That is what keeps this a
-pure-Python wheel with no build step.
+**Its internal coordinates and derivatives use NumPy.** No JAX installation
+or compilation cache is needed. Upstream also ships three Cython extension
+modules; none are built here — two were unused, and of the third only
+`modified_gram_schmidt` was ever called, which is reimplemented in NumPy. That
+is what keeps this a pure-Python wheel with no build step.
 
 The geodesic notice is at the foot of the repository `LICENSE` and has to stay
 there too.

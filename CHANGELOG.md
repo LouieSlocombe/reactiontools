@@ -33,16 +33,9 @@ keeps its name and its meaning.
   in the new `LICENSE.LGPL` and `LICENSE.GPL`. You may modify that module and
   relink it against the rest of the package under the LGPL; the changes already
   made relative to upstream are listed at the top of the file.
-- **`jax` and `jaxlib` are new runtime dependencies.** `tools_sella`
-  differentiates its internal coordinates rather than hand-coding the
-  derivatives. They are used for automatic differentiation only, never linear
-  algebra, so the CPU wheels are enough and no GPU build is needed. Compiled
-  programs are cached under `~/.cache/reactiontools/jax_cache`; set
-  `JAX_COMPILATION_CACHE_DIR` to move it. A cache directory that cannot be
-  created is no longer fatal: it only saves tracing time, but `tools_sella` is
-  imported by the package `__init__`, so an unwritable home — a compute node, a
-  container without a writable `HOME` — used to make `import reactiontools`
-  fail outright with a `PermissionError`.
+- **Sella's internal coordinates and derivatives use NumPy.** The bundled
+  implementation supports saddle-point searches and IRCs without JAX or a
+  compilation cache, using the package's existing scientific dependencies.
 - `tools_sella` and `tools_geodesic` record the fork and commit they were
   vendored from, so the claim that they stay diffable against upstream can
   actually be checked and the modules re-synced.
@@ -87,6 +80,8 @@ keeps its name and its meaning.
 
 ### Removed
 
+- `jax` and `jaxlib` runtime dependencies, compilation-cache configuration,
+  JAX-specific warning suppression and documentation mocks.
 - `build_tools/editable_repos.sh`. Sella was the last of the git dependencies
   it cloned and installed editable, so the installers no longer clone anything
   but `reactiontools` itself; the clone helper they still use moved to

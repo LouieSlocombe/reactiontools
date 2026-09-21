@@ -91,13 +91,10 @@ distribution as a whole is `MIT AND LGPL-3.0-or-later`. `LICENSE` records which
 is which, `LICENSE.LGPL` and `LICENSE.GPL` carry the text, and you may modify
 that module and relink it against the rest of the package under those terms.
 
-**It is why `jax` is a dependency.** Sella differentiates its internal
-coordinates rather than hand-coding the derivatives, so `jax` and `jaxlib` are
-installed with the package. They are used for automatic differentiation only,
-never for linear algebra, so the CPU wheels are enough and no GPU build is
-needed. Compiled programs are cached under
-`~/.cache/reactiontools/jax_cache`; set `JAX_COMPILATION_CACHE_DIR` to move it
-if the home directory is not writable.
+**Its internal coordinates and derivatives use NumPy.** The bundled Sella
+implementation needs no JAX installation, compiled programs or compilation
+cache. The existing NumPy, SciPy and ASE dependencies support its optimisation
+workflows.
 
 Upstream Sella also ships three Cython extension modules. None are built here:
 two were unused, and of the third only one routine was ever called from Python,

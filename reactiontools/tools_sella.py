@@ -17,9 +17,9 @@ minimum; ``order=0`` minimises along all of them instead.
 The optimisation runs in redundant internal coordinates by default -- bonds,
 angles, dihedrals, and the cell coordinates of a periodic system -- because a
 step that is sensible in bond lengths and angles is usually a poor one in
-Cartesians, and vice versa. Their derivatives come from automatic
-differentiation rather than hand-coded formulae, which is why JAX is a
-dependency of this package; see the module layout below.
+Cartesians, and vice versa. Their derivatives are evaluated with NumPy using
+the chain rule, including direct Hessian-vector products; no external
+automatic-differentiation runtime is needed.
 
 :class:`IRC` follows the reaction path away from a converged saddle by
 integrating the steepest-descent path in mass-weighted coordinates, so the
@@ -35,7 +35,7 @@ Module layout, in dependency order -- each section uses only the ones above it:
 ``Eigensolvers``
     Rayleigh-Ritz iterative diagonalisation.
 ``Internal coordinates``
-    The coordinates themselves, their automatic derivatives, and constraints.
+    The coordinates themselves, their derivatives, and constraints.
 ``Potential energy surface wrappers``
     What the optimisers drive: atoms, calculator, coordinate system, curvature.
 ``Steppers`` and ``Restricted steps``
@@ -80,11 +80,11 @@ Changes made from upstream when the code was brought into this package:
   the sake of Python 2, is no longer imported; the two ``isinstance`` checks it
   was used in test against :class:`str` directly.
 * ``__all__`` was added, naming the four classes this module exports.
-* The JAX compilation cache defaults to ``~/.cache/reactiontools/jax_cache``
-  rather than ``~/.cache/sella/jax_cache``, and a cache directory that cannot
-  be created no longer raises. The cache only saves tracing time, but this
-  module is imported by the package ``__init__``, so an unwritable home
-  directory used to make ``import reactiontools`` fail outright.
+* JAX differentiation and compilation were replaced with NumPy chain-rule
+  derivatives for bonds, angles, and dihedrals, and analytic translation and
+  displacement derivatives. The import no longer configures a compilation
+  cache or changes the process environment. Custom coordinates without
+  supplied derivatives use finite differences.
 * :class:`Sella`, :class:`IRC`, :class:`Internals` and :class:`Constraints`
   were given the class docstrings they lack upstream, as this package requires
   every name it exports to carry one.
@@ -104,7 +104,6 @@ Cite ``hermes2022sella`` when you use it -- see ``CITATIONS.bib``.
 
 import inspect
 import logging
-import os
 import warnings
 from functools import partialmethod
 from itertools import combinations, product
@@ -161,45 +160,6 @@ from scipy.sparse.linalg import LinearOperator
 # reactiontools.__all__; docs/api/tools_sella.md documents whatever is listed
 # here.
 __all__ = ["Sella", "IRC", "Internals", "Constraints"]
-
-# JAX reads both of these when it is imported, so they have to be set first.
-# The cache holds compiled XLA programs, which saves a few seconds of tracing
-# on every run after the first; point JAX_COMPILATION_CACHE_DIR somewhere else
-# if the home directory is not writable. Only automatic differentiation is
-# asked of JAX here, never linear algebra, so there is nothing for a GPU to do.
-_JAX_CACHE_DIR_DEFAULT = os.path.expanduser("~/.cache/reactiontools/jax_cache")
-_JAX_CACHE_DIR = os.environ.setdefault(
-    "JAX_COMPILATION_CACHE_DIR", _JAX_CACHE_DIR_DEFAULT
-)
-try:
-    os.makedirs(_JAX_CACHE_DIR, exist_ok=True)
-except OSError:
-    # The cache only saves tracing time, so a directory that cannot be created
-    # -- a read-only home on a compute node, a container with no writable HOME
-    # -- must not take the whole package down with it, and this module is
-    # imported by reactiontools/__init__.py. Drop the variable again if it was
-    # this module that set it; one the caller set is theirs to keep, and JAX
-    # warns rather than raises when it cannot write there.
-    if _JAX_CACHE_DIR == _JAX_CACHE_DIR_DEFAULT:
-        del os.environ["JAX_COMPILATION_CACHE_DIR"]
-    _JAX_CACHE_DIR = None
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
-
-import jax  # noqa: E402
-import jax.numpy as jnp  # noqa: E402
-from jax import device_get, grad, jacfwd, jacrev, jit, jvp, vmap  # noqa: E402
-
-# Internal coordinates are near-degenerate often enough that single precision
-# loses saddle points outright, so ask JAX for doubles. Nothing has been traced
-# at this point -- jit only traces on first call -- so this still takes effect.
-jax.config.update("jax_enable_x64", True)
-if _JAX_CACHE_DIR is not None:
-    try:
-        jax.config.update("jax_compilation_cache_dir", _JAX_CACHE_DIR)
-        jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
-    except Exception:  # pragma: no cover - older JAX without the cache options
-        pass
-
 
 def _modified_gram_schmidt(
     X: np.ndarray,
@@ -1207,153 +1167,342 @@ class LightAtoms:
 
 
 # =============================================================================
-# Vectorized (batched) internal coordinate functions using jax.vmap
+# Vectorized internal-coordinate derivatives using NumPy
 # =============================================================================
-# These compute gradients/hessians for ALL coordinates of a given type at once,
-# avoiding Python loop overhead. JAX's vmap automatically vectorizes over the
-# batch dimension, providing significant speedup for coordinate calculations.
+# Differentiate the small scalar expressions below in bond-vector space.  The
+# derivative arrays carry every coordinate in a batch together; mixed second
+# derivatives carry either all directions (a Hessian) or just the requested
+# direction (an HVP).  This applies the chain rule exactly, without finite
+# differences, a compiler, or a runtime automatic-differentiation dependency.
+
+class _CoordinateDifferential:
+    """A batched scalar and its first and optional mixed second derivatives.
+
+    ``gradient`` has one entry per bond-vector component.  ``direction`` has
+    one entry per differentiation direction, and ``mixed`` differentiates the
+    gradient in those directions.  An HVP therefore needs only O(ndof) storage.
+    """
+
+    __slots__ = ('value', 'gradient', 'direction', 'mixed')
+
+    def __init__(self, value, gradient, direction=None, mixed=None):
+        self.value = value
+        self.gradient = gradient
+        self.direction = direction
+        self.mixed = mixed
+
+    def __add__(self, other):
+        if not isinstance(other, _CoordinateDifferential):
+            return type(self)(self.value + other, self.gradient,
+                              self.direction, self.mixed)
+        return type(self)(
+            self.value + other.value, self.gradient + other.gradient,
+            None if self.direction is None else self.direction + other.direction,
+            None if self.mixed is None else self.mixed + other.mixed,
+        )
+
+    __radd__ = __add__
+
+    def __neg__(self):
+        return self * -1.0
+
+    def __sub__(self, other):
+        return self + (-other)
+
+    def __mul__(self, other):
+        if not isinstance(other, _CoordinateDifferential):
+            return type(self)(
+                self.value * other, self.gradient * other,
+                None if self.direction is None else self.direction * other,
+                None if self.mixed is None else self.mixed * other,
+            )
+        gradient = (self.gradient * other.value[:, None]
+                    + other.gradient * self.value[:, None])
+        direction = mixed = None
+        if self.direction is not None:
+            direction = (self.direction * other.value[:, None]
+                         + other.direction * self.value[:, None])
+            mixed = (
+                self.mixed * other.value[:, None, None]
+                + other.mixed * self.value[:, None, None]
+                + self.gradient[:, :, None] * other.direction[:, None, :]
+                + other.gradient[:, :, None] * self.direction[:, None, :]
+            )
+        return type(self)(self.value * other.value, gradient, direction, mixed)
+
+    __rmul__ = __mul__
+
+    def _unary(self, value, first, second):
+        direction = mixed = None
+        if self.direction is not None:
+            direction = first[:, None] * self.direction
+            mixed = (first[:, None, None] * self.mixed
+                     + second[:, None, None] * self.gradient[:, :, None]
+                     * self.direction[:, None, :])
+        return type(self)(value, first[:, None] * self.gradient, direction, mixed)
+
+    def __pow__(self, power):
+        value = self.value ** power
+        first = power * self.value ** (power - 1)
+        second = (power * (power - 1) * self.value ** (power - 2)
+                  if self.direction is not None else None)
+        return self._unary(value, first, second)
+
+    def __truediv__(self, other):
+        return self * other ** -1.0
+
+    def arccos(self):
+        value = np.clip(self.value, -1.0, 1.0)
+        denom = 1.0 - value * value
+        first = -1.0 / np.sqrt(denom)
+        second = (-value / denom ** 1.5
+                  if self.direction is not None else None)
+        return self._unary(np.arccos(value), first, second)
+
+    def arctan2(self, other):
+        y, x = self.value, other.value
+        radius2 = x * x + y * y
+        fy, fx = x / radius2, -y / radius2
+        gradient = (fy[:, None] * self.gradient
+                    + fx[:, None] * other.gradient)
+        direction = mixed = None
+        if self.direction is not None:
+            direction = (fy[:, None] * self.direction
+                         + fx[:, None] * other.direction)
+            fyy = -2.0 * x * y / radius2 ** 2
+            fxx = -fyy
+            fyx = (y * y - x * x) / radius2 ** 2
+            mixed = (
+                fy[:, None, None] * self.mixed
+                + fx[:, None, None] * other.mixed
+                + fyy[:, None, None] * self.gradient[:, :, None]
+                * self.direction[:, None, :]
+                + fxx[:, None, None] * other.gradient[:, :, None]
+                * other.direction[:, None, :]
+                + fyx[:, None, None] * (
+                    self.gradient[:, :, None] * other.direction[:, None, :]
+                    + other.gradient[:, :, None] * self.direction[:, None, :]
+                )
+            )
+        return type(self)(np.arctan2(y, x), gradient, direction, mixed)
+
+
+def _coordinate_dot(left, right):
+    return sum(a * b for a, b in zip(left, right))
+
+
+def _coordinate_cross(left, right):
+    return (left[1] * right[2] - left[2] * right[1],
+            left[2] * right[0] - left[0] * right[2],
+            left[0] * right[1] - left[1] * right[0])
+
+
+def _coordinate_expression(kind, vectors):
+    """One expression shared by values, gradients, Hessians, and HVPs."""
+    if kind == 'bond':
+        return _coordinate_dot(vectors[0], vectors[0]) ** 0.5
+    if kind == 'angle':
+        left, right = vectors
+        cosine = -_coordinate_dot(left, right) / (
+            _coordinate_dot(left, left) * _coordinate_dot(right, right)
+        ) ** 0.5
+        if isinstance(cosine, _CoordinateDifferential):
+            return cosine.arccos()
+        return np.arccos(np.clip(cosine, -1.0, 1.0))
+    left, middle, right = vectors
+    normal1 = _coordinate_cross(left, middle)
+    normal2 = _coordinate_cross(middle, right)
+    numerator = _coordinate_dot(middle, _coordinate_cross(normal1, normal2))
+    denominator = (_coordinate_dot(middle, middle) ** 0.5
+                   * _coordinate_dot(normal1, normal2))
+    if isinstance(numerator, _CoordinateDifferential):
+        return numerator.arctan2(denominator)
+    return np.arctan2(numerator, denominator)
+
+
+def _coordinate_edge_derivatives(kind, pos, tvec, order=1, tangent=None):
+    """Evaluate a batch, differentiating with respect to its bond vectors."""
+    edges = np.diff(np.asarray(pos, dtype=float), axis=1) + np.asarray(tvec)
+    nbatch, nedge, _ = edges.shape
+    ndof = 3 * nedge
+    flat = edges.reshape(nbatch, ndof)
+    if order == 0:
+        vectors = [tuple(edges[:, i, j] for j in range(3)) for i in range(nedge)]
+    else:
+        identity = np.broadcast_to(np.eye(ndof), (nbatch, ndof, ndof))
+        directions = None
+        mixed = None
+        if order == 2:
+            if tangent is None:
+                directions = identity
+            else:
+                directions = np.diff(np.asarray(tangent), axis=1).reshape(
+                    nbatch, ndof, 1)
+            mixed = np.zeros((nbatch, ndof, directions.shape[-1]))
+        components = [
+            _CoordinateDifferential(
+                flat[:, i], identity[:, i, :],
+                None if directions is None else directions[:, i, :], mixed,
+            ) for i in range(ndof)
+        ]
+        vectors = [components[3 * i:3 * i + 3] for i in range(nedge)]
+    # Singular geometries have undefined derivatives, represented by NaNs.
+    # Avoid repeated arithmetic warnings while evaluating their expressions.
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return _coordinate_expression(kind, vectors)
+
+
+def _coordinate_position_gradient(edge_gradient):
+    """Apply the incidence matrix for edge[i] = pos[i + 1] - pos[i]."""
+    nbatch, nedge, _ = edge_gradient.shape
+    gradient = np.zeros((nbatch, nedge + 1, 3))
+    gradient[:, :-1] -= edge_gradient
+    gradient[:, 1:] += edge_gradient
+    return gradient
+
+
+def _coordinate_kernels(kind):
+    """Build the common batched interfaces for one internal-coordinate type."""
+    def value(pos, tvec):
+        return _coordinate_edge_derivatives(kind, pos, tvec, order=0)
+
+    def gradient(pos, tvec):
+        result = _coordinate_edge_derivatives(kind, pos, tvec)
+        nbatch, natoms, _ = np.shape(pos)
+        return _coordinate_position_gradient(
+            result.gradient.reshape(nbatch, natoms - 1, 3))
+
+    def hessian(pos, tvec):
+        result = _coordinate_edge_derivatives(kind, pos, tvec, order=2)
+        nbatch, natoms, _ = np.shape(pos)
+        edges = result.mixed.reshape(nbatch, natoms - 1, 3, natoms - 1, 3)
+        hess = np.zeros((nbatch, natoms, 3, natoms, 3))
+        hess[:, :-1, :, :-1, :] += edges
+        hess[:, 1:, :, 1:, :] += edges
+        hess[:, :-1, :, 1:, :] -= edges
+        hess[:, 1:, :, :-1, :] -= edges
+        return hess
+
+    def hvp(pos, tvec, tangent):
+        result = _coordinate_edge_derivatives(kind, pos, tvec, order=2,
+                                              tangent=tangent)
+        nbatch, natoms, _ = np.shape(pos)
+        return _coordinate_position_gradient(
+            result.mixed.reshape(nbatch, natoms - 1, 3))
+
+    def cell_gradient(pos, ncvec, cell):
+        result = _coordinate_edge_derivatives(kind, pos, np.asarray(ncvec) @ cell)
+        nbatch, natoms, _ = np.shape(pos)
+        edges = result.gradient.reshape(nbatch, natoms - 1, 3)
+        return np.einsum('bvi,bvj->bij', ncvec, edges)
+
+    return value, gradient, hessian, hvp, cell_gradient
+
+
+def _bond_value_batched(pos, tvec):
+    displacement = (np.asarray(pos)[:, 1] - np.asarray(pos)[:, 0]
+                    + np.asarray(tvec)[:, 0])
+    return np.linalg.norm(displacement, axis=1)
+
+
+def _bond_unit_vector(pos, tvec):
+    displacement = (np.asarray(pos)[:, 1] - np.asarray(pos)[:, 0]
+                    + np.asarray(tvec)[:, 0])
+    length = np.linalg.norm(displacement, axis=1)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return displacement / length[:, None], length
+
+
+def _bond_grad_batched(pos, tvec):
+    unit, _ = _bond_unit_vector(pos, tvec)
+    return np.stack((-unit, unit), axis=1)
+
+
+def _bond_hess_batched(pos, tvec):
+    unit, length = _bond_unit_vector(pos, tvec)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        block = ((np.eye(3)[None] - unit[:, :, None] * unit[:, None, :])
+                 / length[:, None, None])
+    hessian = np.empty((len(unit), 2, 3, 2, 3))
+    hessian[:, 0, :, 0] = hessian[:, 1, :, 1] = block
+    hessian[:, 0, :, 1] = hessian[:, 1, :, 0] = -block
+    return hessian
+
+
+def _bond_hvp_batched(pos, tvec, tangent):
+    unit, length = _bond_unit_vector(pos, tvec)
+    direction = np.asarray(tangent)[:, 1] - np.asarray(tangent)[:, 0]
+    with np.errstate(divide='ignore', invalid='ignore'):
+        result = (direction - unit * np.einsum('bi,bi->b', unit, direction)[:, None])
+        result /= length[:, None]
+    return np.stack((-result, result), axis=1)
+
+
+def _bond_cell_grad_batched(pos, ncvec, cell):
+    unit, _ = _bond_unit_vector(pos, np.asarray(ncvec) @ cell)
+    return np.asarray(ncvec)[:, 0, :, None] * unit[:, None, :]
+
+
+(_angle_value_batched, _angle_grad_batched, _angle_hess_batched,
+ _angle_hvp_batched, _angle_cell_grad_batched) = _coordinate_kernels('angle')
+(_dihedral_value_batched, _dihedral_grad_batched, _dihedral_hess_batched,
+ _dihedral_hvp_batched, _dihedral_cell_grad_batched) = _coordinate_kernels('dihedral')
+
+
+def _bond_value(pos: np.ndarray, tvec: np.ndarray) -> float:
+    return _bond_value_batched(np.asarray(pos)[None], np.asarray(tvec)[None])[0]
+
+
+def _angle_value(pos: np.ndarray, tvec: np.ndarray) -> float:
+    return _angle_value_batched(np.asarray(pos)[None], np.asarray(tvec)[None])[0]
+
+
+def _dihedral_value(pos: np.ndarray, tvec: np.ndarray) -> float:
+    return _dihedral_value_batched(np.asarray(pos)[None], np.asarray(tvec)[None])[0]
+
+
+def _bond_hvp_single(pos, tvec, tangent):
+    return _bond_hvp_batched(np.asarray(pos)[None], np.asarray(tvec)[None],
+                             np.asarray(tangent)[None])[0]
+
+
+def _angle_hvp_single(pos, tvec, tangent):
+    return _angle_hvp_batched(np.asarray(pos)[None], np.asarray(tvec)[None],
+                              np.asarray(tangent)[None])[0]
+
+
+def _dihedral_hvp_single(pos, tvec, tangent):
+    return _dihedral_hvp_batched(np.asarray(pos)[None], np.asarray(tvec)[None],
+                                 np.asarray(tangent)[None])[0]
+
+
+# Since tvec = ncvec @ cell, each cell gradient contracts the bond-vector
+# gradient with ncvec.  The cell is shared by every coordinate in the batch.
+def _bond_with_cell(pos, ncvec, cell):
+    return _bond_value(pos, np.asarray(ncvec) @ cell)
+
+
+def _angle_with_cell(pos, ncvec, cell):
+    return _angle_value(pos, np.asarray(ncvec) @ cell)
+
+
+def _dihedral_with_cell(pos, ncvec, cell):
+    return _dihedral_value(pos, np.asarray(ncvec) @ cell)
+
+
+def _bond_cell_grad_single(pos, ncvec, cell):
+    return _bond_cell_grad_batched(np.asarray(pos)[None], np.asarray(ncvec)[None], cell)[0]
+
+
+def _angle_cell_grad_single(pos, ncvec, cell):
+    return _angle_cell_grad_batched(np.asarray(pos)[None], np.asarray(ncvec)[None], cell)[0]
+
+
+def _dihedral_cell_grad_single(pos, ncvec, cell):
+    return _dihedral_cell_grad_batched(np.asarray(pos)[None], np.asarray(ncvec)[None], cell)[0]
+
+
 # =============================================================================
-
-def _bond_value(pos: jnp.ndarray, tvec: jnp.ndarray) -> float:
-    """Bond length: pos shape (2, 3), tvec shape (1, 3)"""
-    return jnp.linalg.norm(pos[1] - pos[0] + tvec[0])
-
-
-def _angle_value(pos: jnp.ndarray, tvec: jnp.ndarray) -> float:
-    """Angle value: pos shape (3, 3), tvec shape (2, 3)"""
-    dx1 = -(pos[1] - pos[0] + tvec[0])
-    dx2 = pos[2] - pos[1] + tvec[1]
-    cos_angle = dx1 @ dx2 / (jnp.linalg.norm(dx1) * jnp.linalg.norm(dx2))
-    # Clamp to avoid NaN from arccos
-    cos_angle = jnp.clip(cos_angle, -1.0, 1.0)
-    return jnp.arccos(cos_angle)
-
-
-def _dihedral_value(pos: jnp.ndarray, tvec: jnp.ndarray) -> float:
-    """Dihedral angle: pos shape (4, 3), tvec shape (3, 3)"""
-    dx1 = pos[1] - pos[0] + tvec[0]
-    dx2 = pos[2] - pos[1] + tvec[1]
-    dx3 = pos[3] - pos[2] + tvec[2]
-    numer = dx2 @ jnp.cross(jnp.cross(dx1, dx2), jnp.cross(dx2, dx3))
-    denom = jnp.linalg.norm(dx2) * jnp.cross(dx1, dx2) @ jnp.cross(dx2, dx3)
-    return jnp.arctan2(numer, denom)
-
-
-# Batched gradient functions: input shapes (n_coords, n_atoms, 3), (n_coords, n_vecs, 3)
-# Output shapes: (n_coords, n_atoms, 3)
-_bond_grad_batched = jit(vmap(grad(_bond_value, argnums=0), in_axes=(0, 0)))
-_angle_grad_batched = jit(vmap(grad(_angle_value, argnums=0), in_axes=(0, 0)))
-_dihedral_grad_batched = jit(vmap(grad(_dihedral_value, argnums=0), in_axes=(0, 0)))
-
-# Batched value functions
-_bond_value_batched = jit(vmap(_bond_value, in_axes=(0, 0)))
-_angle_value_batched = jit(vmap(_angle_value, in_axes=(0, 0)))
-_dihedral_value_batched = jit(vmap(_dihedral_value, in_axes=(0, 0)))
-
-# Batched hessian functions: output shapes (n_coords, n_atoms, 3, n_atoms, 3)
-_bond_hess_batched = jit(vmap(jacfwd(grad(_bond_value, argnums=0), argnums=0), in_axes=(0, 0)))
-_angle_hess_batched = jit(vmap(jacfwd(grad(_angle_value, argnums=0), argnums=0), in_axes=(0, 0)))
-_dihedral_hess_batched = jit(vmap(jacfwd(grad(_dihedral_value, argnums=0), argnums=0), in_axes=(0, 0)))
-
-# =============================================================================
-# Hessian-vector product (HVP) functions using forward-over-reverse mode
-# =============================================================================
-# These compute H @ v directly without materializing the full Hessian matrix.
-# Uses jvp(grad(f), x, v) which is O(n) instead of O(n²) for forming full Hessian.
-# =============================================================================
-
-def _bond_hvp_single(pos: jnp.ndarray, tvec: jnp.ndarray, tangent: jnp.ndarray) -> jnp.ndarray:
-    """Compute Hessian @ tangent for a single bond without forming the Hessian."""
-    primals = (pos, tvec)
-    tangents = (tangent, jnp.zeros_like(tvec))
-    _, hvp_result = jvp(grad(_bond_value, argnums=0), primals, tangents)
-    return hvp_result
-
-
-def _angle_hvp_single(pos: jnp.ndarray, tvec: jnp.ndarray, tangent: jnp.ndarray) -> jnp.ndarray:
-    """Compute Hessian @ tangent for a single angle without forming the Hessian."""
-    primals = (pos, tvec)
-    tangents = (tangent, jnp.zeros_like(tvec))
-    _, hvp_result = jvp(grad(_angle_value, argnums=0), primals, tangents)
-    return hvp_result
-
-
-def _dihedral_hvp_single(pos: jnp.ndarray, tvec: jnp.ndarray, tangent: jnp.ndarray) -> jnp.ndarray:
-    """Compute Hessian @ tangent for a single dihedral without forming the Hessian."""
-    primals = (pos, tvec)
-    tangents = (tangent, jnp.zeros_like(tvec))
-    _, hvp_result = jvp(grad(_dihedral_value, argnums=0), primals, tangents)
-    return hvp_result
-
-
-# Batched HVP functions: compute H @ v for all coords at once
-# Input shapes: pos (n_coords, n_atoms, 3), tvec (n_coords, n_vecs, 3), tangent (n_coords, n_atoms, 3)
-# Output shapes: (n_coords, n_atoms, 3)
-_bond_hvp_batched = jit(vmap(_bond_hvp_single, in_axes=(0, 0, 0)))
-_angle_hvp_batched = jit(vmap(_angle_hvp_single, in_axes=(0, 0, 0)))
-_dihedral_hvp_batched = jit(vmap(_dihedral_hvp_single, in_axes=(0, 0, 0)))
-
-
-# =============================================================================
-# Cell-derivative functions for unit cell optimization
-# =============================================================================
-# These compute derivatives of internal coordinates with respect to cell matrix.
-# Used for coupled atomic + cell optimization in periodic systems.
-#
-# The chain rule is: d(coord)/d(cell) = d(coord)/d(tvec) @ d(tvec)/d(cell)
-# Since tvec = ncvec @ cell, we have d(tvec)/d(cell) = ncvec (Kronecker structure)
-# =============================================================================
-
-def _bond_with_cell(pos: jnp.ndarray, ncvec: jnp.ndarray, cell: jnp.ndarray) -> float:
-    """Bond length with cell as explicit parameter for autodiff."""
-    tvec = ncvec @ cell  # (1, 3) @ (3, 3) -> (1, 3)
-    return jnp.linalg.norm(pos[1] - pos[0] + tvec[0])
-
-
-def _angle_with_cell(pos: jnp.ndarray, ncvec: jnp.ndarray, cell: jnp.ndarray) -> float:
-    """Angle with cell as explicit parameter for autodiff."""
-    tvec = ncvec @ cell  # (2, 3) @ (3, 3) -> (2, 3)
-    dx1 = -(pos[1] - pos[0] + tvec[0])
-    dx2 = pos[2] - pos[1] + tvec[1]
-    cos_angle = dx1 @ dx2 / (jnp.linalg.norm(dx1) * jnp.linalg.norm(dx2))
-    cos_angle = jnp.clip(cos_angle, -1.0, 1.0)
-    return jnp.arccos(cos_angle)
-
-
-def _dihedral_with_cell(pos: jnp.ndarray, ncvec: jnp.ndarray, cell: jnp.ndarray) -> float:
-    """Dihedral angle with cell as explicit parameter for autodiff."""
-    tvec = ncvec @ cell  # (3, 3) @ (3, 3) -> (3, 3)
-    dx1 = pos[1] - pos[0] + tvec[0]
-    dx2 = pos[2] - pos[1] + tvec[1]
-    dx3 = pos[3] - pos[2] + tvec[2]
-    numer = dx2 @ jnp.cross(jnp.cross(dx1, dx2), jnp.cross(dx2, dx3))
-    denom = jnp.linalg.norm(dx2) * jnp.cross(dx1, dx2) @ jnp.cross(dx2, dx3)
-    return jnp.arctan2(numer, denom)
-
-
-# Single-coordinate cell gradients: output shape (3, 3) for d(coord)/d(cell)
-_bond_cell_grad_single = jit(grad(_bond_with_cell, argnums=2))
-_angle_cell_grad_single = jit(grad(_angle_with_cell, argnums=2))
-_dihedral_cell_grad_single = jit(grad(_dihedral_with_cell, argnums=2))
-
-# Batched cell gradients: input (n_coords, n_atoms, 3), (n_coords, n_vecs, 3), (3, 3)
-# Output: (n_coords, 3, 3)
-# Note: cell is NOT batched (same cell for all coords), so in_axes=(0, 0, None)
-_bond_cell_grad_batched = jit(vmap(_bond_cell_grad_single, in_axes=(0, 0, None)))
-_angle_cell_grad_batched = jit(vmap(_angle_cell_grad_single, in_axes=(0, 0, None)))
-_dihedral_cell_grad_batched = jit(vmap(_dihedral_cell_grad_single, in_axes=(0, 0, None)))
-
-
-# =============================================================================
-# Block size for SIMD/JIT efficiency
-# =============================================================================
-# Padding arrays to multiples of BLOCK_SIZE keeps the batched kernels on
-# uniform shapes, which vectorize better and reduce JAX JIT recompilation
-# when array sizes change.
-# =============================================================================
-BLOCK_SIZE = 64
-
-
 IVec = Tuple[int, int, int]
 
 
@@ -1370,15 +1519,52 @@ class DuplicateConstraintError(DuplicateInternalError):
 
 
 def _gradient(
-    func: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], float]
-) -> Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray]:
-    return jit(grad(func, argnums=0))
+    func: Callable[..., float],
+) -> Callable[..., np.ndarray]:
+    """Finite-difference fallback for user-defined scalar coordinates only."""
+    def derivative(pos, *args, **kwargs):
+        pos = np.asarray(pos, dtype=np.float64)
+        result = np.empty_like(pos)
+        # A fourth-order stencil balances truncation and roundoff errors.
+        # Use absolute displacements: scaling with Cartesian positions would
+        # enlarge the stencil just by translating the molecule.
+        step = np.finfo(float).eps ** 0.2
+        for index in np.ndindex(pos.shape):
+            delta = np.zeros_like(pos)
+            delta[index] = step
+            result[index] = (
+                func(pos - 2 * delta, *args, **kwargs)
+                - 8 * func(pos - delta, *args, **kwargs)
+                + 8 * func(pos + delta, *args, **kwargs)
+                - func(pos + 2 * delta, *args, **kwargs)
+            ) / (12 * step)
+        return result
+    return derivative
 
 
 def _hessian(
-    func: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], float]
-) -> Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray]:
-    return jit(jacfwd(jacrev(func, argnums=0), argnums=0))
+    func: Callable[..., float],
+    jac: Callable[..., np.ndarray] = None,
+) -> Callable[..., np.ndarray]:
+    """Differentiate the supplied gradient, or a numerical one, for custom coordinates."""
+    gradient = _gradient(func) if jac is None else jac
+
+    def derivative(pos, *args, **kwargs):
+        pos = np.asarray(pos, dtype=np.float64)
+        result = np.empty(pos.shape + pos.shape)
+        step = np.finfo(float).eps ** (1 / 6)
+        for index in np.ndindex(pos.shape):
+            delta = np.zeros_like(pos)
+            delta[index] = step
+            result[(slice(None),) * pos.ndim + index] = (
+                gradient(pos - 2 * delta, *args, **kwargs)
+                - 8 * gradient(pos - delta, *args, **kwargs)
+                + 8 * gradient(pos + delta, *args, **kwargs)
+                - gradient(pos + 2 * delta, *args, **kwargs)
+            ) / (12 * step)
+        matrix = result.reshape(pos.size, pos.size)
+        return ((matrix + matrix.T) / 2).reshape(result.shape)
+    return derivative
 
 
 class Coordinate:
@@ -1419,15 +1605,15 @@ class Coordinate:
         return f'{self.__class__.__name__}({str_out})'
 
     @staticmethod
-    def _eval0(pos: jnp.ndarray, **kwargs) -> float:
+    def _eval0(pos: np.ndarray, **kwargs) -> float:
         raise NotImplementedError
 
     @staticmethod
-    def _eval1(pos: jnp.ndarray, **kwargs) -> jnp.ndarray:
+    def _eval1(pos: np.ndarray, **kwargs) -> np.ndarray:
         raise NotImplementedError
 
     @staticmethod
-    def _eval2(pos: jnp.ndarray, **kwargs) -> jnp.ndarray:
+    def _eval2(pos: np.ndarray, **kwargs) -> np.ndarray:
         raise NotImplementedError
 
     def calc(self, atoms: Atoms) -> float:
@@ -1440,7 +1626,7 @@ class Coordinate:
             atoms.positions[self.indices], **self.kwargs
         ))
 
-    def calc_hessian(self, atoms: Atoms) -> jnp.ndarray:
+    def calc_hessian(self, atoms: Atoms) -> np.ndarray:
         return np.array(self._eval2(
             atoms.positions[self.indices], **self.kwargs
         ))
@@ -1562,44 +1748,44 @@ class Internal(Coordinate):
 
     @staticmethod
     def _eval0(
-        pos: jnp.ndarray, tvecs: jnp.ndarray
+        pos: np.ndarray, tvecs: np.ndarray
     ) -> float:
         raise NotImplementedError
 
     @staticmethod
     def _eval1(
-        pos: jnp.ndarray, tvecs: jnp.ndarray
-    ) -> jnp.ndarray:
+        pos: np.ndarray, tvecs: np.ndarray
+    ) -> np.ndarray:
         raise NotImplementedError
 
     @staticmethod
     def _eval2(
-        pos: jnp.ndarray, tvecs: jnp.ndarray
-    ) -> jnp.ndarray:
+        pos: np.ndarray, tvecs: np.ndarray
+    ) -> np.ndarray:
         raise NotImplementedError
 
     def calc(self, atoms: Atoms) -> float:
-        tvecs = jnp.asarray(
+        tvecs = np.asarray(
             self.kwargs['ncvecs'] @ atoms.cell, dtype=np.float64
         )
         return float(self._eval0(atoms.positions[self.indices], tvecs))
 
     def calc_gradient(self, atoms: Atoms) -> np.ndarray:
-        tvecs = jnp.asarray(
+        tvecs = np.asarray(
             self.kwargs['ncvecs'] @ atoms.cell, dtype=np.float64
         )
         return np.array(self._eval1(atoms.positions[self.indices], tvecs))
 
-    def calc_hessian(self, atoms: Atoms) -> jnp.ndarray:
-        tvecs = jnp.asarray(
+    def calc_hessian(self, atoms: Atoms) -> np.ndarray:
+        tvecs = np.asarray(
             self.kwargs['ncvecs'] @ atoms.cell, dtype=np.float64
         )
         return np.array(self._eval2(atoms.positions[self.indices], tvecs))
 
     @staticmethod
     def _eval_cell_grad(
-        pos: jnp.ndarray, ncvecs: jnp.ndarray, cell: jnp.ndarray
-    ) -> jnp.ndarray:
+        pos: np.ndarray, ncvecs: np.ndarray, cell: np.ndarray
+    ) -> np.ndarray:
         """Compute gradient of coordinate with respect to cell matrix.
 
         Must be overridden in subclasses (Bond, Angle, Dihedral).
@@ -1613,17 +1799,17 @@ class Internal(Coordinate):
         Returns:
             np.ndarray: Shape (3, 3) array of d(coord)/d(cell[i,j])
         """
-        ncvecs = jnp.asarray(self.kwargs['ncvecs'], dtype=np.float64)
-        cell = jnp.asarray(
+        ncvecs = np.asarray(self.kwargs['ncvecs'], dtype=np.float64)
+        cell = np.asarray(
             atoms.cell.array,
             dtype=np.float64
         )
-        pos = jnp.asarray(atoms.positions[self.indices], dtype=np.float64)
+        pos = np.asarray(atoms.positions[self.indices], dtype=np.float64)
         return np.array(self._eval_cell_grad(pos, ncvecs, cell))
 
 
 def _translation(
-    pos: jnp.ndarray,
+    pos: np.ndarray,
     dim: int,
 ) -> float:
     return pos[:, dim].mean()
@@ -1647,9 +1833,17 @@ class Translation(Coordinate):
             return False
         return True
 
-    _eval0 = staticmethod(jit(_translation))
-    _eval1 = staticmethod(_gradient(_translation))
-    _eval2 = staticmethod(_hessian(_translation))
+    _eval0 = staticmethod(_translation)
+
+    @staticmethod
+    def _eval1(pos, dim):
+        result = np.zeros_like(pos, dtype=np.float64)
+        result[:, dim] = 1.0 / len(pos)
+        return result
+
+    @staticmethod
+    def _eval2(pos, dim):
+        return np.zeros(pos.shape + pos.shape, dtype=np.float64)
 
 
 # Nominally, jax.numpy.linalg.eigh supports auto-differentiation,
@@ -2208,7 +2402,7 @@ class Rotation(Coordinate):
         jac = _rotation_3axis_jacobian_np(pos, refpos, self.q_prev)
         return jac[self.kwargs['axis']]
 
-    def calc_hessian(self, atoms: Atoms) -> jnp.ndarray:
+    def calc_hessian(self, atoms: Atoms) -> np.ndarray:
         return _rotation_hessian_np(
             atoms.positions[self.indices],
             self.kwargs['axis'],
@@ -2218,9 +2412,9 @@ class Rotation(Coordinate):
 
 
 def _displacement(
-    pos: jnp.ndarray,
-    refpos: jnp.ndarray,
-    W: jnp.ndarray
+    pos: np.ndarray,
+    refpos: np.ndarray,
+    W: np.ndarray
 ) -> float:
     dx = (pos - refpos).ravel()
     return dx @ W @ dx
@@ -2242,25 +2436,38 @@ class Displacement(Coordinate):
             return False
         return np.allclose(self.kwargs['refpos'], other.kwargs['refpos'])
 
-    _eval0 = staticmethod(jit(_displacement))
-    _eval1 = staticmethod(jit(_gradient(_displacement)))
-    _eval2 = staticmethod(jit(_hessian(_displacement)))
+    _eval0 = staticmethod(_displacement)
+
+    @staticmethod
+    def _eval1(pos, refpos, W):
+        return ((W + W.T) @ (pos - refpos).ravel()).reshape(pos.shape)
+
+    @staticmethod
+    def _eval2(pos, refpos, W):
+        return (W + W.T).reshape(pos.shape + pos.shape)
 
 
 def _bond(
-    pos: jnp.ndarray,
-    tvecs: jnp.ndarray
+    pos: np.ndarray,
+    tvecs: np.ndarray
 ) -> float:
-    return jnp.linalg.norm(
+    return np.linalg.norm(
         pos[1] - pos[0] + tvecs[0]
     )
 
 
 class Bond(Internal):
     nindices = 2
-    _eval0 = staticmethod(jit(_bond))
-    _eval1 = staticmethod(_gradient(_bond))
-    _eval2 = staticmethod(_hessian(_bond))
+    _eval0 = staticmethod(_bond)
+
+    @staticmethod
+    def _eval1(pos, tvecs):
+        return _bond_grad_batched(pos[None], tvecs[None])[0]
+
+    @staticmethod
+    def _eval2(pos, tvecs):
+        return _bond_hess_batched(pos[None], tvecs[None])[0]
+
     _eval_cell_grad = staticmethod(_bond_cell_grad_single)
 
     def calc_vec(self, atoms: Atoms) -> np.ndarray:
@@ -2272,42 +2479,56 @@ class Bond(Internal):
 
 
 def _angle(
-    pos: jnp.ndarray,
-    tvecs: jnp.ndarray
+    pos: np.ndarray,
+    tvecs: np.ndarray
 ) -> float:
     dx1 = -(pos[1] - pos[0] + tvecs[0])
     dx2 = pos[2] - pos[1] + tvecs[1]
-    cos_angle = dx1 @ dx2 / (jnp.linalg.norm(dx1) * jnp.linalg.norm(dx2))
+    cos_angle = dx1 @ dx2 / (np.linalg.norm(dx1) * np.linalg.norm(dx2))
     # Clamp to avoid NaN from arccos due to floating-point errors
-    cos_angle = jnp.clip(cos_angle, -1.0, 1.0)
-    return jnp.arccos(cos_angle)
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+    return np.arccos(cos_angle)
 
 
 class Angle(Internal):
     nindices = 3
-    _eval0 = staticmethod(jit(_angle))
-    _eval1 = staticmethod(_gradient(_angle))
-    _eval2 = staticmethod(_hessian(_angle))
+    _eval0 = staticmethod(_angle)
+
+    @staticmethod
+    def _eval1(pos, tvecs):
+        return _angle_grad_batched(pos[None], tvecs[None])[0]
+
+    @staticmethod
+    def _eval2(pos, tvecs):
+        return _angle_hess_batched(pos[None], tvecs[None])[0]
+
     _eval_cell_grad = staticmethod(_angle_cell_grad_single)
 
 
 def _dihedral(
-    pos: jnp.ndarray,
-    tvecs: jnp.ndarray
+    pos: np.ndarray,
+    tvecs: np.ndarray
 ) -> float:
     dx1 = pos[1] - pos[0] + tvecs[0]
     dx2 = pos[2] - pos[1] + tvecs[1]
     dx3 = pos[3] - pos[2] + tvecs[2]
-    numer = dx2 @ jnp.cross(jnp.cross(dx1, dx2), jnp.cross(dx2, dx3))
-    denom = jnp.linalg.norm(dx2) * jnp.cross(dx1, dx2) @ jnp.cross(dx2, dx3)
-    return jnp.arctan2(numer, denom)
+    numer = dx2 @ np.cross(np.cross(dx1, dx2), np.cross(dx2, dx3))
+    denom = np.linalg.norm(dx2) * np.cross(dx1, dx2) @ np.cross(dx2, dx3)
+    return np.arctan2(numer, denom)
 
 
 class Dihedral(Internal):
     nindices = 4
-    _eval0 = staticmethod(jit(_dihedral))
-    _eval1 = staticmethod(_gradient(_dihedral))
-    _eval2 = staticmethod(_hessian(_dihedral))
+    _eval0 = staticmethod(_dihedral)
+
+    @staticmethod
+    def _eval1(pos, tvecs):
+        return _dihedral_grad_batched(pos[None], tvecs[None])[0]
+
+    @staticmethod
+    def _eval2(pos, tvecs):
+        return _dihedral_hess_batched(pos[None], tvecs[None])[0]
+
     _eval_cell_grad = staticmethod(_dihedral_cell_grad_single)
 
 
@@ -2322,19 +2543,20 @@ def make_internal(
     fun: Callable[..., float],
     nindices: int,
     use_jit: bool = True,
-    jac: Callable[..., jnp.ndarray] = None,
-    hess: Callable[..., jnp.ndarray] = None,
+    jac: Callable[..., np.ndarray] = None,
+    hess: Callable[..., np.ndarray] = None,
     **kwargs,
 ) -> Type[Coordinate]:
+    """Construct a custom coordinate, using finite differences for missing derivatives.
+
+    Supply ``jac`` and ``hess`` for analytic derivatives. ``use_jit`` is
+    retained for compatibility and has no effect on the NumPy implementation.
+    Built-in coordinates always use their own exact derivatives.
+    """
     if jac is None:
         jac = _gradient(fun)
     if hess is None:
-        hess = _hessian(fun)
-
-    if use_jit:
-        fun = jit(fun)
-        jac = jit(jac)
-        hess = jit(hess)
+        hess = _hessian(fun, jac)
 
     return type(name, (Coordinate,), dict(
         nindices=nindices,
@@ -2501,21 +2723,18 @@ class BaseInternals:
     def _build_batched_arrays(self) -> None:
         """Build batched index arrays for vectorized computation.
 
-        Arrays are padded to multiples of BLOCK_SIZE for SIMD/JIT efficiency.
-        Masks are stored to filter results back to actual sizes.
+        The legacy ``_padded`` arrays now contain only real coordinates.
+        NumPy needs no fixed shapes, and unused slots would describe singular
+        zero-length bonds and angles.
         """
         if self._batched_arrays_valid:
             return
-
-        def pad_to_block(n: int) -> int:
-            """Round up to nearest multiple of BLOCK_SIZE."""
-            return ((n + BLOCK_SIZE - 1) // BLOCK_SIZE) * BLOCK_SIZE
 
         # Build arrays for bonds
         bonds = self.internals['bonds']
         n_bonds = len(bonds)
         if n_bonds > 0:
-            n_bonds_padded = pad_to_block(n_bonds)
+            n_bonds_padded = n_bonds
             # Original (unpadded) arrays for indexing
             self._bond_indices = np.array([b.indices for b in bonds], dtype=np.int32)
             self._bond_ncvecs = np.array(
@@ -2541,7 +2760,7 @@ class BaseInternals:
         angles = self.internals['angles']
         n_angles = len(angles)
         if n_angles > 0:
-            n_angles_padded = pad_to_block(n_angles)
+            n_angles_padded = n_angles
             self._angle_indices = np.array([a.indices for a in angles], dtype=np.int32)
             self._angle_ncvecs = np.array(
                 [a.kwargs['ncvecs'] for a in angles], dtype=np.int32
@@ -2565,7 +2784,7 @@ class BaseInternals:
         dihedrals = self.internals['dihedrals']
         n_dihedrals = len(dihedrals)
         if n_dihedrals > 0:
-            n_dihedrals_padded = pad_to_block(n_dihedrals)
+            n_dihedrals_padded = n_dihedrals
             self._dihedral_indices = np.array(
                 [d.indices for d in dihedrals], dtype=np.int32
             )
@@ -2724,16 +2943,16 @@ class BaseInternals:
     def _compute_batched_values(self, positions: np.ndarray, cell: np.ndarray) -> Dict[str, np.ndarray]:
         """Compute all internal coordinate values using vectorized operations.
 
-        Uses padded arrays for SIMD/JIT efficiency, then slices to actual size.
+        Uses compact batches containing only the actual coordinates.
         """
         self._build_batched_arrays()
         tvecs = self._get_cached_tvecs(cell)
         result = {}
 
-        # Bonds - use padded arrays for consistent JAX shapes
+        # Bonds
         if self._n_bonds_actual > 0:
             bond_pos = positions[self._bond_indices_padded]  # (n_padded, 2, 3)
-            values_padded = np.asarray(device_get(_bond_value_batched(bond_pos, tvecs['bonds_padded'])))
+            values_padded = np.asarray(_bond_value_batched(bond_pos, tvecs['bonds_padded']))
             result['bonds'] = values_padded[:self._n_bonds_actual]
         else:
             result['bonds'] = np.empty(0)
@@ -2741,7 +2960,7 @@ class BaseInternals:
         # Angles
         if self._n_angles_actual > 0:
             angle_pos = positions[self._angle_indices_padded]  # (n_padded, 3, 3)
-            values_padded = np.asarray(device_get(_angle_value_batched(angle_pos, tvecs['angles_padded'])))
+            values_padded = np.asarray(_angle_value_batched(angle_pos, tvecs['angles_padded']))
             result['angles'] = values_padded[:self._n_angles_actual]
         else:
             result['angles'] = np.empty(0)
@@ -2749,7 +2968,7 @@ class BaseInternals:
         # Dihedrals
         if self._n_dihedrals_actual > 0:
             dihedral_pos = positions[self._dihedral_indices_padded]  # (n_padded, 4, 3)
-            values_padded = np.asarray(device_get(_dihedral_value_batched(dihedral_pos, tvecs['dihedrals_padded'])))
+            values_padded = np.asarray(_dihedral_value_batched(dihedral_pos, tvecs['dihedrals_padded']))
             result['dihedrals'] = values_padded[:self._n_dihedrals_actual]
         else:
             result['dihedrals'] = np.empty(0)
@@ -2760,7 +2979,7 @@ class BaseInternals:
         """Compute all internal coordinate gradients using vectorized operations.
 
         Returns dict mapping coord type to (indices, gradients) tuples.
-        Uses padded arrays for SIMD/JIT efficiency, then slices to actual size.
+        Uses compact batches containing only the actual coordinates.
         """
         self._build_batched_arrays()
         tvecs = self._get_cached_tvecs(cell)
@@ -2769,7 +2988,7 @@ class BaseInternals:
         # Bonds - use padded arrays
         if self._n_bonds_actual > 0:
             bond_pos = positions[self._bond_indices_padded]  # (n_padded, 2, 3)
-            grads_padded = np.asarray(device_get(_bond_grad_batched(bond_pos, tvecs['bonds_padded'])))
+            grads_padded = np.asarray(_bond_grad_batched(bond_pos, tvecs['bonds_padded']))
             result['bonds'] = (self._bond_indices, grads_padded[:self._n_bonds_actual])
         else:
             result['bonds'] = (np.empty((0, 2), dtype=np.int32), np.empty((0, 2, 3)))
@@ -2777,7 +2996,7 @@ class BaseInternals:
         # Angles
         if self._n_angles_actual > 0:
             angle_pos = positions[self._angle_indices_padded]
-            grads_padded = np.asarray(device_get(_angle_grad_batched(angle_pos, tvecs['angles_padded'])))
+            grads_padded = np.asarray(_angle_grad_batched(angle_pos, tvecs['angles_padded']))
             result['angles'] = (self._angle_indices, grads_padded[:self._n_angles_actual])
         else:
             result['angles'] = (np.empty((0, 3), dtype=np.int32), np.empty((0, 3, 3)))
@@ -2785,7 +3004,7 @@ class BaseInternals:
         # Dihedrals
         if self._n_dihedrals_actual > 0:
             dihedral_pos = positions[self._dihedral_indices_padded]
-            grads_padded = np.asarray(device_get(_dihedral_grad_batched(dihedral_pos, tvecs['dihedrals_padded'])))
+            grads_padded = np.asarray(_dihedral_grad_batched(dihedral_pos, tvecs['dihedrals_padded']))
             result['dihedrals'] = (self._dihedral_indices, grads_padded[:self._n_dihedrals_actual])
         else:
             result['dihedrals'] = (np.empty((0, 4), dtype=np.int32), np.empty((0, 4, 3)))
@@ -2796,7 +3015,7 @@ class BaseInternals:
         """Compute all internal coordinate hessians using vectorized operations.
 
         Returns dict mapping coord type to (indices, hessians) tuples.
-        Uses padded arrays for SIMD/JIT efficiency, then slices to actual size.
+        Uses compact batches containing only the actual coordinates.
         """
         self._build_batched_arrays()
         tvecs = self._get_cached_tvecs(cell)
@@ -2805,7 +3024,7 @@ class BaseInternals:
         # Bonds - use padded arrays
         if self._n_bonds_actual > 0:
             bond_pos = positions[self._bond_indices_padded]
-            hess_padded = np.asarray(device_get(_bond_hess_batched(bond_pos, tvecs['bonds_padded'])))
+            hess_padded = np.asarray(_bond_hess_batched(bond_pos, tvecs['bonds_padded']))
             result['bonds'] = (self._bond_indices, hess_padded[:self._n_bonds_actual])
         else:
             result['bonds'] = (np.empty((0, 2), dtype=np.int32), np.empty((0, 2, 3, 2, 3)))
@@ -2813,7 +3032,7 @@ class BaseInternals:
         # Angles
         if self._n_angles_actual > 0:
             angle_pos = positions[self._angle_indices_padded]
-            hess_padded = np.asarray(device_get(_angle_hess_batched(angle_pos, tvecs['angles_padded'])))
+            hess_padded = np.asarray(_angle_hess_batched(angle_pos, tvecs['angles_padded']))
             result['angles'] = (self._angle_indices, hess_padded[:self._n_angles_actual])
         else:
             result['angles'] = (np.empty((0, 3), dtype=np.int32), np.empty((0, 3, 3, 3, 3)))
@@ -2821,7 +3040,7 @@ class BaseInternals:
         # Dihedrals
         if self._n_dihedrals_actual > 0:
             dihedral_pos = positions[self._dihedral_indices_padded]
-            hess_padded = np.asarray(device_get(_dihedral_hess_batched(dihedral_pos, tvecs['dihedrals_padded'])))
+            hess_padded = np.asarray(_dihedral_hess_batched(dihedral_pos, tvecs['dihedrals_padded']))
             result['dihedrals'] = (self._dihedral_indices, hess_padded[:self._n_dihedrals_actual])
         else:
             result['dihedrals'] = (np.empty((0, 4), dtype=np.int32), np.empty((0, 4, 3, 4, 3)))
@@ -2833,35 +3052,35 @@ class BaseInternals:
 
         Returns dict mapping coord type to cell gradient arrays.
         Each gradient has shape (n_coords, 3, 3) for d(coord)/d(cell).
-        Uses padded arrays for SIMD/JIT efficiency, then slices to actual size.
+        Uses compact batches containing only the actual coordinates.
         """
         self._build_batched_arrays()
-        cell_jax = jnp.asarray(cell, dtype=np.float64)
+        cell_array = np.asarray(cell, dtype=np.float64)
         result = {}
 
-        # Bonds - use padded arrays for consistent JAX shapes
+        # Bonds
         if self._n_bonds_actual > 0:
-            bond_pos = jnp.asarray(positions[self._bond_indices_padded], dtype=np.float64)
-            bond_ncvecs = jnp.asarray(self._bond_ncvecs_padded, dtype=np.float64)
-            grads_padded = np.asarray(device_get(_bond_cell_grad_batched(bond_pos, bond_ncvecs, cell_jax)))
+            bond_pos = np.asarray(positions[self._bond_indices_padded], dtype=np.float64)
+            bond_ncvecs = np.asarray(self._bond_ncvecs_padded, dtype=np.float64)
+            grads_padded = np.asarray(_bond_cell_grad_batched(bond_pos, bond_ncvecs, cell_array))
             result['bonds'] = grads_padded[:self._n_bonds_actual]
         else:
             result['bonds'] = np.empty((0, 3, 3))
 
         # Angles
         if self._n_angles_actual > 0:
-            angle_pos = jnp.asarray(positions[self._angle_indices_padded], dtype=np.float64)
-            angle_ncvecs = jnp.asarray(self._angle_ncvecs_padded, dtype=np.float64)
-            grads_padded = np.asarray(device_get(_angle_cell_grad_batched(angle_pos, angle_ncvecs, cell_jax)))
+            angle_pos = np.asarray(positions[self._angle_indices_padded], dtype=np.float64)
+            angle_ncvecs = np.asarray(self._angle_ncvecs_padded, dtype=np.float64)
+            grads_padded = np.asarray(_angle_cell_grad_batched(angle_pos, angle_ncvecs, cell_array))
             result['angles'] = grads_padded[:self._n_angles_actual]
         else:
             result['angles'] = np.empty((0, 3, 3))
 
         # Dihedrals
         if self._n_dihedrals_actual > 0:
-            dihedral_pos = jnp.asarray(positions[self._dihedral_indices_padded], dtype=np.float64)
-            dihedral_ncvecs = jnp.asarray(self._dihedral_ncvecs_padded, dtype=np.float64)
-            grads_padded = np.asarray(device_get(_dihedral_cell_grad_batched(dihedral_pos, dihedral_ncvecs, cell_jax)))
+            dihedral_pos = np.asarray(positions[self._dihedral_indices_padded], dtype=np.float64)
+            dihedral_ncvecs = np.asarray(self._dihedral_ncvecs_padded, dtype=np.float64)
+            grads_padded = np.asarray(_dihedral_cell_grad_batched(dihedral_pos, dihedral_ncvecs, cell_array))
             result['dihedrals'] = grads_padded[:self._n_dihedrals_actual]
         else:
             result['dihedrals'] = np.empty((0, 3, 3))
@@ -3342,7 +3561,7 @@ class BaseInternals:
 
             # Non-batched coords use lightweight atoms. Translation hessians are
             # identically zero (translations are linear in positions), so cache
-            # one zero array per (n,) and reuse — avoids 24+ JAX calls per
+            # one zero array per (n,) and reuse — avoids repeated allocations per
             # hessian rebuild on systems with TRICs.
             atoms = self.light_atoms
             trans_data = []
@@ -3446,8 +3665,8 @@ class BaseInternals:
     def hessian_rdot(self, v: np.ndarray):
         """Compute Hessian @ v for all internal coordinates using direct HVP.
 
-        This computes the same result as hessian().rdot(v) but uses forward-over-reverse
-        mode autodiff (jvp(grad(f))) to compute Hessian-vector products directly,
+        This computes the same result as hessian().rdot(v) using directional
+        chain-rule derivatives to compute Hessian-vector products directly,
         avoiding the O(n²) cost of materializing full Hessian matrices.
 
         Args:
@@ -3513,56 +3732,55 @@ class BaseInternals:
         # out[row:row+n_active_trans] is already zero from the clear
         row += n_active_trans
 
-        # Launch all JAX HVP computations, deferring device_get
-        # This allows JAX to pipeline the computations before we block on transfer
+        # Compute coordinate HVPs in batches before scattering to global indices.
 
-        bond_jax_result = None
+        bond_result = None
         bond_active_idx = None
         if bonds_active.any() and self._n_bonds_actual > 0:
             if bonds_active.all():
                 bond_pos = positions[self._bond_indices_padded]
                 bond_tvecs = tvecs['bonds_padded']
                 v_sub = v_atoms[self._bond_indices_padded]
-                bond_jax_result = _bond_hvp_batched(bond_pos, bond_tvecs, v_sub)
+                bond_result = _bond_hvp_batched(bond_pos, bond_tvecs, v_sub)
                 bond_active_idx = self._bond_indices
             else:
                 bond_active_idx = self._bond_indices[bonds_active]
                 bond_pos = positions[bond_active_idx]
                 bond_tvecs = tvecs['bonds'][bonds_active]
                 v_sub = v_atoms[bond_active_idx]
-                bond_jax_result = _bond_hvp_batched(bond_pos, bond_tvecs, v_sub)
+                bond_result = _bond_hvp_batched(bond_pos, bond_tvecs, v_sub)
 
-        angle_jax_result = None
+        angle_result = None
         angle_active_idx = None
         if angles_active.any() and self._n_angles_actual > 0:
             if angles_active.all():
                 angle_pos = positions[self._angle_indices_padded]
                 angle_tvecs = tvecs['angles_padded']
                 v_sub = v_atoms[self._angle_indices_padded]
-                angle_jax_result = _angle_hvp_batched(angle_pos, angle_tvecs, v_sub)
+                angle_result = _angle_hvp_batched(angle_pos, angle_tvecs, v_sub)
                 angle_active_idx = self._angle_indices
             else:
                 angle_active_idx = self._angle_indices[angles_active]
                 angle_pos = positions[angle_active_idx]
                 angle_tvecs = tvecs['angles'][angles_active]
                 v_sub = v_atoms[angle_active_idx]
-                angle_jax_result = _angle_hvp_batched(angle_pos, angle_tvecs, v_sub)
+                angle_result = _angle_hvp_batched(angle_pos, angle_tvecs, v_sub)
 
-        dih_jax_result = None
+        dih_result = None
         dih_active_idx = None
         if dihedrals_active.any() and self._n_dihedrals_actual > 0:
             if dihedrals_active.all():
                 dih_pos = positions[self._dihedral_indices_padded]
                 dih_tvecs = tvecs['dihedrals_padded']
                 v_sub = v_atoms[self._dihedral_indices_padded]
-                dih_jax_result = _dihedral_hvp_batched(dih_pos, dih_tvecs, v_sub)
+                dih_result = _dihedral_hvp_batched(dih_pos, dih_tvecs, v_sub)
                 dih_active_idx = self._dihedral_indices
             else:
                 dih_active_idx = self._dihedral_indices[dihedrals_active]
                 dih_pos = positions[dih_active_idx]
                 dih_tvecs = tvecs['dihedrals'][dihedrals_active]
                 v_sub = v_atoms[dih_active_idx]
-                dih_jax_result = _dihedral_hvp_batched(dih_pos, dih_tvecs, v_sub)
+                dih_result = _dihedral_hvp_batched(dih_pos, dih_tvecs, v_sub)
 
         # Compute rotation HVPs using closed-form Hessian (handles
         # degenerate eigenvalues for linear/near-linear fragments).
@@ -3605,10 +3823,10 @@ class BaseInternals:
                                                q_stable=coord.q_prev)
                     rot_closed_results.append((hvp, idx))
 
-        # Now collect results with device_get and scatter into output
+        # Scatter the coordinate results into the output.
 
-        if bond_jax_result is not None:
-            hvp = np.asarray(device_get(bond_jax_result))
+        if bond_result is not None:
+            hvp = np.asarray(bond_result)
             if bonds_active.all():
                 hvp = hvp[:self._n_bonds_actual]
             n_coords = self._n_bonds_actual if bonds_active.all() else int(bonds_active.sum())
@@ -3621,8 +3839,8 @@ class BaseInternals:
                 out[np.arange(row, row+n_coords)[:, None], flat_cols] = hvp.reshape(n_coords, -1)
             row += n_coords
 
-        if angle_jax_result is not None:
-            hvp = np.asarray(device_get(angle_jax_result))
+        if angle_result is not None:
+            hvp = np.asarray(angle_result)
             if angles_active.all():
                 hvp = hvp[:self._n_angles_actual]
             n_coords = self._n_angles_actual if angles_active.all() else int(angles_active.sum())
@@ -3635,8 +3853,8 @@ class BaseInternals:
                 out[np.arange(row, row+n_coords)[:, None], flat_cols] = hvp.reshape(n_coords, -1)
             row += n_coords
 
-        if dih_jax_result is not None:
-            hvp = np.asarray(device_get(dih_jax_result))
+        if dih_result is not None:
+            hvp = np.asarray(dih_result)
             if dihedrals_active.all():
                 hvp = hvp[:self._n_dihedrals_actual]
             n_coords = self._n_dihedrals_actual if dihedrals_active.all() else int(dihedrals_active.sum())
@@ -3832,16 +4050,16 @@ class BaseInternals:
     def get_principal_rotation_axes(
         self,
         indices: Tuple[int, ...]
-    ) -> jnp.ndarray:
+    ) -> np.ndarray:
         """Calculates the principal axes of rotation of a cluster of atoms."""
         indices = np.asarray(indices, dtype=np.int32)
         pos = self.all_positions
         dx = pos[indices] - pos[indices].mean(0)
         Inertia = (
-            (dx * dx).sum() * jnp.eye(3)
+            (dx * dx).sum() * np.eye(3)
             - (dx[:, None, :] * dx[:, :, None]).sum(0)
         )
-        _, rvecs = jnp.linalg.eigh(Inertia)
+        _, rvecs = np.linalg.eigh(Inertia)
         return rvecs
 
     def add_dummy_to_internals(
@@ -4885,7 +5103,7 @@ class Internals(BaseInternals):
             return None
 
         # Use vectorized computation to check all angles at once
-        # Use padded arrays for consistent JAX shapes (avoids recompilation)
+        # Use the cached batch arrays.
         self._build_batched_arrays()
         if self._n_angles_actual > 0:
             positions = self.all_positions

@@ -67,11 +67,8 @@ autodoc_typehints = "signature"
 # mdtraj is imported lazily inside the functions that use it, and plumed is
 # reached only through ase.calculators.plumed. Neither appears in a signature or
 # a default, so mocking both costs nothing and keeps the docs buildable from the
-# light half of the dependency set. jax is mocked for the same reason: it is
-# imported at the top of tools_sella but nothing it provides reaches a public
-# signature, and it is far and away the heaviest thing to install on a docs
-# builder.
-autodoc_mock_imports = ["jax", "mdtraj", "plumed"]
+# light half of the dependency set.
+autodoc_mock_imports = ["mdtraj", "plumed"]
 
 autosummary_generate = False
 add_module_names = False

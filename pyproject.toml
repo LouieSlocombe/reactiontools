@@ -35,8 +35,6 @@ keywords = [
 
 dependencies = [
   "ase>=3.25",
-  "jax>=0.4.20",
-  "jaxlib>=0.4.20",
   "matplotlib>=3.8.4",
   "mdtraj>=1.10.2",
   "numpy>=2.0",
@@ -54,11 +52,9 @@ dependencies = [
 #                       is there lacks its ASE entry point.
 # sella                 no longer a dependency at all either. The saddle-point
 #                       searches live in reactiontools.tools_sella, because the
-#                       fork the package needs is not on PyPI. jax and jaxlib
-#                       are listed above because that module needs them: the
-#                       internal coordinates are differentiated rather than
-#                       hand-coded. They are CPU-only here -- nothing asks JAX
-#                       for linear algebra -- so the plain wheels are enough.
+#                       fork the package needs is not on PyPI. Its internal
+#                       coordinates and derivatives use NumPy, with no separate
+#                       automatic-differentiation dependency.
 #
 # ORCA is needed at runtime by reactiontools.tools_orca but is licensed
 # separately and installed by hand; see build_tools/README.md.
@@ -123,7 +119,6 @@ filterwarnings = [
   "ignore::DeprecationWarning:ase.*",
   "ignore:The implementation of `fixcm=True`.*:FutureWarning:ase.md.langevin",
   "ignore:Log flushes by default now.*:FutureWarning:ase.optimize.optimize",
-  "ignore:Error reading persistent compilation cache entry.*:UserWarning:jax._src.compiler",
 ]
 
 [tool.coverage.run]

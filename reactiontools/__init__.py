@@ -101,10 +101,8 @@ fetched from GitHub are now part of the package like any other module:
     the rest of the package is. Cite ``zhu2019geodesic``.
 ``tools_sella``
     Derived from Sella by Eric Hermes and contributors. Unlike everything else
-    here it is **LGPL**, not MIT -- see ``LICENSE`` -- and it is what makes
-    ``jax`` a dependency of this package, as it differentiates its internal
-    coordinates rather than hand-coding their derivatives. Cite
-    ``hermes2022sella``.
+    here it is **LGPL**, not MIT -- see ``LICENSE``. Its internal coordinates
+    and their derivatives use NumPy. Cite ``hermes2022sella``.
 """
 
 from .tools_cv import (
