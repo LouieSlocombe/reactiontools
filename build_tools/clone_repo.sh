@@ -1,15 +1,5 @@
 #!/bin/bash
-# Shared git handling, sourced by custom_install_sol.sh.
-#
-# This file used to install the dependencies that came from git rather than
-# conda-forge, cloned once and installed editable so they could be edited
-# alongside reactiontools. There are none left: geodesic_interpolate and then
-# sella were both brought into the package, as reactiontools/tools_geodesic.py
-# and reactiontools/tools_sella.py, so cloning either would install a copy that
-# nothing imports. To change that code, edit the module.
-#
-# What remains is the clone helper, which custom_install_sol.sh uses to fetch
-# reactiontools itself.
+# Clone helper used by custom_install_sol.sh to fetch reactiontools.
 
 # clone_repo <url> <path>
 # Clones <url> into <path> unless a checkout is already there, which is left

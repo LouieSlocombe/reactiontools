@@ -41,23 +41,9 @@ dependencies = [
   "pandas>=2.2.2",
   "scipy>=1.16",
 ]
-# Everything the package needs to import and to run every workflow. PyPI rejects
-# any distribution whose metadata carries a direct URL requirement, so nothing
-# here may be a git+https dependency -- which is why the two that used to be are
-# handled the way they are:
-#
-# geodesic_interpolate  no longer a dependency at all. The interpolation lives
-#                       in reactiontools.tools_geodesic, because the fork the
-#                       package needs is not on PyPI and the distribution that
-#                       is there lacks its ASE entry point.
-# sella                 no longer a dependency at all either. The saddle-point
-#                       searches live in reactiontools.tools_sella, because the
-#                       fork the package needs is not on PyPI. Its internal
-#                       coordinates and derivatives use NumPy, with no separate
-#                       automatic-differentiation dependency.
-#
-# ORCA is needed at runtime by reactiontools.tools_orca but is licensed
-# separately and installed by hand; see build_tools/README.md.
+# Python runtime dependencies. Sella and geodesic interpolation are bundled.
+# PLUMED and ORCA are installed separately for workflows that use them;
+# see docs/installation.md.
 
 classifiers = [
   "Development Status :: 5 - Production/Stable",

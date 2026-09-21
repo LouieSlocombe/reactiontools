@@ -10,7 +10,7 @@
 # by this script: it is licensed separately, so tools_orca needs it put on the
 # node by hand with ORCA_PATH pointing at the binary (see README.md).
 #
-# reactiontools is cloned into $SRC_DIR and installed editable, so a `git pull`
+# reactiontools is cloned into $SRC_DIR/reactiontools and installed editable, so a `git pull`
 # there is all it takes to update it. An existing checkout is used as it is,
 # never wiped.
 
@@ -82,4 +82,4 @@ echo "reactiontools: OK"
 
 conda deactivate
 echo "=== Build Complete! ==="
-echo "Checkouts: ${SRC_DIR}"
+echo "Checkout: ${SRC_DIR}/${ENV_NAME}"

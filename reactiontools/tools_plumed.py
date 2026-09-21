@@ -47,8 +47,9 @@ PLUMED_ASE_UNITS = "UNITS ENERGY=eV LENGTH=A TIME=fs"
 
 _PLUMED_HINT = (
     "plumed_calculator needs the plumed Python module, which is "
-    "not installed. Build it, and the PLUMED it binds to, with "
-    "`bash build_tools/conda_install.sh`."
+    "not installed. Install matching PLUMED Python bindings and kernel; see "
+    "https://reactiontools.readthedocs.io/en/latest/installation.html"
+    "#optional-workflow-dependencies."
 )
 
 _CV_LABEL = re.compile(r"^\s*([A-Za-z_]\w*)\s*:")

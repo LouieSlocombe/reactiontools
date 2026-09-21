@@ -1,122 +1,89 @@
 # Installation
 
-From PyPI, into an existing environment:
+## Install with pip
+
+Requires **Python 3.12 or later**. In an activated virtual environment or Conda
+environment:
 
 ```bash
-pip install reactiontools
+python -m pip install reactiontools
+python -c "import reactiontools; print(reactiontools.__version__)"
 ```
 
-That is enough for everything except `tools_orca`, which needs ORCA — licensed
-separately and installed by hand; see [Dependencies](#dependencies). The
-saddle-point searches and geodesic interpolation need nothing extra.
+Pip installs NumPy, SciPy, ASE, Matplotlib, pandas and MDTraj automatically.
+Sella, IRC and geodesic interpolation are included in the package and need no
+additional installation. Sella's derivatives use NumPy; JAX is not required.
 
-For everything at once — environment, PLUMED and the package — one command from
-the repository root:
+## Install from source
+
+```bash
+git clone https://github.com/LouieSlocombe/reactiontools.git
+cd reactiontools
+python -m pip install -e .
+```
+
+An editable install uses the code in your checkout, so source changes take
+effect without reinstalling. Run the remaining checkout commands from this
+repository root.
+
+## Optional workflow dependencies
+
+Install these only for the workflows that use them:
+
+| Workflow | Requirement | Setup |
+| --- | --- | --- |
+| Reconstruct metadynamics free energies with `run_sum_hills` | PLUMED executable | Put `plumed` on `PATH`. |
+| Run biased ASE dynamics with `plumed_calculator` | PLUMED Python bindings (`py-plumed`) and a loadable kernel | Use matching bindings and kernel; the Conda installer below builds both. OPES simulations need the `opes` module. |
+| Run ORCA calculations | ORCA executable | Install ORCA separately and set `ORCA_PATH` to the binary, or pass `orca_path` to the calculator helper. |
+
+Building PLUMED input files and processing existing OPES output with the
+bundled scripts do not require a PLUMED installation.
+
+For ORCA setup, see the
+[build guide](https://github.com/LouieSlocombe/reactiontools/blob/main/build_tools/README.md#orca).
+
+## Conda with PLUMED and OPES
+
+The Linux installer creates an environment, builds PLUMED with OPES and its
+matching Python bindings, and installs the checkout in editable mode. It
+requires Conda and Git; Python and the compiler are installed by the script.
+
+**Each run removes and recreates the target environment and
+`build_tools/sources/`.** The default environment name is `reactiontools`.
 
 ```bash
 bash build_tools/conda_install.sh
-```
-
-That creates the `reactiontools` conda environment, compiles PLUMED with the
-OPES module and the matching Python bindings into it, and installs this package
-in editable mode. It **removes and recreates** any environment of that name; pass `ENV_NAME=...` to
-install somewhere else.
-
-If you already have a PLUMED with OPES on your `PATH`, the environment and the
-package on their own are:
-
-```bash
-conda env create -f build_tools/environment.yml -y
-```
-
-```bash
 conda activate reactiontools
 ```
 
-```bash
-pip install -e .
-```
-
-See [build_tools/README.md](https://github.com/LouieSlocombe/reactiontools/blob/main/build_tools/README.md) for the full guide, why
-PLUMED is built from source, and the Sol cluster route.
-
-## Dependencies
-
-Python 3.12 or newer is required, and `pip install reactiontools` brings in
-`numpy>=2.0`, `scipy>=1.16`, `matplotlib>=3.8.4`, `pandas>=2.2.2`, `ase>=3.25`
-and `mdtraj>=1.10.2`.
-
-The Python, ASE and SciPy minimums follow what `tools_geodesic` needs.
-NumPy 2 provides the trapezoidal integration used for basin free energies;
-the Matplotlib, pandas and MDTraj minimums support NumPy 2.
-
-### Geodesic interpolation
-
-Nothing to install. `prepare_neb(geo_int=True)`, `quick_guess_path`,
-`quick_guess_ts` and `seed_product_from_ts` are built on `tools_geodesic`,
-which is part of the package like any other module. `geodesic_interpolate` is
-its entry point, and `Geodesic`, `redistribute` and the scalers that set the
-metric are exported alongside it.
-
-It is derived from
-[`geodesic-interpolate`](https://github.com/virtualzx-nad/geodesic-interpolate)
-by Xiaolei Zhu, MIT licensed as the rest of the package is — the notice is at
-the foot of `LICENSE` — and it is still `zhu2019geodesic` you cite when you use
-it. It lives here rather than being depended on because the version on PyPI
-under the name `geodesic-interpolate` exposes only the lower-level `Geodesic`
-and `redistribute`, without the ASE-aware entry point these functions call, and
-a git dependency on a fork that does have it would keep this package off PyPI
-altogether.
-
-### Saddle-point searches
-
-Nothing to install either. `optimise_ts`, `optimise_irc` and `sella_ts_search`
-are built on `tools_sella`, which is part of the package like any other module.
-`Sella` and `IRC` are its entry points, and `Internals` and `Constraints` are
-exported alongside them for driving either under constraints.
-
-It is derived from [Sella](https://github.com/zadorlab/sella) by Eric Hermes
-and contributors, and it is `hermes2022sella` you cite when you use it. It
-lives here for the same PyPI reason as the interpolation: the fork these
-workflows are built against is not on PyPI, and a git dependency on it would
-keep this package off PyPI altogether.
-
-Two things follow from bringing it in.
-
-**It is LGPL, not MIT.** Sella is licensed under the GNU Lesser General Public
-License v3, copyright Sandia National Laboratories (NTESS) under US Government
-contract DE-NA0003525, and that licence travels with the code: `tools_sella.py`
-stays LGPL-3.0-or-later while everything else here stays MIT, so the
-distribution as a whole is `MIT AND LGPL-3.0-or-later`. `LICENSE` records which
-is which, `LICENSE.LGPL` and `LICENSE.GPL` carry the text, and you may modify
-that module and relink it against the rest of the package under those terms.
-
-**Its internal coordinates and derivatives use NumPy.** The bundled Sella
-implementation needs no JAX installation, compiled programs or compilation
-cache. The existing NumPy, SciPy and ASE dependencies support its optimisation
-workflows.
-
-Upstream Sella also ships three Cython extension modules. None are built here:
-two were unused, and of the third only one routine was ever called from Python,
-which is reimplemented in NumPy. That is what keeps `reactiontools` a
-pure-Python wheel with no build step.
-
-### Development
-
-The test runner and the linter are not runtime dependencies either. To run the
-suite from a checkout, install the `dev` extra:
+To choose a different environment name:
 
 ```bash
-pip install -e ".[dev]"
+ENV_NAME=reactiontools-opes bash build_tools/conda_install.sh
+conda activate reactiontools-opes
 ```
 
-### Outside pip entirely
+The supplied Conda environment selects Python 3.13 or later. The package itself
+supports Python 3.12 or later. For an environment without the PLUMED build,
+verification commands, or Sol cluster setup, see the
+[build guide](https://github.com/LouieSlocombe/reactiontools/blob/main/build_tools/README.md).
 
-Three more fall outside `pip` altogether, and are only needed by the functions
-named:
+## Development
 
-| Dependency | Needed by | Notes |
-| --- | --- | --- |
-| `plumed` executable | `run_sum_hills` | Must be on `PATH`. Called as a subprocess, not imported. Compiled by `conda_install.sh`; conda-forge's `plumed` package is built without the OPES module that `f_opes=True` inputs need. |
-| `py-plumed` | `plumed_calculator` | The Python bindings, compiled by `conda_install.sh` against the same PLUMED. Imported on first use; the input builder works without it. |
-| [ORCA](https://www.faccts.de/orca/) | everything in `tools_orca` | Licensed separately and installed by hand; point `ORCA_PATH` at the binary. See [build_tools/README.md](https://github.com/LouieSlocombe/reactiontools/blob/main/build_tools/README.md#orca). |
+From the repository root, install the test and lint tools and run the checks:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest --cov
+ruff check .
+```
+
+Tests requiring unavailable external software or local sockets are skipped.
+Sella and IRC tests run with the standard Python dependencies.
+
+To build the documentation with the same dependencies as CI:
+
+```bash
+python -m pip install -r docs/requirements.txt
+python -m sphinx -W --keep-going -b html docs docs/_build/html
+```

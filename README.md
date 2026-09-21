@@ -27,29 +27,28 @@ from EMT to a machine-learned potential to a DFT code.
 
 ## Installation
 
+Requires Python 3.12 or later. In your Python environment:
+
 ```bash
-pip install reactiontools
+python -m pip install reactiontools
 ```
 
-That covers everything. The saddle-point searches and geodesic interpolation
-need nothing extra: both are part of the package, in `tools_sella` and
-`tools_geodesic`. The one thing still installed separately is ORCA, which
-`tools_orca` shells out to and which is licensed separately.
+This installs the Python dependencies and includes Sella, IRC and geodesic
+interpolation. PLUMED and its Python bindings are needed only for PLUMED-backed
+workflows; ORCA must be installed separately to run ORCA calculations.
 
-For everything at once, including PLUMED built with the OPES module, one
-command from the repository root:
+For a Linux Conda environment with PLUMED and OPES, run the installer from the
+repository root. **It removes and recreates the target environment**, named
+`reactiontools` by default; set `ENV_NAME` to choose another name.
 
 ```bash
 bash build_tools/conda_install.sh
+conda activate reactiontools
 ```
 
-That creates the `reactiontools` conda environment, compiles PLUMED and the
-matching Python bindings into it, and installs this package in editable mode.
-
-For the environment-only route, the dependencies that fall outside `pip`
-(the `plumed` executable, `py-plumed` and ORCA), and the Sol cluster, see
-[Installation](https://reactiontools.readthedocs.io/en/latest/installation.html) or
-[build_tools/README.md](build_tools/README.md).
+See [Installation](https://reactiontools.readthedocs.io/en/latest/installation.html)
+for source installs and optional dependencies, or the
+[build guide](build_tools/README.md) for Conda and Sol setup.
 
 ## Quickstart
 
@@ -131,26 +130,24 @@ The test runner and the linter are not runtime dependencies; install the `dev`
 extra to get them:
 
 ```bash
-pip install -e ".[dev]"
-```
-
-```bash
-pytest --cov
+python -m pip install -e ".[dev]"
+python -m pytest --cov
+ruff check .
 ```
 
 The suite builds its own structures with `ase.build` and evaluates them with
 EMT. Offline unit tests cover orchestration without opening sockets; a small
 set of `integration` tests exercises real local socket transport when the
 runner permits it. Checks needing ORCA, PLUMED or OpenMM skip when those are
-unavailable, so a plain `pip install -e ".[dev]"` runs the suite green. The
-saddle-point and IRC tests always run: `tests/test_sella.py` is the upstream
-Sella suite, brought across with the module it exercises. Coverage is
-branch-aware and enforces the configured floor.
+unavailable. The saddle-point and IRC tests run with the standard Python
+dependencies in `tests/test_sella.py`. Coverage is branch-aware and enforces
+the configured floor.
 
 CI tests Python 3.12–3.14 and also tests the minimum scientific, pytest and Ruff
-versions together on Python 3.12. To reproduce that environment, install with
-`pip install -c .github/requirements-min.txt -e ".[dev]"` in a fresh Python 3.12
-environment. Keep those constraints in step with the bounds in `pyproject.toml`.
+versions together on Python 3.12. To reproduce that environment, run
+`python -m pip install -c .github/requirements-min.txt -e ".[dev]"` in a fresh
+Python 3.12 environment. Keep those constraints in step with the bounds in
+`pyproject.toml`.
 
 ## Citing
 

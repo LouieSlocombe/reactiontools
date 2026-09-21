@@ -18,14 +18,12 @@ dependencies:
   - ruff>=0.1.0
 
   # --- Build tools, for build_plumed.sh ---
-  # PLUMED is compiled rather than taken from conda-forge because that build has
-  # no opes module, which tools_cv's f_opes=True inputs and run_opes_fes need.
+  # The installers build PLUMED with the opes module for OPES simulations.
   - make
   - cxx-compiler
   # build_py_plumed regenerates the py-plumed C extension from its .pyx source.
   - cython
 
-# sella is deliberately absent, and needs nothing doing about it: the
-# saddle-point searches are part of the package now, as
-# reactiontools/tools_sella.py, so `pip install -e ..` is all it takes.
-# Its internal coordinates and derivatives use NumPy. See docs/installation.md.
+# Install the package separately from the repository root:
+# python -m pip install -e .
+# Sella and geodesic interpolation are included in the package.

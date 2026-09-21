@@ -87,14 +87,16 @@ every one of them at once with
 ``warnings.simplefilter("error", ConvergenceWarning)``.
 
 MDTraj is an installed dependency but is imported only by the workflows that
-use it. One thing the package uses is not installed with it:
+use it. Additional software is needed for these workflows:
 
 ``ORCA``
-    Everything in ``tools_orca`` shells out to it. Licensed separately and
+    Needed to run ORCA calculations through ``tools_orca``. Licensed separately and
     installed by hand; see ``build_tools/README.md``.
+``PLUMED``
+    ``run_sum_hills`` needs the executable on ``PATH``. ``plumed_calculator``
+    needs the Python bindings and a loadable kernel. See ``docs/installation.md``.
 
-Nothing else has to be installed by hand. Both of the pieces that used to be
-fetched from GitHub are now part of the package like any other module:
+Sella and geodesic interpolation are included in the package:
 
 ``tools_geodesic``
     Derived from ``geodesic-interpolate`` by Xiaolei Zhu and MIT licensed as

@@ -1,16 +1,16 @@
 #!/bin/bash
 # One-command install of the reactiontools conda environment: creates the environment
 # from environment.yml, compiles PLUMED (with the opes module) and the PLUMED Python
-# bindings (py-plumed) into it, then installs reactiontools and its two git
-# dependencies in editable mode and verifies the result.
+# bindings (py-plumed) into it, then installs reactiontools in editable mode
+# and verifies the result. Run from the repository root:
 #
-#   bash conda_install.sh
+#   bash build_tools/conda_install.sh
 #
 # WARNING: the target environment (default: reactiontools) is REMOVED and recreated
 # from scratch on every run, as are the sources cloned into build_tools/sources/.
 # Set ENV_NAME to install into a differently named environment instead:
 #
-#   ENV_NAME=reactiontools2 bash conda_install.sh
+#   ENV_NAME=reactiontools-opes bash build_tools/conda_install.sh
 #
 # Exit immediately on error and fail pipelines cleanly, so a broken build does not
 # fall through to the later steps and report success.

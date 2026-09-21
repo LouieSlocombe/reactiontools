@@ -35,8 +35,8 @@ build_plumed() {
 # Builds the PLUMED Python bindings (the `plumed` module that plumed_calculator
 # imports) from the plumed2 sources that build_plumed left in <work_dir>, against
 # the PLUMED installed in $CONDA_PREFIX. The kernel path is baked in as the
-# default, so `import plumed` works without PLUMED_KERNEL being set. Requires
-# cython. Leaves the shell in <work_dir>.
+# default, so `plumed.Plumed()` can load it without PLUMED_KERNEL being set.
+# Requires Cython. Leaves the shell in <work_dir>.
 build_py_plumed() {
     local work_dir="$1"
 

@@ -26,7 +26,7 @@ from EMT to a machine-learned potential to a DFT code.
 :link: installation
 :link-type: doc
 
-One command to get PLUMED, the environment and the package in place.
+Install with pip, or set up Conda with PLUMED and OPES.
 :::
 
 :::{grid-item-card} {octicon}`rocket` Quickstart
