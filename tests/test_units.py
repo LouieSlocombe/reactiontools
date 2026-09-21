@@ -64,6 +64,7 @@ class TestThermalEnergy:
         with pytest.raises(KeyError):
             thermal_energy(300.0, "furlongs")
 
+    @pytest.mark.integration
     def test_an_openmm_quantity_is_accepted(self) -> None:
         # Callers driving OpenMM have a Quantity to hand; making them unwrap
         # it at every call would be the only reason they ever touch
@@ -82,17 +83,20 @@ class TestAsKelvin:
     def test_it_returns_a_float(self) -> None:
         assert isinstance(as_kelvin(300), float)
 
+    @pytest.mark.integration
     def test_an_openmm_quantity_is_unwrapped(self) -> None:
         openmm_unit = pytest.importorskip("openmm.unit")
 
         assert as_kelvin(300.0 * openmm_unit.kelvin) == pytest.approx(300.0)
 
+    @pytest.mark.integration
     def test_other_temperature_units_are_converted_not_stripped(self) -> None:
         openmm_unit = pytest.importorskip("openmm.unit")
 
-        # OpenMM knows this is 300 K expressed differently; taking the bare
-        # number would give 26.85.
-        quantity = (300.0 * openmm_unit.kelvin).in_units_of(openmm_unit.kelvin)
+        # A scaled temperature unit must convert to kelvin; stripping the
+        # quantity's unit would leave 300000 instead of 300.
+        millikelvin = openmm_unit.kelvin.create_unit(1e-3, "millikelvin", "mK")
+        quantity = 300000.0 * millikelvin
         assert as_kelvin(quantity) == pytest.approx(300.0)
 
 

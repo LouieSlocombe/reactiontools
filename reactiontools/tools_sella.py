@@ -8656,6 +8656,10 @@ class Sella(Optimizer):
     internal : bool or Internals, optional
         Work in redundant internal coordinates rather than Cartesians, or an
         :class:`Internals` built by hand to say exactly which ones.
+        ``True`` discovers coordinates automatically. An explicit
+        :class:`Internals` is used as supplied; populate it first with the
+        ``find_all_bonds``, ``find_all_angles`` and ``find_all_dihedrals``
+        methods, or add the desired coordinates individually.
     constraints : Constraints, optional
         Coordinates to hold fixed during the search.
     eta : float, optional

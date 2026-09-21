@@ -186,10 +186,13 @@ class TestResolveOrca:
 
         assert _resolve_orca(None) == str(fake_orca)
 
-    def test_screen_reader_is_rejected(self) -> None:
-        screen_reader = "/usr/bin/orca"
-        if not Path(screen_reader).is_file():
-            pytest.skip("no /usr/bin/orca on this machine")
+    def test_screen_reader_is_rejected(self, tmp_path: Path) -> None:
+        # The GNOME screen reader is a Python script without ORCA's sibling
+        # module binaries. Reproduce that layout without depending on the
+        # host having the screen reader installed at /usr/bin/orca.
+        screen_reader = tmp_path / "orca"
+        screen_reader.write_text("#!/usr/bin/env python3\n")
+        screen_reader.chmod(0o755)
         with pytest.raises(RuntimeError, match="screen reader"):
             _resolve_orca(screen_reader)
 

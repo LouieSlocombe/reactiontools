@@ -78,8 +78,20 @@ python -m pytest --cov
 ruff check .
 ```
 
-Tests requiring unavailable external software or local sockets are skipped.
-Sella and IRC tests run with the standard Python dependencies.
+The core suite has no expected failures. Sella and IRC tests run with the
+standard Python dependencies. Tests marked `integration` can skip for these
+specific reasons:
+
+| Tests | Requirement to run them |
+| --- | --- |
+| Three ORCA calculations | A separately installed ORCA executable, selected with `ORCA_PATH`. |
+| Eight biased PLUMED dynamics tests | PLUMED Python bindings and a loadable kernel, as described above. |
+| Five OpenMM quantity conversions | `python -m pip install openmm`. CI installs it in the Python 3.12 job with current dependencies. |
+| Six comparisons against upstream Sella's compiled Gram–Schmidt implementation | An importable upstream `sella` installation. The bundled NumPy implementation also has unconditional mathematical tests. |
+| Two socket transport tests | A runner that permits binding local Unix sockets. Offline orchestration tests run independently of these. |
+
+Use `python -m pytest -rs` to see the reason for each skip in your environment,
+or `python -m pytest -m "not integration"` to run the core suite alone.
 
 To build the documentation with the same dependencies as CI:
 

@@ -69,12 +69,17 @@ jobs:
       - name: Install minimum dependencies
         if: matrix.dependencies == 'minimum'
         run: pip install -c .github/requirements-min.txt -e ".[dev]"
+      # Exercise OpenMM interoperability in one environment; the remaining
+      # jobs still verify that OpenMM is optional.
+      - name: Install OpenMM for integration tests
+        if: matrix.python-version == '3.12' && matrix.dependencies == 'latest'
+        run: pip install openmm
       - run: pip check
 
       - name: Lint with the minimum Ruff version
         if: matrix.dependencies == 'minimum'
         run: ruff check .
-      # ORCA tests skip without ORCA_PATH; the `integration` tests skip if the
-      # runner will not open local sockets. Coverage enforces the floor set in
-      # [tool.coverage.report].
+      # Integration tests skip when optional software (ORCA, PLUMED, OpenMM,
+      # upstream Sella) or local sockets are unavailable. Coverage enforces
+      # the floor set in [tool.coverage.report].
       - run: pytest --cov

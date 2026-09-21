@@ -123,8 +123,7 @@ def test_no_module_imports_itself_in_a_cycle(name: str) -> None:
 
 @pytest.mark.parametrize("name", sorted(_PLOT_FREE))
 def test_the_plot_free_modules_stay_plot_free(name: str) -> None:
-    if _source_of(name) is None:
-        pytest.skip(f"{name} does not exist yet")
+    assert _source_of(name) is not None, f"required plot-free module {name} is missing"
 
     _, external = _reachable(name)
 

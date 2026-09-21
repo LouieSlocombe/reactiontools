@@ -1,8 +1,8 @@
 """Tests for the proton-transfer collective variables and the scripts for them.
 
-The builders are pure string construction, so these run without PLUMED, without
-an MD engine and without any data files: a three-atom geometry is enough to
-size a switching function.
+The builders are pure string construction, so most tests run without PLUMED or
+an MD engine: a three-atom geometry is enough to size a switching function.
+OpenMM quantity integration tests run when the optional dependency is installed.
 """
 
 import re
@@ -320,10 +320,10 @@ class TestAsPositions:
         with pytest.raises(ValueError, match=r"\(n_atoms, 3\)"):
             as_positions(np.zeros((3, 4)))
 
+    @pytest.mark.integration
     def test_openmm_quantities_are_converted_from_nanometres(self) -> None:
-        # Built without importing OpenMM: as_positions dispatches on the
-        # module a positions object came from, so a stand-in with the same
-        # shape exercises the same branch.
+        # Use OpenMM's real Quantity and Vec3 types to exercise conversion
+        # from the nanometres used for a Modeller's positions to angstrom.
         openmm = pytest.importorskip("openmm")
         from openmm import unit as openmm_unit
 
@@ -344,6 +344,7 @@ class TestTemperature:
 
         assert "TEMP=300.0" in script
 
+    @pytest.mark.integration
     def test_an_openmm_quantity_is_still_accepted(self) -> None:
         openmm_unit = pytest.importorskip("openmm.unit")
 

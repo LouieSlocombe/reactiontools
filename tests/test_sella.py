@@ -2359,8 +2359,7 @@ class TestRigidFragments:
         for idx, (i, j) in enumerate(zip(*np.where(cell_mask))):
             if i != j:
                 offdiag_indices.append(idx)
-        if not offdiag_indices:
-            pytest.skip("No off-diagonal cell DOF available")
+        assert offdiag_indices, "default cell mask must include shear degrees of freedom"
 
         shear_idx = offdiag_indices[0]
         x_shear[pes.n_internal + shear_idx] += 0.05
@@ -2501,8 +2500,7 @@ class TestRigidFragments:
         for idx, (i, j) in enumerate(zip(*np.where(cell_mask))):
             if i != j:
                 offdiag_indices.append(idx)
-        if not offdiag_indices:
-            pytest.skip("No off-diagonal cell DOF")
+        assert offdiag_indices, "default cell mask must include shear degrees of freedom"
 
         x_sheared[pes.n_internal + offdiag_indices[0]] += 0.05
         pes.set_x(x_sheared)
@@ -2764,24 +2762,10 @@ for offsets in product(*((0, 1),) * 3):
     atoms_ref += atoms
 
 
-# internal=True builds a coordinate basis of only 30 coordinates for this
-# 72-DOF cluster (sella warns "30 coords found! Expected 72"), and all 30 of
-# them are the rigid-water constraints. Ufree therefore comes out (30, 0) --
-# an empty free subspace -- so the optimizer has no direction to move in and
-# reports convergence immediately. The Cartesian path correctly yields
-# 72 - 30 = 42 free DOF. Until the internal basis covers the full space these
-# two cases cannot pass; order=0 previously *appeared* to pass only because
-# every assertion is vacuously true on an empty spectrum.
-_EMPTY_FREE_SUBSPACE = pytest.mark.xfail(
-    reason="internal coords span only the 30 constraints; Ufree is (30, 0)",
-    strict=True,
-)
-
-
 @pytest.mark.parametrize("internal,order",
-                         [pytest.param(True, 0, marks=_EMPTY_FREE_SUBSPACE),
+                         [(True, 0),
                           (False, 0),
-                          pytest.param(True, 1, marks=_EMPTY_FREE_SUBSPACE),
+                          (True, 1),
                           (False, 1),
                           ])
 def test_water_dimer(internal, order, tmp_path):
@@ -2813,25 +2797,33 @@ def test_water_dimer(internal, order, tmp_path):
         trajectory=str(tmp_path / 'test.traj'),
         eta=1e-6,
         delta0=1e-2,
+        internal=internal,
+        constraints=cons,
+        # Automatic discovery adds each water's translation and rotation
+        # coordinates. An unpopulated explicit Internals object disables
+        # discovery and contains only the 30 constrained coordinates.
+        allow_fragments=True,
     )
-    if internal:
-        sella_kwargs['internal'] = Internals(
-            atoms, cons=cons, allow_fragments=True
-        )
-    else:
-        sella_kwargs['constraints'] = cons
     opt = Sella(atoms, **sella_kwargs)
 
+    # Eight rigid waters retain 6 * 8 - 6 relative-motion degrees of freedom.
+    # Check before running as well, so a missing basis fails immediately.
+    nfree = 6 * nwater - 6
+    assert opt.pes.get_Ufree().shape[1] == nfree
+
     opt.delta = 0.05
-    opt.run(fmax=1e-3)
+    # Convergence is measured in Cartesian forces, whereas the gradient
+    # assertion below uses internal coordinates; converge more tightly to
+    # leave room for the change of metric.
+    opt.run(fmax=1e-4)
 
     atoms.rattle()
-    opt.run(fmax=1e-3)
+    opt.run(fmax=1e-4)
 
     Ufree = opt.pes.get_Ufree()
     # Without this guard every assertion below is vacuously true when the
     # free subspace is empty, and the test passes while checking nothing.
-    assert Ufree.shape[1] > 0, f"empty free subspace: Ufree {Ufree.shape}"
+    assert Ufree.shape[1] == nfree
 
     g = opt.pes.get_g() @ Ufree
     np.testing.assert_allclose(g, 0, atol=1e-3)
@@ -2912,6 +2904,7 @@ def test_modified_gram_schmidt_gives_up_rather_than_spinning():
         modified_gram_schmidt(X, maxiter=1)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     importlib.util.find_spec("sella") is None,
     reason="needs an upstream sella to compare against",

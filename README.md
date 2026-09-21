@@ -138,10 +138,13 @@ ruff check .
 The suite builds its own structures with `ase.build` and evaluates them with
 EMT. Offline unit tests cover orchestration without opening sockets; a small
 set of `integration` tests exercises real local socket transport when the
-runner permits it. Checks needing ORCA, PLUMED or OpenMM skip when those are
-unavailable. The saddle-point and IRC tests run with the standard Python
-dependencies in `tests/test_sella.py`. Coverage is branch-aware and enforces
-the configured floor.
+runner permits it. Checks needing ORCA, PLUMED, OpenMM or an upstream Sella
+comparison installation skip when those are unavailable. The saddle-point
+and IRC tests run with the standard Python dependencies in `tests/test_sella.py`,
+with no expected failures. CI exercises OpenMM conversions on Python 3.12.
+See [test requirements](docs/installation.md#development) for each optional
+integration; `python -m pytest -rs` reports the skip reasons. Coverage is
+branch-aware and enforces the configured floor.
 
 CI tests Python 3.12–3.14 and also tests the minimum scientific, pytest and Ruff
 versions together on Python 3.12. To reproduce that environment, run
