@@ -35,7 +35,8 @@ python -m pip install reactiontools
 
 This installs the Python dependencies and includes Sella, IRC and geodesic
 interpolation. PLUMED and its Python bindings are needed only for PLUMED-backed
-workflows; ORCA must be installed separately to run ORCA calculations.
+workflows. The ORCA quantum chemistry package must be installed separately to
+run ORCA electronic-structure calculations.
 
 For a Linux Conda environment with PLUMED and OPES, run the installer from the
 repository root. **It removes and recreates the target environment**, named

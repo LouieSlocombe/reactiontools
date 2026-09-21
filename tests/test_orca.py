@@ -1,4 +1,4 @@
-"""Tests for reactiontools.tools_orca.
+"""Tests for the ORCA quantum chemistry interface in reactiontools.tools_orca.
 
 Nearly everything here is offline: the keyword-assembly tests point ORCA at a
 dummy binary that passes :func:`_resolve_orca`'s checks, and the parser and
@@ -62,7 +62,7 @@ from reactiontools.tools_orca import (
 # a machine without it is the normal case, not a broken one.
 orca_required = pytest.mark.skipif(
     os.environ.get("ORCA_PATH") is None,
-    reason="needs ORCA; set ORCA_PATH to the executable",
+    reason="needs the ORCA quantum chemistry executable; set ORCA_PATH",
 )
 
 DATA = Path(__file__).parent / "data"
@@ -186,15 +186,16 @@ class TestResolveOrca:
 
         assert _resolve_orca(None) == str(fake_orca)
 
-    def test_screen_reader_is_rejected(self, tmp_path: Path) -> None:
-        # The GNOME screen reader is a Python script without ORCA's sibling
-        # module binaries. Reproduce that layout without depending on the
-        # host having the screen reader installed at /usr/bin/orca.
-        screen_reader = tmp_path / "orca"
-        screen_reader.write_text("#!/usr/bin/env python3\n")
-        screen_reader.chmod(0o755)
-        with pytest.raises(RuntimeError, match="screen reader"):
-            _resolve_orca(screen_reader)
+    def test_rejects_gnome_orca_executable_name_collision(self, tmp_path: Path) -> None:
+        """Reject an unrelated namesake when locating quantum chemistry ORCA."""
+        # GNOME Orca is a separate accessibility application whose executable
+        # is also called `orca`. Reproduce its Python-script layout without
+        # installing or running it; it has no quantum chemistry module binaries.
+        unrelated_orca = tmp_path / "orca"
+        unrelated_orca.write_text("#!/usr/bin/env python3\n")
+        unrelated_orca.chmod(0o755)
+        with pytest.raises(RuntimeError, match="ORCA quantum chemistry executable"):
+            _resolve_orca(unrelated_orca)
 
     def test_missing_binary_raises(self) -> None:
         with pytest.raises(FileNotFoundError):

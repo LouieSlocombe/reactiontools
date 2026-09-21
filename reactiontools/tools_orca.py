@@ -1,13 +1,14 @@
-"""ORCA calculators for ASE, from presets and cheap screening up to CCSD(T)/CBS.
+"""ASE calculators for the ORCA quantum chemistry package.
 
-ORCA is licensed separately and is not installable from PyPI or conda, so it
-has to be put on the machine by hand; everything here locates the binary
+ORCA performs the electronic-structure calculations used here, from DFT
+presets and cheap screening up to CCSD(T)/CBS. It is installed and licensed
+separately from reactiontools; everything here locates its executable
 through :func:`_resolve_orca`, which honours an explicit ``orca_path=``
 argument, then ``$ASE_ORCA_COMMAND``, ``$ORCA_COMMAND``, ``$ORCA_PATH`` (the
-executable itself or its install directory), ``$ORCA_DIR`` and finally PATH --
-refusing anything that is not really ORCA, such as the GNOME screen reader
-that ships as ``/usr/bin/orca`` on many Linux systems. See
-``build_tools/README.md`` for the install steps.
+executable itself or its install directory), ``$ORCA_DIR`` and finally PATH.
+The executable check guards against a name collision: the unrelated GNOME
+Orca screen reader also uses the command ``orca``. See ``build_tools/README.md``
+for the quantum chemistry package's install steps.
 
 :func:`orca_calc_preset` builds an ASE calculator from a handful of presets,
 so a DFT, MP2, CCSD(T) or QM/XTB2 job can be set up without hand-writing
@@ -64,11 +65,12 @@ _DONE_RE = re.compile(r"ORCA TERMINATED NORMALLY")
 
 
 def _resolve_orca(command: str | Path | None) -> str:
-    """Locate the ORCA quantum-chemistry binary, refusing look-alikes.
+    """Locate the executable for the ORCA quantum chemistry package.
 
-    ``orca`` on PATH is very often the GNOME screen reader, which would happily
-    launch if we passed it straight to ASE, so anything that is not clearly the
-    quantum-chemistry program is rejected up front rather than executed.
+    The unrelated GNOME Orca screen reader also installs an executable named
+    ``orca``. Validate the candidate before handing it to ASE so that this
+    name collision cannot accidentally launch an accessibility application
+    in place of an electronic-structure calculation.
 
     Parameters
     ----------
@@ -88,7 +90,8 @@ def _resolve_orca(command: str | Path | None) -> str:
     FileNotFoundError
         If no candidate was found, or the candidate does not exist.
     RuntimeError
-        If the candidate exists but does not look like ORCA.
+        If the candidate exists but does not look like the ORCA quantum
+        chemistry executable.
     """
     candidate = (
         command or os.environ.get("ASE_ORCA_COMMAND") or os.environ.get("ORCA_COMMAND")
@@ -103,26 +106,29 @@ def _resolve_orca(command: str | Path | None) -> str:
             candidate = shutil.which("orca")
     if not candidate:
         raise FileNotFoundError(
-            "ORCA executable not found. Pass orca_path='/path/to/orca' or set "
-            "$ORCA_PATH."
+            "ORCA quantum chemistry executable not found. Install ORCA "
+            "separately, then pass orca_path='/path/to/orca' or set $ORCA_PATH."
         )
 
     path = Path(str(candidate).split()[0]).expanduser()
     resolved = shutil.which(str(path)) or str(path)
     path = Path(resolved).resolve()
     if not path.is_file():
-        raise FileNotFoundError(f"ORCA executable {path} does not exist")
+        raise FileNotFoundError(
+            f"ORCA quantum chemistry executable {path} does not exist"
+        )
 
-    # Real ORCA ships its module binaries alongside the driver; the screen
-    # reader is a lone Python script.
+    # The quantum chemistry package ships module binaries alongside its
+    # driver. GNOME's unrelated `orca` executable is a Python script.
     siblings = any(path.parent.glob("orca_[gs]*"))
     is_elf = path.read_bytes()[:4] == b"\x7fELF"
     if not (siblings or is_elf):
         raise RuntimeError(
-            f"{path} does not look like the ORCA quantum-chemistry program "
+            f"{path} does not look like the ORCA quantum chemistry executable "
             "(no orca_* module binaries next to it, and it is not a binary). "
-            "On most Linux systems /usr/bin/orca is the GNOME screen reader. "
-            "Pass orca_path='/path/to/orca/orca' explicitly."
+            "The unrelated GNOME Orca screen reader also uses the command "
+            "name 'orca'. Set ORCA_PATH or pass orca_path explicitly to the "
+            "executable from your ORCA quantum chemistry installation."
         )
     return str(path)
 

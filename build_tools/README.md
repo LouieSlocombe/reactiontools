@@ -112,17 +112,22 @@ Tests that need external programs may skip when those programs are unavailable.
 
 ## ORCA
 
-ORCA is licensed separately and is not installed by these scripts. Install it
-from the [ORCA website](https://www.faccts.de/orca/) and point `ORCA_PATH` at the
-executable:
+ORCA is the quantum chemistry package used here for electronic-structure
+calculations. It is licensed separately and is not installed by these scripts.
+Install it from the [ORCA website](https://www.faccts.de/orca/) and point
+`ORCA_PATH` at its executable:
 
 ```bash
-export ORCA_PATH="/path/to/orca"
+export ORCA_PATH="/path/to/orca-install/orca"
 ```
 
 Add the export to your shell configuration to keep it across sessions. The ORCA
 helpers accept an explicit executable path; `ORCA_PATH` provides a default and
 enables the tests that require ORCA.
+
+On some Linux systems, the command `orca` belongs to the unrelated GNOME Orca
+screen reader. Set the explicit path above to select the quantum chemistry
+executable; the resolver checks for this name collision before launching it.
 
 ## OpenMM workflows
 

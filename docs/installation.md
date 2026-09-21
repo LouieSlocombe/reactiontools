@@ -34,7 +34,7 @@ Install these only for the workflows that use them:
 | --- | --- | --- |
 | Reconstruct metadynamics free energies with `run_sum_hills` | PLUMED executable | Put `plumed` on `PATH`. |
 | Run biased ASE dynamics with `plumed_calculator` | PLUMED Python bindings (`py-plumed`) and a loadable kernel | Use matching bindings and kernel; the Conda installer below builds both. OPES simulations need the `opes` module. |
-| Run ORCA calculations | ORCA executable | Install ORCA separately and set `ORCA_PATH` to the binary, or pass `orca_path` to the calculator helper. |
+| Run ORCA electronic-structure calculations | ORCA quantum chemistry executable | Install ORCA separately and set `ORCA_PATH` to its executable, or pass `orca_path` to the calculator helper. |
 
 Building PLUMED input files and processing existing OPES output with the
 bundled scripts do not require a PLUMED installation.
@@ -84,7 +84,7 @@ specific reasons:
 
 | Tests | Requirement to run them |
 | --- | --- |
-| Three ORCA calculations | A separately installed ORCA executable, selected with `ORCA_PATH`. |
+| Three ORCA calculations | A separately installed ORCA quantum chemistry executable, selected with `ORCA_PATH`. |
 | Eight biased PLUMED dynamics tests | PLUMED Python bindings and a loadable kernel, as described above. |
 | Five OpenMM quantity conversions | `python -m pip install openmm`. CI installs it in the Python 3.12 job with current dependencies. |
 | Six comparisons against upstream Sella's compiled Gram–Schmidt implementation | An importable upstream `sella` installation. The bundled NumPy implementation also has unconditional mathematical tests. |
