@@ -56,6 +56,15 @@ _UNIT_LABELS = {
 }
 
 
+def _format_energy(value: float) -> str:
+    """Format an energy to three decimals without displaying negative zero.
+
+    The caller supplies the unit label; no numerical conversion is done here.
+    """
+    text = f"{value:.3f}"
+    return "0.000" if text == "-0.000" else text
+
+
 def _normalise_unit(unit: str | None) -> str | None:
     """Normalise an energy-unit name and validate it.
 

@@ -2,7 +2,7 @@
 
 import importlib.util
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -20,6 +20,8 @@ from reactiontools import (
     plumed_calculator,
     plumed_metad_input,
     plumed_selection,
+    run_opes_fes,
+    run_opes_reweighting,
     run_sum_hills,
     sum_hills_files,
 )
@@ -106,28 +108,13 @@ class TestFindMolecules:
 
 
 class TestRunSumHills:
-    @pytest.fixture
-    def recorded(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> list[tuple[list[str], dict[str, Any]]]:
-        """Capture the argv that would have been handed to plumed."""
-        calls = []
-
-        def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-            calls.append((cmd, kwargs))
-            return subprocess.CompletedProcess(cmd, 0)
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        return calls
-
     def test_builds_the_expected_command(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(hills="HILLS", outfile="fes.dat", verbose=False)
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert cmd == [
             "plumed",
             "sum_hills",
@@ -140,39 +127,39 @@ class TestRunSumHills:
 
     def test_mintozero_is_optional(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(mintozero=False, verbose=False)
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert "--mintozero" not in cmd
 
     def test_accepts_path_objects(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
         tmp_path: Path,
     ) -> None:
         run_sum_hills(
             hills=tmp_path / "HILLS", outfile=tmp_path / "fes.dat", verbose=False
         )
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert all(isinstance(part, str) for part in cmd)
         assert str(tmp_path / "HILLS") in cmd
 
     def test_checks_the_exit_status(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         """A failed sum_hills must not pass silently."""
         run_sum_hills(verbose=False)
 
-        _, kwargs = recorded[0]
+        _, kwargs = recorded_subprocess[0]
         assert kwargs["check"] is True
 
     def test_returns_the_command_line(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         returned = run_sum_hills(
             hills="HILLS", outfile="fes.dat", mintozero=False, verbose=False
@@ -182,7 +169,7 @@ class TestRunSumHills:
 
     def test_verbose_prints_the_command(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         run_sum_hills(verbose=True)
@@ -191,21 +178,34 @@ class TestRunSumHills:
 
     def test_quiet_by_default_when_verbose_is_false(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         run_sum_hills(verbose=False)
 
         assert capsys.readouterr().out == ""
 
-    def test_propagates_a_plumed_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "runner, options",
+        [
+            (run_sum_hills, {}),
+            (run_opes_fes, {}),
+            (run_opes_reweighting, {"sigma": 0.2, "kt": 1.0}),
+        ],
+    )
+    def test_propagates_a_plumed_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        runner: Callable[..., str],
+        options: dict[str, Any],
+    ) -> None:
         def fake_run(cmd: list[str], **kwargs: Any) -> NoReturn:
             raise subprocess.CalledProcessError(1, cmd)
 
         monkeypatch.setattr(subprocess, "run", fake_run)
 
         with pytest.raises(subprocess.CalledProcessError):
-            run_sum_hills(verbose=False)
+            runner(verbose=False, **options)
 
 
 class TestPlumedMetadInput:
@@ -562,53 +562,38 @@ class TestPlumedCalculator:
 
 
 class TestRunSumHillsOptions:
-    @pytest.fixture
-    def recorded(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> list[tuple[list[str], dict[str, Any]]]:
-        """Capture the argv that would have been handed to plumed."""
-        calls = []
-
-        def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-            calls.append((cmd, kwargs))
-            return subprocess.CompletedProcess(cmd, 0)
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        return calls
-
     def test_stride_asks_for_a_series(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(stride=100, verbose=False)
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert "--stride" in cmd
         assert cmd[cmd.index("--stride") + 1] == "100"
 
     def test_nohistory_is_optional(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(stride=100, nohistory=True, verbose=False)
 
-        assert "--nohistory" in recorded[0][0]
+        assert "--nohistory" in recorded_subprocess[0][0]
 
     def test_grid_bounds_are_passed_through(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(grid_min=1.5, grid_max=6.0, grid_bin=500, verbose=False)
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert cmd[cmd.index("--min") + 1] == "1.5"
         assert cmd[cmd.index("--max") + 1] == "6.0"
         assert cmd[cmd.index("--bin") + 1] == "500"
 
     def test_grid_bounds_take_one_value_per_variable(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         """A two-dimensional surface needs a bound for each variable."""
         run_sum_hills(
@@ -618,64 +603,64 @@ class TestRunSumHillsOptions:
             verbose=False,
         )
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert cmd[cmd.index("--min") + 1] == "1.0,-3.14"
         assert cmd[cmd.index("--max") + 1] == "6.0,3.14"
         assert cmd[cmd.index("--bin") + 1] == "200,100"
 
     def test_idw_selects_the_variables_to_keep(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(idw="d1", kt=0.0259, verbose=False)
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert cmd[cmd.index("--idw") + 1] == "d1"
         assert cmd[cmd.index("--kt") + 1] == "0.0259"
 
     def test_idw_accepts_several_labels(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(idw=["d1", "t1"], kt=0.0259, verbose=False)
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert cmd[cmd.index("--idw") + 1] == "d1,t1"
 
     def test_kt_without_idw_is_refused(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         """Alone it would quietly do nothing; kt needs idw to mean anything."""
         with pytest.raises(ValueError, match="only applies when idw"):
             run_sum_hills(kt=0.0259, verbose=False)
 
-        assert recorded == []
+        assert recorded_subprocess == []
 
     def test_negbias_is_optional(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(negbias=True, verbose=False)
 
-        assert "--negbias" in recorded[0][0]
+        assert "--negbias" in recorded_subprocess[0][0]
 
     def test_extra_arguments_are_appended(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         run_sum_hills(extra=["--fmt", "%14.9f"], verbose=False)
 
-        assert recorded[0][0][-2:] == ["--fmt", "%14.9f"]
+        assert recorded_subprocess[0][0][-2:] == ["--fmt", "%14.9f"]
 
     def test_the_plain_command_is_unchanged(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         """None of the new options may appear unless they were asked for."""
         run_sum_hills(verbose=False)
 
-        cmd, _ = recorded[0]
+        cmd, _ = recorded_subprocess[0]
         assert cmd == [
             "plumed",
             "sum_hills",

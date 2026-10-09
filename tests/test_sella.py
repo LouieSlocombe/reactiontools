@@ -182,6 +182,45 @@ def water_box():
 
 
 @pytest.fixture
+def bismuth_nitrate_cluster():
+    """Bi(NO3)3 coordinates from the single-atom TRIC regression, without a calculator."""
+    return Atoms(
+        'BiN3O9',
+        positions=[
+            [-0.168754, 0.103309, -0.601068],   # Bi
+            [-1.452579, 0.996969, 1.671974],    # N
+            [-1.906613, 1.312382, 2.719561],    # O
+            [-0.390479, 0.236458, 1.599985],    # O
+            [-1.916359, 1.339852, 0.548706],    # O
+            [2.088604, 1.559729, 0.184556],     # N
+            [3.081561, 2.106988, 0.537575],     # O
+            [0.991304, 2.160371, -0.042657],    # O
+            [2.046745, 0.279049, -0.004926],    # O
+            [-0.824031, -2.516641, 0.135921],   # N
+            [-1.024602, -3.638619, 0.469313],   # O
+            [0.376482, -2.057305, -0.023988],   # O
+            [-1.745220, -1.672049, -0.097571],  # O
+        ]
+    )
+
+
+@pytest.fixture
+def separated_water_pair():
+    """Two nonperiodic waters with the explicit geometry used by the TRIC tests."""
+    return Atoms(
+        symbols=['O', 'H', 'H', 'O', 'H', 'H'],
+        positions=[
+            [0.0, 0.0, 0.0],     # O (first molecule)
+            [0.96, 0.0, 0.0],    # H
+            [0.0, 0.96, 0.0],    # H
+            [10.0, 0.0, 0.0],    # O (second molecule, far away)
+            [10.96, 0.0, 0.0],   # H
+            [10.0, 0.96, 0.0],   # H
+        ]
+    )
+
+
+@pytest.fixture
 def fd_pes_gradient():
     """Factory for central-difference gradients of a PES with respect to ``x``.
 
@@ -899,31 +938,14 @@ def test_custom_coordinate_derivatives_are_independent_of_origin(offset, provide
 class TestTRICs:
     """Tests for Translation-Rotation Internal Coordinates (TRICs)."""
 
-    def test_tric_single_atom_fragment(self):
+    def test_tric_single_atom_fragment(self, bismuth_nitrate_cluster):
         """Test TRICs with a single-atom fragment (should not raise assertion).
 
         This tests the bug fix for the line ordering issue in find_all_bonds()
         where single atoms would incorrectly get rotation ICs added.
         """
         # Bi(NO3)3 cluster from the bug report - Bi is a single atom, NO3 are fragments
-        atoms = Atoms(
-            'BiN3O9',
-            positions=[
-                [-0.168754, 0.103309, -0.601068],   # Bi
-                [-1.452579, 0.996969, 1.671974],    # N
-                [-1.906613, 1.312382, 2.719561],    # O
-                [-0.390479, 0.236458, 1.599985],    # O
-                [-1.916359, 1.339852, 0.548706],    # O
-                [2.088604, 1.559729, 0.184556],     # N
-                [3.081561, 2.106988, 0.537575],     # O
-                [0.991304, 2.160371, -0.042657],    # O
-                [2.046745, 0.279049, -0.004926],    # O
-                [-0.824031, -2.516641, 0.135921],   # N
-                [-1.024602, -3.638619, 0.469313],   # O
-                [0.376482, -2.057305, -0.023988],   # O
-                [-1.745220, -1.672049, -0.097571],  # O
-            ]
-        )
+        atoms = bismuth_nitrate_cluster
         # Use scale=1.0 to ensure fragments are detected (not bonded via 1.25 scale)
         ints = Internals(atoms, allow_fragments=True)
         # This should not raise an assertion error even though Bi is a single atom
@@ -939,26 +961,9 @@ class TestTRICs:
         for rot in ints.internals['rotations']:
             assert len(rot.indices) >= 2, "Rotation IC added to single atom!"
 
-    def test_tric_scale_parameter(self):
+    def test_tric_scale_parameter(self, bismuth_nitrate_cluster):
         """Test that scale parameter affects bond detection."""
-        atoms = Atoms(
-            'BiN3O9',
-            positions=[
-                [-0.168754, 0.103309, -0.601068],   # Bi
-                [-1.452579, 0.996969, 1.671974],    # N
-                [-1.906613, 1.312382, 2.719561],    # O
-                [-0.390479, 0.236458, 1.599985],    # O
-                [-1.916359, 1.339852, 0.548706],    # O
-                [2.088604, 1.559729, 0.184556],     # N
-                [3.081561, 2.106988, 0.537575],     # O
-                [0.991304, 2.160371, -0.042657],    # O
-                [2.046745, 0.279049, -0.004926],    # O
-                [-0.824031, -2.516641, 0.135921],   # N
-                [-1.024602, -3.638619, 0.469313],   # O
-                [0.376482, -2.057305, -0.023988],   # O
-                [-1.745220, -1.672049, -0.097571],  # O
-            ]
-        )
+        atoms = bismuth_nitrate_cluster
 
         # With small scale, should have fragments (TRICs added)
         ints_small = Internals(atoms, allow_fragments=True)
@@ -976,20 +981,10 @@ class TestTRICs:
         assert n_trans_small >= n_trans_large
         assert n_rot_small >= n_rot_large
 
-    def test_tric_two_separate_molecules(self):
+    def test_tric_two_separate_molecules(self, separated_water_pair):
         """Test TRICs with two well-separated molecules."""
         # Two water molecules far apart - use explicit element list for clarity
-        atoms = Atoms(
-            symbols=['O', 'H', 'H', 'O', 'H', 'H'],
-            positions=[
-                [0.0, 0.0, 0.0],     # O (first molecule)
-                [0.96, 0.0, 0.0],    # H
-                [0.0, 0.96, 0.0],    # H
-                [10.0, 0.0, 0.0],    # O (second molecule, far away)
-                [10.96, 0.0, 0.0],   # H
-                [10.0, 0.96, 0.0],   # H
-            ]
-        )
+        atoms = separated_water_pair
 
         ints = Internals(atoms, allow_fragments=True)
         ints.find_all_bonds()
@@ -999,20 +994,10 @@ class TestTRICs:
         assert len(ints.internals['translations']) == 6  # 3 per fragment × 2 fragments
         assert len(ints.internals['rotations']) == 6     # 3 per fragment × 2 fragments
 
-    def test_validate_basis_with_trics(self):
+    def test_validate_basis_with_trics(self, separated_water_pair):
         """Test that validate_basis correctly calculates DOF with TRICs."""
         # Two water molecules far apart - use explicit element list for clarity
-        atoms = Atoms(
-            symbols=['O', 'H', 'H', 'O', 'H', 'H'],
-            positions=[
-                [0.0, 0.0, 0.0],     # O (first molecule)
-                [0.96, 0.0, 0.0],    # H
-                [0.0, 0.96, 0.0],    # H
-                [10.0, 0.0, 0.0],    # O (second molecule, far away)
-                [10.96, 0.0, 0.0],   # H
-                [10.0, 0.96, 0.0],   # H
-            ]
-        )
+        atoms = separated_water_pair
 
         ints = Internals(atoms, allow_fragments=True)
         ints.find_all_bonds()
@@ -1034,7 +1019,7 @@ class TestTRICs:
             f"validate_basis warned: {[str(w.message) for w in basis_warnings]}"
         )
 
-    def test_tric_optimization_convergence(self):
+    def test_tric_optimization_convergence(self, bismuth_nitrate_cluster):
         """Optimization with TRICs runs without an ODE failure.
 
         Smoke test: the assertion is that no exception is raised. It guards
@@ -1042,24 +1027,7 @@ class TestTRICs:
         Jacobians that arise from TRICs, which surfaced as a RuntimeError.
         """
         # Bi(NO3)3 cluster - a real-world TRIC test case
-        atoms = Atoms(
-            'BiN3O9',
-            positions=[
-                [-0.168754, 0.103309, -0.601068],   # Bi
-                [-1.452579, 0.996969, 1.671974],    # N
-                [-1.906613, 1.312382, 2.719561],    # O
-                [-0.390479, 0.236458, 1.599985],    # O
-                [-1.916359, 1.339852, 0.548706],    # O
-                [2.088604, 1.559729, 0.184556],     # N
-                [3.081561, 2.106988, 0.537575],     # O
-                [0.991304, 2.160371, -0.042657],    # O
-                [2.046745, 0.279049, -0.004926],    # O
-                [-0.824031, -2.516641, 0.135921],   # N
-                [-1.024602, -3.638619, 0.469313],   # O
-                [0.376482, -2.057305, -0.023988],   # O
-                [-1.745220, -1.672049, -0.097571],  # O
-            ]
-        )
+        atoms = bismuth_nitrate_cluster
         atoms.calc = LennardJones()
 
         # Use TRICs with small scale to ensure fragments are detected
@@ -1811,6 +1779,7 @@ class TestMolecularCrystal:
         )
 
         assert isinstance(opt.pes, CellInternalPES)
+        assert opt.pes.rigid_fragments is True
 
         # Verify the internal coords have TRICs (translations and rotations)
         internals = opt.pes.int
@@ -1907,12 +1876,10 @@ class TestTRICsCellDerivatives:
             # Translation center of mass should not depend on cell
             assert_allclose(grad_cell, 0, atol=1e-10)
 
-    def test_rotation_cell_derivative_zero(self):
+    def test_rotation_cell_derivative_zero(self, water_box):
         """Test that rotation coordinates have zero cell derivatives."""
         # Create water molecule (non-linear, has rotations)
-        atoms = molecule('H2O')
-        atoms.center(vacuum=3.0)
-        atoms.pbc = True
+        atoms = water_box()
 
         internals = Internals(atoms, allow_fragments=True)
         internals.find_all_bonds()
@@ -1945,11 +1912,9 @@ class TestTRICsCellDerivatives:
         # Check that gradient is zero (bond doesn't cross boundary)
         assert_allclose(grad_cell, 0, atol=1e-10)
 
-    def test_cell_jacobian_trics_rows_zero(self):
+    def test_cell_jacobian_trics_rows_zero(self, water_box):
         """Test that TRICs rows in cell_jacobian are zero."""
-        atoms = molecule('H2O')
-        atoms.center(vacuum=3.0)
-        atoms.pbc = True
+        atoms = water_box()
 
         internals = Internals(atoms, allow_fragments=True)
         internals.find_all_bonds()
@@ -2236,14 +2201,25 @@ class TestRigidFragments:
         for group in pes.fragment_groups:
             assert_allclose(delta_r[group].mean(axis=0), 0, atol=1e-12)
 
-    def test_rigid_fragment_cell_gradient_numerical(self, two_water_crystal, fd_pes_gradient):
+    @pytest.mark.parametrize(
+        "cell",
+        [
+            pytest.param(7.0, id="cubic"),
+            pytest.param(_TRICLINIC_CELL, id="triclinic"),
+            pytest.param(_SHEARED_CELL, id="large-shear"),
+        ],
+    )
+    def test_rigid_fragment_cell_gradient_numerical(
+        self, two_water_crystal, fd_pes_gradient, cell
+    ):
         """Test rigid fragment cell gradient matches numerical finite difference.
 
         This is the key correctness test: the analytical cell gradient with
         rigid fragment mode should match the energy change when we actually
-        move fragment CoMs to maintain fractional positions.
+        move fragment CoMs to maintain fractional positions. The three cases
+        cover cubic and two nonorthogonal reference cells.
         """
-        atoms = two_water_crystal()
+        atoms = two_water_crystal(cell)
         internals = Internals(atoms, allow_fragments=True)
 
         pes = CellInternalPES(atoms, internals)
@@ -2254,24 +2230,6 @@ class TestRigidFragments:
         g_cell = g[pes.n_internal:]
 
         # Numerical gradient via finite difference on cell parameters
-        g_cell_numeric = fd_pes_gradient(pes, range(pes.n_internal, pes.dim), delta=1e-6)
-
-        assert_allclose(g_cell, g_cell_numeric, atol=1e-4, rtol=1e-3)
-
-    def test_rigid_fragment_cell_gradient_nonorthogonal(self, two_water_crystal, fd_pes_gradient):
-        """Test rigid fragment gradient with non-orthogonal cell."""
-        atoms = two_water_crystal(_TRICLINIC_CELL)
-
-        internals = Internals(atoms, allow_fragments=True)
-
-        pes = CellInternalPES(atoms, internals)
-        assert pes.rigid_fragments is True
-
-        # Get analytical gradient
-        _, g = pes.eval()
-        g_cell = g[pes.n_internal:]
-
-        # Numerical gradient
         g_cell_numeric = fd_pes_gradient(pes, range(pes.n_internal, pes.dim), delta=1e-6)
 
         assert_allclose(g_cell, g_cell_numeric, atol=1e-4, rtol=1e-3)
@@ -2322,26 +2280,6 @@ class TestRigidFragments:
         delta_r = pes_rigid._compute_delta_r()
         assert_allclose(delta_r, 0, atol=1e-12)
 
-    def test_rigid_fragments_sella_integration(self, two_water_crystal):
-        """Test rigid fragments through the Sella API."""
-        atoms = two_water_crystal()
-
-        opt = Sella(
-            atoms,
-            internal=True,
-            order=0,
-            optimize_cell=True,
-            allow_fragments=True,
-            logfile=None,
-        )
-
-        assert isinstance(opt.pes, CellInternalPES)
-        assert opt.pes.rigid_fragments is True
-
-        # Take a few steps to verify no errors
-        for _ in range(3):
-            opt.step()
-
     def test_rotation_applied_on_shear(self, two_water_crystal):
         """Test that fragment atoms rotate under shear, not just translate."""
         atoms = two_water_crystal()
@@ -2385,27 +2323,6 @@ class TestRigidFragments:
                 assert np.max(np.abs(diff)) > 1e-6, (
                     "Fragment atoms should rotate under shear deformation"
                 )
-
-    def test_gradient_numerical_large_shear(self, two_water_crystal, fd_pes_gradient):
-        """Test gradient correctness with a heavily sheared cell.
-
-        This stress-tests the rotation correction at large deformation
-        where the rotation component R deviates significantly from identity.
-        """
-        atoms = two_water_crystal(_SHEARED_CELL)
-
-        internals = Internals(atoms, allow_fragments=True)
-        pes = CellInternalPES(atoms, internals)
-        assert pes.rigid_fragments is True
-
-        # Get analytical gradient
-        _, g = pes.eval()
-        g_cell = g[pes.n_internal:]
-
-        # Numerical gradient via finite difference
-        g_cell_numeric = fd_pes_gradient(pes, range(pes.n_internal, pes.dim), delta=1e-6)
-
-        assert_allclose(g_cell, g_cell_numeric, atol=1e-4, rtol=1e-3)
 
     def test_gradient_after_cell_step(self, two_water_crystal, fd_pes_gradient):
         """Test gradient correctness after the cell has already been deformed.

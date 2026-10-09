@@ -291,6 +291,40 @@ class TestAlignAtomSets:
                 reference_indices=list(range(len(indices))),
             )
 
+    @pytest.mark.parametrize(
+        ("indices", "message"),
+        [
+            (1.0, "mobile_indices must contain integer atom indices."),
+            (True, "mobile_indices must contain integer atom indices."),
+            ([1.0], "mobile_indices must contain only integer atom indices."),
+            ([True], "mobile_indices must contain only integer atom indices."),
+        ],
+    )
+    def test_index_type_errors_keep_the_alignment_wording(
+        self, rigid_pair: tuple[Atoms, Atoms, np.ndarray, np.ndarray],
+        indices: Any, message: str,
+    ) -> None:
+        mobile, reference, _rotation, _translation = rigid_pair
+
+        with pytest.raises(TypeError) as error:
+            align_atom_sets(mobile, reference, mobile_indices=indices)
+
+        assert str(error.value) == message
+
+    def test_accepts_numpy_integer_indices_from_a_generator(
+        self, rigid_pair: tuple[Atoms, Atoms, np.ndarray, np.ndarray],
+    ) -> None:
+        mobile, reference, _rotation, _translation = rigid_pair
+        order = np.array([2, 0, 3, 1], dtype=np.int64)
+
+        aligned = align_atom_sets(
+            mobile, reference,
+            mobile_indices=(index for index in order),
+            reference_indices=order,
+        )
+
+        assert aligned.positions == pytest.approx(reference.positions, abs=1e-12)
+
     def test_rejects_empty_atom_sets(self) -> None:
         with pytest.raises(ValueError, match="must not be empty"):
             align_atom_sets(Atoms(), Atoms())
@@ -834,6 +868,40 @@ class TestSwapBondingConfiguration:
         with pytest.raises(TypeError, match="integer"):
             swap_bonding_configuration(h_bond, 0, invalid, 2)
 
+    @pytest.mark.parametrize(
+        ("index", "message"),
+        [
+            (None, "hydrogen_index must be an integer or iterable of integers."),
+            (True, "hydrogen_index must be an integer or iterable of integers."),
+            ([1.0], "hydrogen_index must contain only integers."),
+            ([True], "hydrogen_index must contain only integers."),
+        ],
+    )
+    def test_index_type_errors_keep_the_transfer_wording(
+        self, h_bond: Atoms, index: Any, message: str,
+    ) -> None:
+        with pytest.raises(TypeError) as error:
+            swap_bonding_configuration(h_bond, 0, index, 2)
+
+        assert str(error.value) == message
+
+    def test_numpy_scalars_and_generator_indices_can_share_a_donor(self) -> None:
+        atoms = Atoms(
+            "OHOHO",
+            positions=[[0, 0, 0], [0.9, 0, 0], [3, 0, 0], [0, 1.1, 0], [0, 3, 0]],
+        )
+
+        shared = swap_bonding_configuration(
+            atoms, np.int64(0),
+            (index for index in np.array([1, 3], dtype=np.int64)),
+            (index for index in np.array([2, 4], dtype=np.int64)),
+        )
+        repeated = swap_bonding_configuration(atoms, [0, 0], [1, 3], [2, 4])
+
+        assert shared.positions == pytest.approx(repeated.positions)
+        assert shared.get_distance(1, 2) == pytest.approx(0.9)
+        assert shared.get_distance(3, 4) == pytest.approx(1.1)
+
     def test_rejects_an_empty_hydrogen_list(self, h_bond: Atoms) -> None:
         with pytest.raises(ValueError, match="must not be empty"):
             swap_bonding_configuration(h_bond, 0, [], 2)
@@ -861,24 +929,14 @@ class TestSwapBondingConfiguration:
 
 
 @pytest.fixture
-def transfer() -> tuple[Atoms, Atoms]:
+def transfer(pt_atoms: Atoms) -> tuple[Atoms, Atoms]:
     """A proton transfer and a transition state for it.
 
     The reactant is the hydrogen-bonded triad of the `pt_atoms` fixture, with
     the proton on the donor oxygen; the transition state has it midway across.
     Returned as a pair, since seeding needs both.
     """
-    reactant = Atoms(
-        "OHOCCC",
-        positions=[
-            [0.00, 0.00, 0.00],
-            [0.98, 0.00, 0.00],
-            [2.65, 0.00, 0.00],
-            [-0.65, 1.18, 0.00],
-            [0.10, 2.40, 0.00],
-            [1.55, 2.35, 0.00],
-        ],
-    )
+    reactant = pt_atoms.copy()
     ts = reactant.copy()
     ts.positions[1] = [1.325, 0.00, 0.00]
     return reactant, ts
@@ -1506,6 +1564,22 @@ class TestSeedMinimaFromTs:
 
 
 class TestSeedSummary:
+    def test_rounded_negative_zero_is_not_reported_as_negative_energy(self) -> None:
+        summary = SeedSummary(
+            ts_energy=-0.0001,
+            ts_fmax=0.0,
+            minima=[],
+            connecting=None,
+            n_directions=1,
+            n_relaxations=2,
+            n_stalled=2,
+            n_unconverged=0,
+            n_failed=0,
+        )
+
+        assert "TS energy:     0.000 eV" in str(summary)
+        assert "-0.000" not in str(summary)
+
     def test_it_prints_the_barriers_and_the_connecting_pair(self) -> None:
         minima = []
         for barrier in (0.374, 0.372):

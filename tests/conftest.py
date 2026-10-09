@@ -9,8 +9,10 @@ import matplotlib
 # Must run before reactiontools imports pyplot, or the tests need a display.
 matplotlib.use("Agg")
 
+import subprocess  # noqa: E402
 from collections.abc import Callable, Iterator  # noqa: E402
 from pathlib import Path  # noqa: E402
+from typing import Any  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
@@ -157,3 +159,18 @@ def fes_file(tmp_path: Path) -> Path:
     fes = cv**2  # a simple parabola, minimum of 0 eV at cv = 0
     np.savetxt(path, np.column_stack([cv, fes]))
     return path
+
+
+@pytest.fixture
+def recorded_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[list[str], dict[str, Any]]]:
+    """Record subprocess calls only in tests that explicitly request this fake."""
+    calls = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return calls

@@ -46,6 +46,7 @@ from .tools_reaction import (
     optimise_geom,
     quick_guess_path,
 )
+from .tools_units import _format_energy
 
 #: Cosine below which the direction a path arrives at the saddle in counts as
 #: unrelated to the direction the reaction is going in overall -- 0.5 is 60
@@ -212,6 +213,33 @@ def kabsch_transform(
     return rotation, translation
 
 
+def _integer_indices(value: int | Iterable[int], name: str) -> list[int]:
+    """Normalise a nonempty integer selection, preserving order and repeats.
+
+    Whether an index is in range, repeated, or shared by several atoms is
+    decided by the caller. An iteration failure is chained to its original
+    TypeError so callers can distinguish it from a noninteger element.
+    """
+    if isinstance(value, Integral) and not isinstance(value, bool):
+        return [int(value)]
+
+    try:
+        indices = list(value)
+    except TypeError as exc:
+        raise TypeError(
+            f"{name} must be an integer or iterable of integers."
+        ) from exc
+
+    if not indices:
+        raise ValueError(f"{name} must not be empty.")
+    if any(
+        not isinstance(index, Integral) or isinstance(index, bool)
+        for index in indices
+    ):
+        raise TypeError(f"{name} must contain only integers.")
+    return [int(index) for index in indices]
+
+
 def _atom_indices(
     atoms: Atoms,
     indices: int | Iterable[int] | None,
@@ -247,21 +275,14 @@ def _atom_indices(
             raise ValueError(f"{name} must not be empty.")
         return np.arange(len(atoms), dtype=int)
 
-    if isinstance(indices, Integral) and not isinstance(indices, bool):
-        raw_indices = [indices]
-    else:
-        try:
-            raw_indices = list(indices)
-        except TypeError as exc:
-            raise TypeError(f"{name} must contain integer atom indices.") from exc
-
-    if not raw_indices:
-        raise ValueError(f"{name} must not be empty.")
-    if any(
-        not isinstance(index, Integral) or isinstance(index, bool)
-        for index in raw_indices
-    ):
-        raise TypeError(f"{name} must contain only integer atom indices.")
+    try:
+        raw_indices = _integer_indices(indices, name)
+    except TypeError as exc:
+        # Keep the alignment API's wording and original exception cause.
+        qualifier = "" if exc.__cause__ is not None else "only "
+        raise TypeError(
+            f"{name} must contain {qualifier}integer atom indices."
+        ) from exc.__cause__
 
     selected = np.asarray(raw_indices, dtype=int)
     if len(np.unique(selected)) != len(selected):
@@ -1007,50 +1028,9 @@ def swap_bonding_configuration(
     IndexError
         If an atom index is out of range.
     """
-    def as_indices(value: int | Iterable[int], name: str) -> list[int]:
-        """Normalise one index argument to a list of plain integers.
-
-        Parameters
-        ----------
-        value : int or iterable of int
-            A single shared index, or one index per hydrogen.
-        name : str
-            Name of the caller's argument, quoted back in the error messages.
-
-        Returns
-        -------
-        list of int
-            The indices, in the order given.
-
-        Raises
-        ------
-        TypeError
-            If *value* is neither an integer nor an iterable of integers.
-        ValueError
-            If an empty iterable is supplied.
-        """
-        if isinstance(value, Integral) and not isinstance(value, bool):
-            return [int(value)]
-
-        try:
-            indices = list(value)
-        except TypeError as exc:
-            raise TypeError(
-                f"{name} must be an integer or iterable of integers."
-            ) from exc
-
-        if not indices:
-            raise ValueError(f"{name} must not be empty.")
-        if any(
-            not isinstance(index, Integral) or isinstance(index, bool)
-            for index in indices
-        ):
-            raise TypeError(f"{name} must contain only integers.")
-        return [int(index) for index in indices]
-
-    donors = as_indices(donor_index, "donor_index")
-    hydrogens = as_indices(hydrogen_index, "hydrogen_index")
-    acceptors = as_indices(acceptor_index, "acceptor_index")
+    donors = _integer_indices(donor_index, "donor_index")
+    hydrogens = _integer_indices(hydrogen_index, "hydrogen_index")
+    acceptors = _integer_indices(acceptor_index, "acceptor_index")
     transfer_count = len(hydrogens)
 
     def one_per_hydrogen(indices: list[int], name: str) -> list[int]:
@@ -1059,7 +1039,7 @@ def swap_bonding_configuration(
         Parameters
         ----------
         indices : list of int
-            Indices as ``as_indices`` returned them.
+            Indices as ``_integer_indices`` returned them.
         name : str
             Name of the caller's argument, quoted back in the error message.
 
@@ -1586,16 +1566,7 @@ class SeedSummary:
         first, second = self.connecting
         return self.minima[first], self.minima[second]
 
-    @staticmethod
-    def _ev(value: float) -> str:
-        """Format an energy, without a sign on a value that rounds to zero.
-
-        A barrier that rounds to nothing comes out a hair either side of it,
-        and "-0.000 eV" reads as a finding rather than as the rounding it is.
-        The same problem, and the same fix, as ``NebSummary`` has.
-        """
-        text = f"{value:.3f}"
-        return "0.000" if text == "-0.000" else text
+    _ev = staticmethod(_format_energy)
 
     def __str__(self) -> str:
         """Report the saddle, the minima found under it, and what was thrown away."""

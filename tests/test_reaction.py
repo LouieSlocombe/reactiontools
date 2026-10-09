@@ -4,6 +4,7 @@ import os
 import socket
 import warnings
 from collections.abc import Callable, Iterable
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase.build import add_adsorbate, fcc100, molecule
+from ase.calculators.calculator import PropertyNotImplementedError
 from ase.calculators.emt import EMT
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.calculators.socketio import PySocketIOClient, SocketIOCalculator
@@ -461,6 +463,53 @@ class TestOptimiseGeom:
 
 
 class TestOptimiseReactantProduct:
+    def test_preserves_endpoint_order_and_trajectory_names(
+        self, monkeypatch: pytest.MonkeyPatch, calc: EMT, water: Atoms
+    ) -> None:
+        product = water.copy()
+        calls = []
+        returned = []
+
+        def relax(atoms: Atoms, calculator: EMT, **kwargs: Any) -> Atoms:
+            calls.append((atoms, calculator, kwargs["opti_traj"], kwargs["_what"]))
+            result = atoms.copy()
+            returned.append(result)
+            return result
+
+        monkeypatch.setattr(tools_reaction, "optimise_geom", relax)
+        result = optimise_reactant_product(
+            water, product, calc, reactant_opti="first.traj", product_opti="second.traj"
+        )
+
+        assert calls[0][0] is water
+        assert calls[1][0] is product
+        assert [call[1:] for call in calls] == [
+            (calc, "first.traj", "Reactant optimisation"),
+            (calc, "second.traj", "Product optimisation"),
+        ]
+        assert result[0] is returned[0]
+        assert result[1] is returned[1]
+
+    def test_reactant_failure_does_not_start_the_product(self, calc: EMT) -> None:
+        strained = molecule("H2O")
+        strained.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.raises(ConvergenceError, match="Reactant optimisation"):
+            optimise_reactant_product(
+                strained,
+                strained.copy(),
+                calc,
+                fmax=1e-3,
+                steps=2,
+                reactant_opti="first.traj",
+                product_opti="second.traj",
+                keep_traj=True,
+                raise_on_unconverged=True,
+            )
+
+        assert Path("first.traj").exists()
+        assert not Path("second.traj").exists()
+
     def test_relaxes_both_endpoints(self, calc: EMT) -> None:
         reactant = molecule("H2O")
         reactant.positions[1] += [0.2, 0.0, 0.0]
@@ -1144,6 +1193,41 @@ def slab_endpoints() -> tuple[Atoms, Atoms]:
     return reactant, product
 
 
+@pytest.fixture
+def serial_slab_band(slab_endpoints: tuple[Atoms, Atoms]) -> list[Atoms]:
+    """Independent serial reference for the concurrent Al(100) hop tests."""
+    reactant, product = slab_endpoints
+    return optimise_neb(
+        prepare_neb(
+            reactant.copy(),
+            product.copy(),
+            EMT(),
+            n_images=5,
+            climb=True,
+            rm_ro_trans=False,
+            geo_int=False,
+        ),
+        fmax=0.05,
+        steps=200,
+        ts_traj="serial.traj",
+    )
+
+
+@pytest.fixture(params=("socket", "threaded"))
+def concurrent_neb_builder(
+    request: pytest.FixtureRequest,
+) -> Callable[..., AbstractContextManager[NEB]]:
+    """Run the shared contracts through both calculator-ownership routes."""
+    if request.param == "socket":
+        request.getfixturevalue("fake_parallel_socketio")
+        return prepare_parallel_neb
+
+    def threaded(*args: Any, **kwargs: Any) -> AbstractContextManager[NEB]:
+        return nullcontext(prepare_threaded_neb(*args, **kwargs))
+
+    return threaded
+
+
 @pytest.mark.usefixtures("fake_parallel_socketio")
 class TestSocketCalculators:
     def test_opens_one_calculator_per_image(self) -> None:
@@ -1254,29 +1338,181 @@ def test_real_socket_calculator_round_trip(
     assert not socket_file.exists()
 
 
-@pytest.mark.usefixtures("fake_parallel_socketio")
-class TestPrepareParallelNeb:
+class TestPrepareConcurrentNeb:
     def test_builds_a_band_of_the_requested_length(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
+        self,
+        concurrent_neb_builder: Callable[..., AbstractContextManager[NEB]],
+        evaluated_endpoints: tuple[Atoms, Atoms],
     ) -> None:
-        reactant, product = evaluated_endpoints
-
-        with prepare_parallel_neb(
-            reactant, product, None, n_images=5, geo_int=False
+        with concurrent_neb_builder(
+            *evaluated_endpoints, lambda index: EMT(), n_images=5, geo_int=False
         ) as neb:
             assert isinstance(neb, NEB)
             assert len(neb.images) == 5
 
     def test_asks_ase_to_spread_the_images(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
+        self,
+        concurrent_neb_builder: Callable[..., AbstractContextManager[NEB]],
+        evaluated_endpoints: tuple[Atoms, Atoms],
     ) -> None:
-        """Without this, ASE would walk the band one image at a time."""
-        reactant, product = evaluated_endpoints
-
-        with prepare_parallel_neb(
-            reactant, product, None, n_images=5, geo_int=False
+        with concurrent_neb_builder(
+            *evaluated_endpoints, lambda index: EMT(), n_images=5, geo_int=False
         ) as neb:
             assert neb.parallel is True
+
+    @pytest.mark.parametrize(
+        "states",
+        [
+            ("cached", "cached"),
+            ("missing", "missing"),
+            ("cached", "missing"),
+            ("missing", "cached"),
+            ("stale", "cached"),
+            ("cached", "stale"),
+            ("stale", "stale"),
+        ],
+    )
+    def test_uses_only_current_endpoint_energies(
+        self,
+        concurrent_neb_builder: Callable[..., AbstractContextManager[NEB]],
+        evaluated_endpoints: tuple[Atoms, Atoms],
+        states: tuple[str, str],
+    ) -> None:
+        expected = []
+        for atoms, state in zip(evaluated_endpoints, states):
+            if state == "missing":
+                atoms.calc = None
+            elif state == "stale":
+                atoms.positions[1, 0] += 0.2
+            reference = atoms.copy()
+            reference.calc = EMT()
+            expected.append(reference.get_potential_energy())
+
+        with concurrent_neb_builder(
+            *evaluated_endpoints,
+            lambda index: EMT(),
+            n_images=5,
+            geo_int=False,
+            rm_ro_trans=False,
+        ) as neb:
+            assert [
+                neb.images[0].get_potential_energy(),
+                neb.images[-1].get_potential_energy(),
+            ] == pytest.approx(expected)
+
+    def test_preserves_a_cached_zero_energy(
+        self,
+        concurrent_neb_builder: Callable[..., AbstractContextManager[NEB]],
+        evaluated_endpoints: tuple[Atoms, Atoms],
+    ) -> None:
+        reactant, product = evaluated_endpoints
+        reactant.calc = SinglePointCalculator(reactant, energy=0.0)
+        with concurrent_neb_builder(
+            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
+        ) as neb:
+            assert neb.images[0].get_potential_energy() == 0.0
+
+    def test_pins_energy_against_rigid_motion_without_claiming_forces(
+        self,
+        concurrent_neb_builder: Callable[..., AbstractContextManager[NEB]],
+        evaluated_endpoints: tuple[Atoms, Atoms],
+    ) -> None:
+        """A SinglePointCalculator would reject energy after NEB realignment."""
+        with concurrent_neb_builder(
+            *evaluated_endpoints,
+            lambda index: EMT(),
+            n_images=5,
+            geo_int=False,
+            rm_ro_trans=True,
+        ) as neb:
+            endpoint = neb.images[-1]
+            before = endpoint.get_potential_energy()
+            endpoint.rotate(30, "z")
+            endpoint.positions += [1.0, 2.0, 3.0]
+            assert endpoint.get_potential_energy() == pytest.approx(before)
+            with pytest.raises(PropertyNotImplementedError):
+                endpoint.get_forces()
+
+    def test_leaves_the_callers_endpoints_alone(
+        self,
+        concurrent_neb_builder: Callable[..., AbstractContextManager[NEB]],
+        evaluated_endpoints: tuple[Atoms, Atoms],
+    ) -> None:
+        reactant, product = evaluated_endpoints
+        calcs = (reactant.calc, product.calc)
+        positions = (reactant.positions.copy(), product.positions.copy())
+        with concurrent_neb_builder(
+            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
+        ):
+            pass
+
+        assert (reactant.calc, product.calc) == calcs
+        assert reactant.positions == pytest.approx(positions[0])
+        assert product.positions == pytest.approx(positions[1])
+
+    def test_rejects_a_band_with_no_interior(
+        self,
+        concurrent_neb_builder: Callable[..., AbstractContextManager[NEB]],
+        evaluated_endpoints: tuple[Atoms, Atoms],
+    ) -> None:
+        with pytest.raises(ValueError, match="at least 3"):
+            with concurrent_neb_builder(
+                *evaluated_endpoints, lambda index: EMT(), n_images=2
+            ):
+                pass
+
+
+@pytest.mark.usefixtures("fake_parallel_socketio")
+class TestPrepareParallelNeb:
+    @pytest.mark.parametrize(
+        "missing", [(False, False), (True, False), (False, True), (True, True)]
+    )
+    def test_prices_only_missing_endpoints_on_the_first_socket(
+        self,
+        evaluated_endpoints: tuple[Atoms, Atoms],
+        fake_parallel_socketio: type[_FakeParallelSocketIOCalculator],
+        monkeypatch: pytest.MonkeyPatch,
+        missing: tuple[bool, bool],
+    ) -> None:
+        built = []
+        evaluated = []
+        original = fake_parallel_socketio.calculate
+
+        def make_calc(index: int) -> EMT:
+            built.append(index)
+            return EMT()
+
+        def calculate(calc: Any, *args: Any, **kwargs: Any) -> None:
+            evaluated.append(calc)
+            original(calc, *args, **kwargs)
+
+        monkeypatch.setattr(fake_parallel_socketio, "calculate", calculate)
+        for atoms, no_energy in zip(evaluated_endpoints, missing):
+            if no_energy:
+                atoms.calc = None
+        with prepare_parallel_neb(
+            *evaluated_endpoints, make_calc, n_images=5, geo_int=False
+        ) as neb:
+            assert built == [0, 1, 2]
+            # Socket preparation does not prime the interior sweep.
+            assert evaluated == [neb.images[1].calc] * sum(missing)
+
+    def test_closes_the_pool_when_endpoint_pricing_fails(
+        self,
+        endpoints: tuple[Atoms, Atoms],
+        fake_parallel_socketio: type[_FakeParallelSocketIOCalculator],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fail(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("endpoint evaluation failed")
+
+        monkeypatch.setattr(fake_parallel_socketio, "calculate", fail)
+        with pytest.raises(RuntimeError, match="endpoint evaluation failed"):
+            with prepare_parallel_neb(*endpoints, None, n_images=5, geo_int=False):
+                pass
+
+        assert len(fake_parallel_socketio.instances) == 3
+        assert all(calc.server is None for calc in fake_parallel_socketio.instances)
 
     def test_gives_each_interior_image_its_own_socket(
         self, evaluated_endpoints: tuple[Atoms, Atoms]
@@ -1305,59 +1541,6 @@ class TestPrepareParallelNeb:
 
         assert not any(isinstance(c, _FakeParallelSocketIOCalculator) for c in ends)
 
-    def test_reuses_the_endpoint_energies_it_is_given(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        reactant, product = evaluated_endpoints
-        expected = [reactant.get_potential_energy(), product.get_potential_energy()]
-
-        with prepare_parallel_neb(
-            reactant, product, None, n_images=5, geo_int=False
-        ) as neb:
-            got = [
-                neb.images[0].get_potential_energy(),
-                neb.images[-1].get_potential_energy(),
-            ]
-
-        assert got == pytest.approx(expected)
-
-    def test_pins_the_endpoint_energy_against_rigid_motion(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        """Regression: rm_ro_trans re-aligns the final image every force call.
-
-        A SinglePointCalculator holding the endpoint energy refuses to give
-        it back once the atoms have moved, so the band died partway through
-        with a bare "the property energy is not available". Rigid-body motion
-        cannot change the energy, so the pinned value stays correct.
-        """
-        reactant, product = evaluated_endpoints
-
-        with prepare_parallel_neb(
-            reactant, product, None, n_images=5, geo_int=False, rm_ro_trans=True
-        ) as neb:
-            endpoint = neb.images[-1]
-            before = endpoint.get_potential_energy()
-
-            endpoint.rotate(30, "z")
-            endpoint.positions += [1.0, 2.0, 3.0]
-
-            assert endpoint.get_potential_energy() == pytest.approx(before)
-
-    def test_leaves_the_callers_endpoints_alone(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        reactant, product = evaluated_endpoints
-        calcs = (reactant.calc, product.calc)
-        positions = (reactant.positions.copy(), product.positions.copy())
-
-        with prepare_parallel_neb(reactant, product, None, n_images=5, geo_int=False):
-            pass
-
-        assert (reactant.calc, product.calc) == calcs
-        assert reactant.positions == pytest.approx(positions[0])
-        assert product.positions == pytest.approx(positions[1])
-
     def test_closes_the_sockets_on_exit(
         self, evaluated_endpoints: tuple[Atoms, Atoms]
     ) -> None:
@@ -1369,41 +1552,6 @@ class TestPrepareParallelNeb:
             calcs = [image.calc for image in neb.images[1:-1]]
 
         assert all(c.server is None for c in calcs)
-
-    def test_rejects_a_band_with_no_interior(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        reactant, product = evaluated_endpoints
-
-        with pytest.raises(ValueError, match="at least 3"):
-            with prepare_parallel_neb(reactant, product, None, n_images=2):
-                pass
-
-    def test_prices_endpoints_that_arrive_without_an_energy(
-        self, slab_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        """Endpoints from a file have no calculator, so a socket prices them."""
-        reactant, product = slab_endpoints
-        expected = [reactant.get_potential_energy(), product.get_potential_energy()]
-        for atoms in (reactant, product):
-            atoms.calc = None
-
-        with prepare_parallel_neb(
-            reactant,
-            product,
-            None,
-            make_launcher=emt_launcher,
-            n_images=4,
-            geo_int=False,
-            rm_ro_trans=False,
-            timeout=120,
-        ) as neb:
-            got = [
-                neb.images[0].get_potential_energy(),
-                neb.images[-1].get_potential_energy(),
-            ]
-
-        assert got == pytest.approx(expected)
 
     def test_ignores_an_energy_left_over_from_the_other_endpoint(
         self, slab_endpoints: tuple[Atoms, Atoms]
@@ -1450,7 +1598,7 @@ class TestPrepareParallelNeb:
         assert got == pytest.approx(expected)
 
     def test_relaxes_the_same_band_as_the_serial_route(
-        self, slab_endpoints: tuple[Atoms, Atoms]
+        self, slab_endpoints: tuple[Atoms, Atoms], serial_slab_band: list[Atoms]
     ) -> None:
         """The whole point: same physics, evaluated concurrently.
 
@@ -1472,29 +1620,16 @@ class TestPrepareParallelNeb:
         ) as neb:
             parallel = optimise_neb(neb, fmax=0.05, steps=200, ts_traj="parallel.traj")
 
-        serial = optimise_neb(
-            prepare_neb(
-                reactant,
-                product,
-                EMT(),
-                n_images=5,
-                climb=True,
-                rm_ro_trans=False,
-                geo_int=False,
-            ),
-            fmax=0.05,
-            steps=200,
-            ts_traj="serial.traj",
-        )
-
         assert [image.get_potential_energy() for image in parallel] == pytest.approx(
-            [image.get_potential_energy() for image in serial], abs=1e-6
+            [image.get_potential_energy() for image in serial_slab_band], abs=1e-6
         )
 
 
 @pytest.mark.integration
 def test_real_parallel_neb_matches_serial(
-    slab_endpoints: tuple[Atoms, Atoms], local_socket_access: None
+    slab_endpoints: tuple[Atoms, Atoms],
+    local_socket_access: None,
+    serial_slab_band: list[Atoms],
 ) -> None:
     """Exercise ASE's threaded NEB over independent real socket clients."""
     reactant, product = slab_endpoints
@@ -1512,50 +1647,46 @@ def test_real_parallel_neb_matches_serial(
     ) as neb:
         parallel = optimise_neb(neb, fmax=0.05, steps=200, ts_traj="real-parallel.traj")
 
-    serial = optimise_neb(
-        prepare_neb(
-            reactant,
-            product,
-            EMT(),
-            n_images=5,
-            climb=True,
-            rm_ro_trans=False,
-            geo_int=False,
-        ),
-        fmax=0.05,
-        steps=200,
-        ts_traj="real-serial.traj",
-    )
-
     assert [image.get_potential_energy() for image in parallel] == pytest.approx(
-        [image.get_potential_energy() for image in serial], abs=1e-6
+        [image.get_potential_energy() for image in serial_slab_band], abs=1e-6
     )
 
 
 class TestPrepareThreadedNeb:
-    def test_builds_a_band_of_the_requested_length(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
+    @pytest.mark.parametrize(
+        "missing", [(False, False), (True, False), (False, True), (True, True)]
+    )
+    def test_prices_missing_endpoints_before_building_and_priming_the_interior(
+        self,
+        evaluated_endpoints: tuple[Atoms, Atoms],
+        monkeypatch: pytest.MonkeyPatch,
+        missing: tuple[bool, bool],
     ) -> None:
-        reactant, product = evaluated_endpoints
+        built = []
+        sweeps = []
+        original = NEB.get_forces
 
+        def make_calc(index: int) -> EMT:
+            built.append(index)
+            return EMT()
+
+        def get_forces(neb: NEB) -> np.ndarray:
+            # IDPP temporarily evaluates this same band before our factory runs.
+            if built:
+                sweeps.append((neb, len(built)))
+            return original(neb)
+
+        monkeypatch.setattr(NEB, "get_forces", get_forces)
+        for atoms, no_energy in zip(evaluated_endpoints, missing):
+            if no_energy:
+                atoms.calc = None
         neb = prepare_threaded_neb(
-            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
+            *evaluated_endpoints, make_calc, n_images=5, geo_int=False
         )
 
-        assert isinstance(neb, NEB)
-        assert len(neb.images) == 5
-
-    def test_asks_ase_to_spread_the_images(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        """Without this, ASE would walk the band one image at a time."""
-        reactant, product = evaluated_endpoints
-
-        neb = prepare_threaded_neb(
-            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
-        )
-
-        assert neb.parallel is True
+        expected = [0] * sum(missing) + [0, 1, 2]
+        assert built == expected
+        assert [count for band, count in sweeps if band is neb] == [len(expected)]
 
     def test_gives_each_interior_image_its_own_calculator(
         self, evaluated_endpoints: tuple[Atoms, Atoms]
@@ -1574,90 +1705,8 @@ class TestPrepareThreadedNeb:
         assert sorted(built) == [0, 1, 2, 3]
         assert [id(c) for c in interior] == [id(built[i]) for i in range(4)]
 
-    def test_reuses_the_endpoint_energies_it_is_given(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        reactant, product = evaluated_endpoints
-        expected = [reactant.get_potential_energy(), product.get_potential_energy()]
-
-        def make_calc(index: int) -> EMT:
-            return EMT()
-
-        neb = prepare_threaded_neb(reactant, product, make_calc, n_images=5, geo_int=False)
-
-        got = [
-            neb.images[0].get_potential_energy(),
-            neb.images[-1].get_potential_energy(),
-        ]
-        assert got == pytest.approx(expected)
-
-    def test_pins_the_endpoint_energy_against_rigid_motion(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        """rm_ro_trans re-aligns the final image every force call; see
-        TestPrepareParallelNeb.test_pins_the_endpoint_energy_against_rigid_motion."""
-        reactant, product = evaluated_endpoints
-
-        neb = prepare_threaded_neb(
-            reactant,
-            product,
-            lambda index: EMT(),
-            n_images=5,
-            geo_int=False,
-            rm_ro_trans=True,
-        )
-
-        endpoint = neb.images[-1]
-        before = endpoint.get_potential_energy()
-        endpoint.rotate(30, "z")
-        endpoint.positions += [1.0, 2.0, 3.0]
-
-        assert endpoint.get_potential_energy() == pytest.approx(before)
-
-    def test_leaves_the_callers_endpoints_alone(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        reactant, product = evaluated_endpoints
-        calcs = (reactant.calc, product.calc)
-        positions = (reactant.positions.copy(), product.positions.copy())
-
-        prepare_threaded_neb(
-            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
-        )
-
-        assert (reactant.calc, product.calc) == calcs
-        assert reactant.positions == pytest.approx(positions[0])
-        assert product.positions == pytest.approx(positions[1])
-
-    def test_prices_endpoints_that_arrive_without_an_energy(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        """Endpoints from a file have no calculator, so the factory prices them."""
-        reactant, product = evaluated_endpoints
-        expected = [reactant.get_potential_energy(), product.get_potential_energy()]
-        for atoms in (reactant, product):
-            atoms.calc = None
-
-        neb = prepare_threaded_neb(
-            reactant, product, lambda index: EMT(), n_images=5, geo_int=False
-        )
-
-        got = [
-            neb.images[0].get_potential_energy(),
-            neb.images[-1].get_potential_energy(),
-        ]
-        assert got == pytest.approx(expected)
-
-    def test_rejects_a_band_with_no_interior(
-        self, evaluated_endpoints: tuple[Atoms, Atoms]
-    ) -> None:
-        reactant, product = evaluated_endpoints
-
-        with pytest.raises(ValueError, match="at least 3"):
-            prepare_threaded_neb(reactant, product, lambda index: EMT(), n_images=2)
-
     def test_relaxes_the_same_band_as_the_serial_route(
-        self, slab_endpoints: tuple[Atoms, Atoms]
+        self, slab_endpoints: tuple[Atoms, Atoms], serial_slab_band: list[Atoms]
     ) -> None:
         """The whole point: same physics, evaluated in threads."""
         reactant, product = slab_endpoints
@@ -1677,23 +1726,8 @@ class TestPrepareThreadedNeb:
             ts_traj="threaded.traj",
         )
 
-        serial = optimise_neb(
-            prepare_neb(
-                reactant,
-                product,
-                EMT(),
-                n_images=5,
-                climb=True,
-                rm_ro_trans=False,
-                geo_int=False,
-            ),
-            fmax=0.05,
-            steps=200,
-            ts_traj="serial.traj",
-        )
-
         assert [image.get_potential_energy() for image in threaded] == pytest.approx(
-            [image.get_potential_energy() for image in serial], abs=1e-6
+            [image.get_potential_energy() for image in serial_slab_band], abs=1e-6
         )
 
 
@@ -2116,6 +2150,78 @@ class TestOptimiseTs:
 
 
 class TestOptimiseIrc:
+    def test_runs_separate_copies_before_reading_either_trajectory(
+        self, monkeypatch: pytest.MonkeyPatch, calc: EMT, water: Atoms
+    ) -> None:
+        original_positions = water.positions.copy()
+        events = []
+        optimisers = []
+
+        class RecordingIRC:
+            def __init__(self, atoms: Atoms, **kwargs: Any) -> None:
+                self.atoms = atoms
+                self.options = kwargs
+                self.initial_positions = atoms.positions.copy()
+                optimisers.append(self)
+                events.append(("construct", kwargs["trajectory"]))
+
+            def run(self, **kwargs: Any) -> bool:
+                self.run_options = kwargs
+                events.append(("run", kwargs["direction"]))
+                self.atoms.positions += 1.0
+                return kwargs["direction"] == "reverse"
+
+        def read_path(trajectory: str, index: str) -> list[Atoms]:
+            assert index == ":"
+            events.append(("read", trajectory))
+            return [water.copy()]
+
+        monkeypatch.setattr(tools_reaction, "IRC", RecordingIRC)
+        monkeypatch.setattr(tools_reaction, "read", read_path)
+        with pytest.warns(ConvergenceWarning, match="Forward IRC"):
+            forward, reverse = optimise_irc(
+                water,
+                calc,
+                fmax=0.03,
+                steps=17,
+                dx=0.04,
+                eta=2e-4,
+                gamma=0.2,
+                keep_going=False,
+                irc_f_traj="forward.traj",
+                irc_r_traj="reverse.traj",
+                logfile="directions.log",
+            )
+
+        assert events == [
+            ("construct", "forward.traj"),
+            ("run", "forward"),
+            ("construct", "reverse.traj"),
+            ("run", "reverse"),
+            ("read", "forward.traj"),
+            ("read", "reverse.traj"),
+        ]
+        assert optimisers[0].atoms is not optimisers[1].atoms
+        for optimiser, direction in zip(optimisers, ("forward", "reverse")):
+            assert optimiser.atoms is not water
+            assert optimiser.atoms.calc is calc
+            assert optimiser.initial_positions == pytest.approx(original_positions)
+            assert optimiser.options == {
+                "trajectory": f"{direction}.traj",
+                "logfile": "directions.log",
+                "dx": 0.04,
+                "eta": 2e-4,
+                "gamma": 0.2,
+                "keep_going": False,
+            }
+            assert optimiser.run_options == {
+                "fmax": 0.03, "steps": 17, "direction": direction
+            }
+        assert water.positions == pytest.approx(original_positions)
+        assert water.calc is None
+        assert forward[0].info["converged"] is False
+        assert reverse[0].info["converged"] is True
+
     def test_returns_both_directions(self, calc: EMT, water: Atoms) -> None:
         with pytest.warns(ConvergenceWarning):
             forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)

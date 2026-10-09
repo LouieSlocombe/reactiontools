@@ -11,6 +11,27 @@ from reactiontools import (
     thermal_energy,
     unit_label,
 )
+from reactiontools.tools_units import _format_energy
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (0.0, "0.000"),
+        (-0.0, "0.000"),
+        (-0.00049, "0.000"),
+        (-0.00051, "-0.001"),
+        (0.00049, "0.000"),
+        (0.00051, "0.001"),
+        (-1.23456, "-1.235"),
+        (1.23456, "1.235"),
+        (float("inf"), "inf"),
+        (float("-inf"), "-inf"),
+        (float("nan"), "nan"),
+    ],
+)
+def test_energy_report_format(value: float, expected: str) -> None:
+    assert _format_energy(value) == expected
 
 
 class TestConvertEnergy:

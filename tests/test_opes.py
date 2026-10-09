@@ -203,35 +203,20 @@ class TestOpesReweightingCommand:
 
 
 class TestRunOpesReweighting:
-    @pytest.fixture
-    def recorded(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> list[tuple[list[str], dict[str, Any]]]:
-        """Capture the argv that would have been handed to the script."""
-        calls = []
-
-        def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-            calls.append((cmd, kwargs))
-            return subprocess.CompletedProcess(cmd, 0)
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        return calls
-
     def test_runs_the_built_command_and_checks_the_exit_status(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
     ) -> None:
         returned = run_opes_reweighting(sigma=0.2, kt=1.0, verbose=False)
 
-        cmd, kwargs = recorded[0]
+        cmd, kwargs = recorded_subprocess[0]
         assert kwargs["check"] is True
         assert returned == " ".join(cmd)
         assert Path(cmd[1]).name == "FES_from_Reweighting.py"
 
     def test_verbose_prints_the_command(
         self,
-        recorded: list[tuple[list[str], dict[str, Any]]],
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         run_opes_reweighting(sigma=0.2, kt=1.0)
