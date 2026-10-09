@@ -454,6 +454,17 @@ def sum_hills_files(outfile: str | Path = "fes.dat") -> list[Path]:
     return [path for _, path in sorted(numbered)]
 
 
+def _run_command(cmd: list[str], verbose: bool) -> str:
+    """Run a PLUMED command and return the displayed command line."""
+    cmd_str = " ".join(cmd)
+
+    if verbose:
+        print(f"Running: {cmd_str}", flush=True)
+
+    subprocess.run(cmd, check=True)
+    return cmd_str
+
+
 def run_sum_hills(
     hills: str | Path = "HILLS",
     outfile: str | Path = "fes.dat",
@@ -560,13 +571,7 @@ def run_sum_hills(
         cmd.append("--negbias")
     if extra:
         cmd += [str(item) for item in extra]
-    cmd_str = " ".join(cmd)
-
-    if verbose:
-        print(f"Running: {cmd_str}", flush=True)
-
-    subprocess.run(cmd, check=True)
-    return cmd_str
+    return _run_command(cmd, verbose)
 
 
 def combine_colvar_files(
@@ -794,13 +799,7 @@ def run_opes_fes(
         kt=kt,
         extra=extra,
     )
-    cmd_str = " ".join(cmd)
-
-    if verbose:
-        print(f"Running: {cmd_str}", flush=True)
-
-    subprocess.run(cmd, check=True)
-    return cmd_str
+    return _run_command(cmd, verbose)
 
 
 def _opes_reweighting_command(
@@ -1022,10 +1021,4 @@ def run_opes_reweighting(
         skiprows=skiprows,
         extra=extra,
     )
-    cmd_str = " ".join(cmd)
-
-    if verbose:
-        print(f"Running: {cmd_str}", flush=True)
-
-    subprocess.run(cmd, check=True)
-    return cmd_str
+    return _run_command(cmd, verbose)
