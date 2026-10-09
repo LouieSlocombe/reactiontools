@@ -588,6 +588,34 @@ class TestTheBuildingBlocks:
         assert "OPES_METAD ARG=z" in line and "BARRIER=15.0" in line
         assert "FES_from_State.py" in command
 
+    @pytest.mark.parametrize(
+        "grid_min, grid_max, expected_grid",
+        [
+            (None, None, ""),
+            (-0.3, 0.3, " --min -0.3 --max 0.3"),
+            ("-1,-2", "1,2", " --min -1,-2 --max 1,2"),
+            (None, 0.3, ""),
+            (-0.3, None, " --min -0.3 --max None"),
+        ],
+    )
+    def test_metad_command_preserves_script_policy_without_execution(
+        self,
+        grid_min: float | str | None,
+        grid_max: float | str | None,
+        expected_grid: str,
+        recorded_subprocess: list[tuple[list[str], dict[str, Any]]],
+    ) -> None:
+        _, command = plumed_bias_and_fes(
+            False, "z", 500, 15.0, 0.05, 20.0, TEMPERATURE,
+            2.494338785445972, "200,300", grid_min, grid_max,
+        )
+
+        assert command == (
+            "plumed sum_hills --hills HILLS --outfile fes.dat"
+            f"{expected_grid} --bin 200,300 --kt 2.49434"
+        )
+        assert recorded_subprocess == []
+
     def test_a_study_can_build_a_script_from_them_alone(self) -> None:
         # What a downstream collective variable looks like: its own CV lines,
         # this module's plumbing for everything around them.

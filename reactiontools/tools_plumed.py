@@ -465,6 +465,49 @@ def _run_command(cmd: list[str], verbose: bool) -> str:
     return cmd_str
 
 
+def _sum_hills_command(
+    hills: str | Path = "HILLS",
+    outfile: str | Path = "fes.dat",
+    mintozero: bool = True,
+    stride: int | None = None,
+    nohistory: bool = False,
+    grid_min: float | str | Sequence[float] | None = None,
+    grid_max: float | str | Sequence[float] | None = None,
+    grid_bin: int | str | Sequence[int] | None = None,
+    idw: str | Sequence[str] | None = None,
+    kt: float | str | None = None,
+    negbias: bool = False,
+    extra: Sequence[str] | None = None,
+) -> list[str]:
+    """Serialize sum_hills arguments without running or imposing caller policy.
+
+    A preformatted ``kt`` preserves the precision of generated CV scripts.
+    The public runner validates its ``kt``/``idw`` contract separately.
+    """
+    cmd = ["plumed", "sum_hills", "--hills", str(hills), "--outfile", str(outfile)]
+    if mintozero:
+        cmd.append("--mintozero")
+    if stride is not None:
+        cmd += ["--stride", str(stride)]
+    if nohistory:
+        cmd.append("--nohistory")
+    if grid_min is not None:
+        cmd += ["--min", _grid_bound(grid_min)]
+    if grid_max is not None:
+        cmd += ["--max", _grid_bound(grid_max)]
+    if grid_bin is not None:
+        cmd += ["--bin", _grid_bound(grid_bin)]
+    if idw is not None:
+        cmd += ["--idw", idw if isinstance(idw, str) else ",".join(idw)]
+    if kt is not None:
+        cmd += ["--kt", str(kt)]
+    if negbias:
+        cmd.append("--negbias")
+    if extra:
+        cmd += [str(item) for item in extra]
+    return cmd
+
+
 def run_sum_hills(
     hills: str | Path = "HILLS",
     outfile: str | Path = "fes.dat",
@@ -550,27 +593,20 @@ def run_sum_hills(
             "or leave kt out."
         )
 
-    cmd = ["plumed", "sum_hills", "--hills", str(hills), "--outfile", str(outfile)]
-    if mintozero:
-        cmd.append("--mintozero")
-    if stride is not None:
-        cmd += ["--stride", str(stride)]
-    if nohistory:
-        cmd.append("--nohistory")
-    if grid_min is not None:
-        cmd += ["--min", _grid_bound(grid_min)]
-    if grid_max is not None:
-        cmd += ["--max", _grid_bound(grid_max)]
-    if grid_bin is not None:
-        cmd += ["--bin", _grid_bound(grid_bin)]
-    if idw is not None:
-        cmd += ["--idw", idw if isinstance(idw, str) else ",".join(idw)]
-    if kt is not None:
-        cmd += ["--kt", str(kt)]
-    if negbias:
-        cmd.append("--negbias")
-    if extra:
-        cmd += [str(item) for item in extra]
+    cmd = _sum_hills_command(
+        hills=hills,
+        outfile=outfile,
+        mintozero=mintozero,
+        stride=stride,
+        nohistory=nohistory,
+        grid_min=grid_min,
+        grid_max=grid_max,
+        grid_bin=grid_bin,
+        idw=idw,
+        kt=kt,
+        negbias=negbias,
+        extra=extra,
+    )
     return _run_command(cmd, verbose)
 
 

@@ -66,7 +66,7 @@ from typing import Any
 import numpy as np
 from ase.io import read
 
-from .tools_plumed import PLUMED_ASE_UNITS, _opes_fes_command
+from .tools_plumed import PLUMED_ASE_UNITS, _opes_fes_command, _sum_hills_command
 from .tools_units import as_kelvin, thermal_energy
 
 __all__ = [
@@ -478,10 +478,17 @@ def plumed_bias_and_fes(
             f"SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature} "
             f"FILE=HILLS{metad_grid}"
         )
-        fes_grid = f" --min {grid_min} --max {grid_max}" if grid_min is not None else ""
-        fes_command = (
-            f"plumed sum_hills --hills HILLS --outfile fes.dat"
-            f"{fes_grid} --bin {grid_bin} --kt {kt:.6g}"
+        # Preserve this script API's unshifted FES and six-significant-figure
+        # kBT, including its historical --kt without --idw. The executing
+        # runner deliberately validates that combination more strictly.
+        fes_command = " ".join(
+            _sum_hills_command(
+                mintozero=False,
+                grid_min=str(grid_min) if grid_min is not None else None,
+                grid_max=str(grid_max) if grid_min is not None else None,
+                grid_bin=str(grid_bin),
+                kt=f"{kt:.6g}",
+            )
         )
     return metad_line, fes_command
 
