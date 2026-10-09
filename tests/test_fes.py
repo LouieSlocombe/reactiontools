@@ -173,6 +173,29 @@ def test_as_fes_1d(fes_1d_file: str) -> None:
     assert fes.energy_unit == "kJ/mol"
 
 
+@pytest.mark.parametrize("n_points", [2, 3, 5])
+def test_file_column_selection_preserves_small_profile_orientation(
+    tmp_path: Path, n_points: int
+) -> None:
+    x = np.arange(n_points, dtype=float)[::-1]
+    path = tmp_path / "selected.dat"
+    np.savetxt(
+        path, np.column_stack([10.0 * x, np.zeros(n_points), x]),
+        header="#! FIELDS energy der_x distance", comments="",
+    )
+
+    fes = as_fes(
+        path, columns=["distance", "energy"], shift_min_to_zero=False,
+        energy_label="Potential",
+    )
+
+    assert fes.cvs[0] == pytest.approx(np.arange(n_points))
+    assert fes.energy == pytest.approx(10.0 * np.arange(n_points))
+    assert fes.cv_labels == ["distance"]
+    assert fes.energy_label == "Potential"
+    assert fes.regular is True
+
+
 def test_as_fes_2d_grid_round_trips(fes_2d_file: str) -> None:
     grid_x, grid_y, free = write_fes_2d(fes_2d_file)
     fes = as_fes(fes_2d_file)
@@ -816,15 +839,16 @@ class TestSummariseFes:
             )
 
 
-class TestFesConvergence:
-    @pytest.fixture
-    def series(self, well: np.ndarray) -> list[np.ndarray]:
-        """A barrier growing towards its final height, as hills fill a well."""
-        return [
-            np.column_stack([well[:, 0], well[:, 1] * scale])
-            for scale in (0.3, 0.6, 0.85, 1.0)
-        ]
+@pytest.fixture
+def series(well: np.ndarray) -> list[np.ndarray]:
+    """Fresh surfaces whose barrier grows towards its final height."""
+    return [
+        np.column_stack([well[:, 0], well[:, 1] * scale])
+        for scale in (0.3, 0.6, 0.85, 1.0)
+    ]
 
+
+class TestFesConvergence:
     def test_summarises_every_surface(self, series: list[np.ndarray]) -> None:
         summaries = fes_convergence(series, (0.0, 2.0), (4.0, 6.0), source_unit="eV")
 
@@ -849,13 +873,6 @@ class TestFesConvergence:
 
 
 class TestPlotFesConvergence:
-    @pytest.fixture
-    def series(self, well: np.ndarray) -> list[np.ndarray]:
-        return [
-            np.column_stack([well[:, 0], well[:, 1] * scale])
-            for scale in (0.3, 0.6, 0.85, 1.0)
-        ]
-
     def test_draws_the_barrier_and_the_difference(
         self,
         series: list[np.ndarray],

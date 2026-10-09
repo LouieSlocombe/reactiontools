@@ -488,27 +488,12 @@ def _fes_from_plumed(
 
     defaults = ["CV1", "CV2", r"$F$"] if len(indices) == 3 else ["CV1", r"$F$"]
     labels = [plumed.label(index, default) for index, default in zip(indices, defaults)]
-    energies = plumed.data[:, indices[-1]]
-
-    if len(indices) == 2:
-        x = plumed.data[:, indices[0]]
-        order = np.argsort(x)
-        return FES(
-            cvs=[x[order]],
-            energy=energies[order],
-            cv_labels=list(cv_labels) if cv_labels else labels[:1],
-            energy_label=energy_label,
-        )
-
-    x, y, z, regular = _grid_from_columns(
-        plumed.data[:, indices[0]], plumed.data[:, indices[1]], energies
-    )
-    return FES(
-        cvs=[x, y],
-        energy=z,
-        cv_labels=list(cv_labels) if cv_labels else labels[:2],
+    # Stack explicitly: two or three rows of file data must not be mistaken
+    # for a row-oriented coordinate array.
+    return _fes_from_array(
+        plumed.data[:, indices].T,
+        cv_labels=list(cv_labels) if cv_labels else labels[:-1],
         energy_label=energy_label,
-        regular=regular,
     )
 
 
