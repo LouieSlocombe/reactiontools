@@ -1038,6 +1038,24 @@ def _require_single_rank(name: str) -> None:
         )
 
 
+def _pin_band_endpoints(
+    neb: NEB,
+    energies: Sequence[float | None],
+    make_endpoint_calc: Callable[[], Calculator],
+) -> None:
+    """Pin endpoint energies, evaluating only those without a cached value.
+
+    The factory is called separately for each missing endpoint. Socket bands
+    return the same live socket each time; threaded bands create a calculator
+    for each evaluation. Pricing finishes before interior images can run.
+    """
+    for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
+        if energy is None:
+            endpoint.calc = make_endpoint_calc()
+            energy = endpoint.get_potential_energy()
+        endpoint.calc = _FixedEnergy(energy)
+
+
 @contextmanager
 def _parallel_band(
     neb: NEB,
@@ -1071,11 +1089,7 @@ def _parallel_band(
         The band, wired up. The sockets close when the block exits.
     """
     with socket_calculators(len(neb.images) - 2, make_calc, **socket_kwargs) as calcs:
-        for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
-            if energy is None:
-                endpoint.calc = calcs[0]
-                energy = endpoint.get_potential_energy()
-            endpoint.calc = _FixedEnergy(energy)
+        _pin_band_endpoints(neb, energies, lambda: calcs[0])
 
         for image, calc in zip(neb.images[1:-1], calcs):
             image.calc = calc
@@ -1299,13 +1313,9 @@ def prepare_threaded_neb(
         parallel=True,
     )
 
-    # Pricing (when needed) runs before the interior sweep, so borrowing
-    # interior image 0's calculator cannot race with it.
-    for endpoint, energy in zip((neb.images[0], neb.images[-1]), energies):
-        if energy is None:
-            endpoint.calc = make_calc(0)
-            energy = endpoint.get_potential_energy()
-        endpoint.calc = _FixedEnergy(energy)
+    # Endpoint pricing finishes before the interior sweep, so make_calc(0)
+    # can safely reuse interior image 0's working directory.
+    _pin_band_endpoints(neb, energies, lambda: make_calc(0))
 
     for index, image in enumerate(neb.images[1:-1]):
         image.calc = make_calc(index)
