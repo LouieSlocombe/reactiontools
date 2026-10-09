@@ -461,6 +461,53 @@ class TestOptimiseGeom:
 
 
 class TestOptimiseReactantProduct:
+    def test_preserves_endpoint_order_and_trajectory_names(
+        self, monkeypatch: pytest.MonkeyPatch, calc: EMT, water: Atoms
+    ) -> None:
+        product = water.copy()
+        calls = []
+        returned = []
+
+        def relax(atoms: Atoms, calculator: EMT, **kwargs: Any) -> Atoms:
+            calls.append((atoms, calculator, kwargs["opti_traj"], kwargs["_what"]))
+            result = atoms.copy()
+            returned.append(result)
+            return result
+
+        monkeypatch.setattr(tools_reaction, "optimise_geom", relax)
+        result = optimise_reactant_product(
+            water, product, calc, reactant_opti="first.traj", product_opti="second.traj"
+        )
+
+        assert calls[0][0] is water
+        assert calls[1][0] is product
+        assert [call[1:] for call in calls] == [
+            (calc, "first.traj", "Reactant optimisation"),
+            (calc, "second.traj", "Product optimisation"),
+        ]
+        assert result[0] is returned[0]
+        assert result[1] is returned[1]
+
+    def test_reactant_failure_does_not_start_the_product(self, calc: EMT) -> None:
+        strained = molecule("H2O")
+        strained.positions[1] += [0.5, 0.0, 0.0]
+
+        with pytest.raises(ConvergenceError, match="Reactant optimisation"):
+            optimise_reactant_product(
+                strained,
+                strained.copy(),
+                calc,
+                fmax=1e-3,
+                steps=2,
+                reactant_opti="first.traj",
+                product_opti="second.traj",
+                keep_traj=True,
+                raise_on_unconverged=True,
+            )
+
+        assert Path("first.traj").exists()
+        assert not Path("second.traj").exists()
+
     def test_relaxes_both_endpoints(self, calc: EMT) -> None:
         reactant = molecule("H2O")
         reactant.positions[1] += [0.2, 0.0, 0.0]
@@ -2116,6 +2163,78 @@ class TestOptimiseTs:
 
 
 class TestOptimiseIrc:
+    def test_runs_separate_copies_before_reading_either_trajectory(
+        self, monkeypatch: pytest.MonkeyPatch, calc: EMT, water: Atoms
+    ) -> None:
+        original_positions = water.positions.copy()
+        events = []
+        optimisers = []
+
+        class RecordingIRC:
+            def __init__(self, atoms: Atoms, **kwargs: Any) -> None:
+                self.atoms = atoms
+                self.options = kwargs
+                self.initial_positions = atoms.positions.copy()
+                optimisers.append(self)
+                events.append(("construct", kwargs["trajectory"]))
+
+            def run(self, **kwargs: Any) -> bool:
+                self.run_options = kwargs
+                events.append(("run", kwargs["direction"]))
+                self.atoms.positions += 1.0
+                return kwargs["direction"] == "reverse"
+
+        def read_path(trajectory: str, index: str) -> list[Atoms]:
+            assert index == ":"
+            events.append(("read", trajectory))
+            return [water.copy()]
+
+        monkeypatch.setattr(tools_reaction, "IRC", RecordingIRC)
+        monkeypatch.setattr(tools_reaction, "read", read_path)
+        with pytest.warns(ConvergenceWarning, match="Forward IRC"):
+            forward, reverse = optimise_irc(
+                water,
+                calc,
+                fmax=0.03,
+                steps=17,
+                dx=0.04,
+                eta=2e-4,
+                gamma=0.2,
+                keep_going=False,
+                irc_f_traj="forward.traj",
+                irc_r_traj="reverse.traj",
+                logfile="directions.log",
+            )
+
+        assert events == [
+            ("construct", "forward.traj"),
+            ("run", "forward"),
+            ("construct", "reverse.traj"),
+            ("run", "reverse"),
+            ("read", "forward.traj"),
+            ("read", "reverse.traj"),
+        ]
+        assert optimisers[0].atoms is not optimisers[1].atoms
+        for optimiser, direction in zip(optimisers, ("forward", "reverse")):
+            assert optimiser.atoms is not water
+            assert optimiser.atoms.calc is calc
+            assert optimiser.initial_positions == pytest.approx(original_positions)
+            assert optimiser.options == {
+                "trajectory": f"{direction}.traj",
+                "logfile": "directions.log",
+                "dx": 0.04,
+                "eta": 2e-4,
+                "gamma": 0.2,
+                "keep_going": False,
+            }
+            assert optimiser.run_options == {
+                "fmax": 0.03, "steps": 17, "direction": direction
+            }
+        assert water.positions == pytest.approx(original_positions)
+        assert water.calc is None
+        assert forward[0].info["converged"] is False
+        assert reverse[0].info["converged"] is True
+
     def test_returns_both_directions(self, calc: EMT, water: Atoms) -> None:
         with pytest.warns(ConvergenceWarning):
             forward, reverse = optimise_irc(water, calc, fmax=0.5, steps=2)

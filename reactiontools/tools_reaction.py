@@ -51,6 +51,7 @@ from scipy.interpolate import CubicSpline
 
 from .tools_geodesic import geodesic_interpolate
 from .tools_sella import IRC, Sella
+from .tools_units import _format_energy
 
 
 class ConvergenceWarning(UserWarning):
@@ -402,42 +403,31 @@ def optimise_reactant_product(
         If either endpoint did not converge and ``raise_on_unconverged`` is
         True.
     """
-    print("Optimising reactant...", flush=True)
-    reactant = optimise_geom(
-        reactant,
-        calc,
-        fmax=fmax,
-        steps=steps,
-        opti_traj=reactant_opti,
-        use_socket=use_socket,
-        socket_port=socket_port,
-        socket_unixsocket=socket_unixsocket,
-        socket_log=socket_log,
-        raise_on_unconverged=raise_on_unconverged,
-        optimiser=optimiser,
-        logfile=logfile,
-        keep_traj=keep_traj,
-        _what="Reactant optimisation",
-    )
-
-    print("Optimising product...", flush=True)
-    product = optimise_geom(
-        product,
-        calc,
-        fmax=fmax,
-        steps=steps,
-        opti_traj=product_opti,
-        use_socket=use_socket,
-        socket_port=socket_port,
-        socket_unixsocket=socket_unixsocket,
-        socket_log=socket_log,
-        raise_on_unconverged=raise_on_unconverged,
-        optimiser=optimiser,
-        logfile=logfile,
-        keep_traj=keep_traj,
-        _what="Product optimisation",
-    )
-    return reactant, product
+    relaxed = []
+    for name, atoms, trajectory in (
+        ("Reactant", reactant, reactant_opti),
+        ("Product", product, product_opti),
+    ):
+        print(f"Optimising {name.lower()}...", flush=True)
+        relaxed.append(
+            optimise_geom(
+                atoms,
+                calc,
+                fmax=fmax,
+                steps=steps,
+                opti_traj=trajectory,
+                use_socket=use_socket,
+                socket_port=socket_port,
+                socket_unixsocket=socket_unixsocket,
+                socket_log=socket_log,
+                raise_on_unconverged=raise_on_unconverged,
+                optimiser=optimiser,
+                logfile=logfile,
+                keep_traj=keep_traj,
+                _what=f"{name} optimisation",
+            )
+        )
+    return relaxed[0], relaxed[1]
 
 
 def _build_band(
@@ -1485,15 +1475,7 @@ class NebSummary:
         """
         return self.ts_index in (0, len(self.energies) - 1)
 
-    @staticmethod
-    def _ev(value: float) -> str:
-        """Format an energy, without a sign on a value that rounds to zero.
-
-        A thermoneutral reaction comes out a hair either side of zero, and
-        "-0.000 eV" reads as a finding rather than as the rounding it is.
-        """
-        text = f"{value:.3f}"
-        return "0.000" if text == "-0.000" else text
+    _ev = staticmethod(_format_energy)
 
     def __str__(self) -> str:
         """Report the barriers and the reaction energy, one per line."""
@@ -1750,43 +1732,33 @@ def optimise_irc(
         run, so a failure there does not cost the reverse run.
     """
 
-    irc_f = ts_image.copy()
-    irc_f.calc = calc
-    print("Running IRC forward", flush=True)
-    sella_irc_f = IRC(
-        irc_f,
-        trajectory=irc_f_traj,
-        logfile=logfile,
-        dx=dx,
-        eta=eta,
-        gamma=gamma,
-        keep_going=keep_going,
-    )
-    converged_f = sella_irc_f.run(fmax=fmax, steps=steps, direction="forward")
-
-    irc_r = ts_image.copy()
-    irc_r.calc = calc
-
-    print("Running IRC reverse", flush=True)
-    sella_irc_r = IRC(
-        irc_r,
-        trajectory=irc_r_traj,
-        logfile=logfile,
-        dx=dx,
-        eta=eta,
-        gamma=gamma,
-        keep_going=keep_going,
-    )
-    converged_r = sella_irc_r.run(fmax=fmax, steps=steps, direction="reverse")
+    ran_to_fmax = []
+    for direction, trajectory in (
+        ("forward", irc_f_traj),
+        ("reverse", irc_r_traj),
+    ):
+        image = ts_image.copy()
+        image.calc = calc
+        print(f"Running IRC {direction}", flush=True)
+        optimiser = IRC(
+            image,
+            trajectory=trajectory,
+            logfile=logfile,
+            dx=dx,
+            eta=eta,
+            gamma=gamma,
+            keep_going=keep_going,
+        )
+        ran_to_fmax.append(optimiser.run(fmax=fmax, steps=steps, direction=direction))
 
     forward = read(irc_f_traj, index=":")
     reverse = read(irc_r_traj, index=":")
-    for path, ran_to_fmax, what in (
-        (forward, converged_f, "Forward IRC"),
-        (reverse, converged_r, "Reverse IRC"),
+    for path, direction_converged, what in (
+        (forward, ran_to_fmax[0], "Forward IRC"),
+        (reverse, ran_to_fmax[1], "Reverse IRC"),
     ):
         converged = _check_converged(
-            ran_to_fmax, what, fmax, steps, raise_on_unconverged
+            direction_converged, what, fmax, steps, raise_on_unconverged
         )
         for image in path:
             image.info["converged"] = converged
