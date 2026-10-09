@@ -44,14 +44,8 @@ build_py_plumed "${WORK_DIR}"
 echo "=== Installing reactiontools (editable) ==="
 pip install -e "${REPO_DIR}"
 
-echo "=== Verifying Installation ==="
 cd "${REPO_DIR}"
-plumed --no-mpi config -q module opes
-echo "PLUMED opes module: OK"
-python -c "import plumed; plumed.Plumed()"
-echo "py-plumed kernel load: OK"
-python -c "import reactiontools"
-echo "reactiontools: OK"
+verify_installation python
 
 echo "=== Build Complete! ==="
 echo "Activate with: conda activate ${ENV_NAME}"

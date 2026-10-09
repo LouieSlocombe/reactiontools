@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared PLUMED build steps, sourced by conda_install.sh and custom_install_sol.sh.
+# Shared PLUMED build steps and installation checks, sourced by both installers.
 # Both installers need an identical PLUMED, so the version is pinned here in one place.
 
 PLUMED_VERSION="v2.10.1"
@@ -48,4 +48,19 @@ build_py_plumed() {
         pip install . --no-build-isolation
 
     cd "${work_dir}"
+}
+
+# verify_installation <python_executable>
+# Checks the OPES module, Python kernel loading, and the installed package using
+# the caller's active interpreter. The installers' set -e stops at a failed check.
+verify_installation() {
+    local python_executable="$1"
+
+    echo "=== Verifying Installation ==="
+    plumed --no-mpi config -q module opes
+    echo "PLUMED opes module: OK"
+    "${python_executable}" -c "import plumed; plumed.Plumed()"
+    echo "py-plumed kernel load: OK"
+    "${python_executable}" -c "import reactiontools"
+    echo "reactiontools: OK"
 }

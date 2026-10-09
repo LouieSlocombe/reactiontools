@@ -37,9 +37,10 @@ builds PLUMED and its Python bindings, installs this checkout, and checks that
 PLUMED's `opes` module, the Python bindings, and `reactiontools` load correctly.
 The environment also includes pytest, coverage, and Ruff.
 
-`environment.yml` alone installs neither PLUMED nor `reactiontools`. The shared
-[`build_plumed.sh`](build_plumed.sh) file contains build functions used by both
-installers and pins the PLUMED version.
+`environment.yml` alone installs neither PLUMED nor `reactiontools`. Both
+installers use its dependency list. The shared
+[`build_plumed.sh`](build_plumed.sh) file contains their build and verification
+functions and pins the PLUMED version.
 
 ### Conda without the PLUMED build
 
@@ -60,6 +61,11 @@ bindings and a loadable kernel in the active environment.
 
 The Sol installer uses the `mamba/latest` module and requires `$SCRATCH` and
 GitHub SSH access to clone `reactiontools`.
+
+It creates the environment with Conda from the same `environment.yml`, adding
+a `python=3.13` pin for that command only. Existing `CONDA_PINNED_PACKAGES` are
+retained. Conda is already available through the loaded module; no extra
+package or YAML parser is needed.
 
 **Each run removes and recreates the `reactiontools` environment and
 `$SCRATCH/reactiontools_sources`.** The editable checkout is stored separately

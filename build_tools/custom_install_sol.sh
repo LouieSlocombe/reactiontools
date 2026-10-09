@@ -42,24 +42,12 @@ rm -rf "${WORK_DIR}"
 mamba env remove -n "${ENV_NAME}" -y 2>/dev/null || true
 
 echo "=== Initializing Conda Environment ==="
-mamba create -n "${ENV_NAME}" -c conda-forge python=3.13 -y
+# Conda's command-scoped pin keeps Sol on Python 3.13 while the shared YAML
+# supplies every dependency. Preserve any pins supplied by the caller too.
+# Conda is already available through the loaded module.
+CONDA_PINNED_PACKAGES="${CONDA_PINNED_PACKAGES:+${CONDA_PINNED_PACKAGES}&}python=3.13" \
+    conda env create -n "${ENV_NAME}" -f "${SCRIPT_DIR}/environment.yml" -y
 source activate "${ENV_NAME}"
-
-echo "=== Installing Dependencies ==="
-# Mirrors environment.yml, including the build tools build_plumed.sh needs.
-mamba install -c conda-forge -y \
-    numpy \
-    scipy \
-    matplotlib \
-    pandas \
-    ase \
-    mdtraj \
-    pytest \
-    pytest-cov \
-    ruff \
-    make \
-    cxx-compiler \
-    cython
 
 echo "=== Preparing Build Directory ==="
 mkdir -p "${WORK_DIR}"
@@ -72,13 +60,7 @@ echo "=== Installing reactiontools (editable) ==="
 clone_repo "ssh://git@github.com/LouieSlocombe/reactiontools.git" "${SRC_DIR}/${ENV_NAME}"
 pip3 install -e "${SRC_DIR}/${ENV_NAME}"
 
-echo "=== Verifying Installation ==="
-plumed --no-mpi config -q module opes
-echo "PLUMED opes module: OK"
-python3 -c "import plumed; plumed.Plumed()"
-echo "py-plumed kernel load: OK"
-python3 -c "import reactiontools"
-echo "reactiontools: OK"
+verify_installation python3
 
 conda deactivate
 echo "=== Build Complete! ==="
