@@ -85,6 +85,9 @@ Changes made from upstream when the code was brought into this package:
   displacement derivatives. The import no longer configures a compilation
   cache or changes the process environment. Custom coordinates without
   supplied derivatives use finite differences.
+* The nine scalar value, Hessian-vector-product, and cell-value adapters left
+  unused by the NumPy migration were removed. Their former callers use the
+  batched kernels directly; the live scalar cell-gradient adapters remain.
 * :class:`Sella`, :class:`IRC`, :class:`Internals` and :class:`Constraints`
   were given the class docstrings they lack upstream, as this package requires
   every name it exports to carry one.
@@ -1450,47 +1453,8 @@ def _bond_cell_grad_batched(pos, ncvec, cell):
  _dihedral_hvp_batched, _dihedral_cell_grad_batched) = _coordinate_kernels('dihedral')
 
 
-def _bond_value(pos: np.ndarray, tvec: np.ndarray) -> float:
-    return _bond_value_batched(np.asarray(pos)[None], np.asarray(tvec)[None])[0]
-
-
-def _angle_value(pos: np.ndarray, tvec: np.ndarray) -> float:
-    return _angle_value_batched(np.asarray(pos)[None], np.asarray(tvec)[None])[0]
-
-
-def _dihedral_value(pos: np.ndarray, tvec: np.ndarray) -> float:
-    return _dihedral_value_batched(np.asarray(pos)[None], np.asarray(tvec)[None])[0]
-
-
-def _bond_hvp_single(pos, tvec, tangent):
-    return _bond_hvp_batched(np.asarray(pos)[None], np.asarray(tvec)[None],
-                             np.asarray(tangent)[None])[0]
-
-
-def _angle_hvp_single(pos, tvec, tangent):
-    return _angle_hvp_batched(np.asarray(pos)[None], np.asarray(tvec)[None],
-                              np.asarray(tangent)[None])[0]
-
-
-def _dihedral_hvp_single(pos, tvec, tangent):
-    return _dihedral_hvp_batched(np.asarray(pos)[None], np.asarray(tvec)[None],
-                                 np.asarray(tangent)[None])[0]
-
-
 # Since tvec = ncvec @ cell, each cell gradient contracts the bond-vector
 # gradient with ncvec.  The cell is shared by every coordinate in the batch.
-def _bond_with_cell(pos, ncvec, cell):
-    return _bond_value(pos, np.asarray(ncvec) @ cell)
-
-
-def _angle_with_cell(pos, ncvec, cell):
-    return _angle_value(pos, np.asarray(ncvec) @ cell)
-
-
-def _dihedral_with_cell(pos, ncvec, cell):
-    return _dihedral_value(pos, np.asarray(ncvec) @ cell)
-
-
 def _bond_cell_grad_single(pos, ncvec, cell):
     return _bond_cell_grad_batched(np.asarray(pos)[None], np.asarray(ncvec)[None], cell)[0]
 
