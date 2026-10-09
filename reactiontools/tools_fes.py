@@ -61,6 +61,7 @@ from .tools_style import _finalise, _style_axes, ax_plot
 from .tools_units import (
     DEFAULT_ENERGY_UNIT,
     ENERGY_UNITS,
+    _format_energy,
     convert_energy,
     thermal_energy,
     unit_label,
@@ -1191,26 +1192,6 @@ def _default_grid_size(
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def _format_energy(value: float) -> str:
-    """Format an energy, without a sign on a value that rounds to zero.
-
-    A barrier that comes out a hair below zero reads as a finding rather than
-    as the rounding it is.
-
-    Parameters
-    ----------
-    value : float
-        The energy to format.
-
-    Returns
-    -------
-    str
-        The value to three decimal places, never as ``"-0.000"``.
-    """
-    text = f"{value:.3f}"
-    return "0.000" if text == "-0.000" else text
-
-
 def _basin_mask(fes: FES, basin: Sequence[float], name: str) -> np.ndarray:
     """Select the sampled grid points of a 1-D surface inside a CV window.
 
